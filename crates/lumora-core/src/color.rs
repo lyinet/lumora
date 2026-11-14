@@ -1,7 +1,7 @@
-//! Colour helpers for the magnifier loupe.
+//! Colour helpers for the magnifier loupe and annotation styles.
 
 /// An 8-bit sRGB colour.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Rgb8 {
     pub r: u8,
     pub g: u8,
