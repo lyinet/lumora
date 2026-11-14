@@ -31,6 +31,7 @@ use lumora_ui::pin::PinWindow;
 use lumora_ui::quick_access::{open_file, QuickAccess};
 use lumora_ui::recording_hud::{RecordingBorder, StopControl};
 use lumora_ui::settings_window::SettingsWindow;
+use lumora_ui::toast::{ToastCenter, ToastKind};
 use lumora_ui::util::ActionTarget;
 use objc2::rc::Retained;
 use objc2::MainThreadMarker;
@@ -111,7 +112,6 @@ impl Mode {
 
 /// A user-visible outcome for [`App::notify`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Warning is used once the toast HUD lands.
 pub enum Notice {
     Success(Msg),
     Warning(Msg),
@@ -145,6 +145,9 @@ pub struct App {
     pub captures: RefCell<HashMap<u64, CaptureRecord>>,
     pins: RefCell<HashMap<u64, PinWindow>>,
     pub editors: RefCell<HashMap<u64, EditorWindow>>,
+    toasts: ToastCenter,
+    /// Actions whose shortcut another app already holds.
+    hotkey_failures: RefCell<Vec<lumora_core::Action>>,
     settings_window: RefCell<Option<SettingsWindow>>,
     onboarding: RefCell<Option<Onboarding>>,
     onboarding_target: RefCell<Option<Retained<ActionTarget>>>,
@@ -182,6 +185,8 @@ impl App {
                 captures: RefCell::new(HashMap::new()),
                 pins: RefCell::new(HashMap::new()),
                 editors: RefCell::new(HashMap::new()),
+                toasts: ToastCenter::new(mtm),
+                hotkey_failures: RefCell::new(Vec::new()),
                 settings_window: RefCell::new(None),
                 onboarding: RefCell::new(None),
                 onboarding_target: RefCell::new(None),
@@ -199,13 +204,15 @@ impl App {
         app
     }
 
-    /// Tell the user how something went.
-    // TODO(error-toast): replaced by the toast HUD.
+    /// Tell the user how something went, with a toast HUD.
     pub fn notify(&self, notice: Notice, detail: Option<String>) {
-        let msg = match notice {
-            Notice::Success(m) | Notice::Warning(m) | Notice::Error(m) => m,
+        let (kind, msg) = match notice {
+            Notice::Success(m) => (ToastKind::Success, m),
+            Notice::Warning(m) => (ToastKind::Warning, m),
+            Notice::Error(m) => (ToastKind::Error, m),
         };
-        log::info!("{}{}", tr(msg), detail.map(|d| format!(": {d}")).unwrap_or_default());
+        log::info!("toast: {}{}", tr(msg), detail.as_deref().map(|d| format!(" — {d}")).unwrap_or_default());
+        self.toasts.show(kind, tr(msg), detail.as_deref());
     }
 
     pub fn shutdown(&self) {
@@ -377,6 +384,7 @@ impl App {
             }
         }
         let w = SettingsWindow::show(self.mtm, self.settings.borrow().clone(), self.home.clone(), self.sink.clone());
+        w.set_unavailable(&self.hotkey_failures.borrow());
         *self.settings_window.borrow_mut() = Some(w);
     }
 
@@ -402,10 +410,21 @@ impl App {
 
     fn apply_hotkeys(&self) {
         let bindings = self.settings.borrow().shortcuts.bound();
-        let failed = self.hotkeys.borrow_mut().set(bindings);
-        for a in failed {
-            // TODO(hotkey-feedback): surface this in the Shortcuts tab.
+        let failed = self.hotkeys.borrow_mut().set(bindings.clone());
+        for a in &failed {
             log::warn!("shortcut for “{}” is in use by another app", a.title());
+        }
+        // Toast only for newly failing shortcuts, so re-applying settings
+        // doesn't nag; the Shortcuts tab always shows the full picture.
+        let previous = self.hotkey_failures.replace(failed.clone());
+        if let Some(a) = failed.iter().find(|a| !previous.contains(a)) {
+            if let Some((_, hk)) = bindings.iter().find(|(b, _)| b == a) {
+                let detail = lumora_core::i18n::trf(Msg::ToastShortcutTakenDetail, &[hk]);
+                self.notify(Notice::Warning(Msg::ToastShortcutTaken), Some(detail));
+            }
+        }
+        if let Some(w) = self.settings_window.borrow().as_ref() {
+            w.set_unavailable(&failed);
         }
     }
 

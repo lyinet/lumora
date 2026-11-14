@@ -40,4 +40,6 @@ pub mod settings_window;
 #[cfg(target_os = "macos")]
 pub mod shutter;
 #[cfg(target_os = "macos")]
+pub mod toast;
+#[cfg(target_os = "macos")]
 pub mod util;

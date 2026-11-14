@@ -25,7 +25,9 @@ use lumora_ui::{shutter, util};
 use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGImage;
 
-use crate::app::{on_main, App, CaptureRecord, Mode};
+use lumora_core::i18n::{tr, trf, Msg};
+
+use crate::app::{on_main, App, CaptureRecord, Mode, Notice};
 use crate::system;
 
 fn background() -> dispatch2::DispatchRetained<DispatchQueue> {
@@ -245,21 +247,44 @@ impl App {
                     if copy {
                         lumora_capture::clipboard::copy_image(&image, scale, None);
                     }
+                    _app.notify(Notice::Error(Msg::ToastSaveFailed), Some(error_text(&e)));
                 }
             });
         });
     }
 
-    /// Reset to idle and surface an error.
+    /// Reset to idle and surface a capture error.
     pub fn fail(self: &Rc<Self>, e: CaptureError) {
-        log::error!("capture failed: {e}");
+        self.fail_with(Msg::ToastCaptureFailed, e);
+    }
+
+    /// Reset to idle and surface an error under `title` (a toast; the
+    /// onboarding panel for a missing permission).
+    pub fn fail_with(self: &Rc<Self>, title: Msg, e: CaptureError) {
+        log::error!("{}: {e}", tr(title));
         self.set_mode(Mode::Idle);
         if e == CaptureError::PermissionDenied {
             self.dispatch(crate::command::Command::ShowOnboarding);
         } else {
-            // TODO(error-toast): show a small HUD with the error instead of a beep.
-            objc2_app_kit::NSBeep();
+            self.notify(Notice::Error(title), Some(error_text(&e)));
         }
+    }
+}
+
+/// A localised one-line description of a capture error.
+pub fn error_text(e: &CaptureError) -> String {
+    match e {
+        CaptureError::PermissionDenied => tr(Msg::ErrPermission).to_string(),
+        CaptureError::TargetGone(what) => {
+            let what = if *what == "window" { tr(Msg::TargetWindow) } else { tr(Msg::TargetDisplay) };
+            trf(Msg::ErrTargetGone, &[&what])
+        }
+        CaptureError::Framework(s) => s.clone(),
+        CaptureError::Write { path, .. } => {
+            let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned());
+            trf(Msg::ErrWrite, &[&name.unwrap_or_else(|| path.clone())])
+        }
+        CaptureError::Empty => tr(Msg::ErrNothing).to_string(),
     }
 }
 

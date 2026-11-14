@@ -10,6 +10,7 @@ use std::rc::Rc;
 use lumora_core::action::Action;
 use lumora_core::geometry::Rect;
 use lumora_core::hotkey::{find_conflicts, Conflict, Hotkey, Key, Modifiers};
+use lumora_core::i18n::{trf, Msg};
 use lumora_core::settings::{Codec, Settings};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol};
@@ -42,6 +43,8 @@ const ROW_H: f64 = 30.0;
 pub struct ShortcutFieldIvars {
     current: Cell<Option<Hotkey>>,
     recording: Cell<bool>,
+    /// Another app holds this shortcut (registration failed).
+    invalid: Cell<bool>,
     label: RefCell<Option<Retained<CATextLayer>>>,
     on_change: Box<dyn Fn(Option<Hotkey>)>,
     on_recording: Box<dyn Fn(bool)>,
@@ -108,6 +111,7 @@ impl ShortcutField {
         let this = Self::alloc(mtm).set_ivars(ShortcutFieldIvars {
             current: Cell::new(current),
             recording: Cell::new(false),
+            invalid: Cell::new(false),
             label: RefCell::new(None),
             on_change: Box::new(on_change),
             on_recording: Box::new(on_recording),
@@ -146,7 +150,13 @@ impl ShortcutField {
             set_text(l, &text);
         }
         if let Some(root) = self.layer() {
-            let border = if recording { color::ACCENT } else { color::HAIRLINE.with_alpha(0.25) };
+            let border = if recording {
+                color::ACCENT
+            } else if self.ivars().invalid.get() {
+                color::ERROR
+            } else {
+                color::HAIRLINE.with_alpha(0.25)
+            };
             root.setBorderColor(Some(&cg_color(border)));
         }
     }
@@ -195,16 +205,27 @@ impl ShortcutField {
         self.ivars().current.set(h);
         self.refresh();
     }
+
+    fn set_invalid(&self, invalid: bool) {
+        self.ivars().invalid.set(invalid);
+        self.refresh();
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Window
 // ---------------------------------------------------------------------------
 
+type Refresh = Rc<dyn Fn(&Settings)>;
+
 struct State {
     settings: RefCell<Settings>,
     sink: EventSink,
     home: PathBuf,
+    /// Shortcuts the system refused to register (held by another app).
+    taken: RefCell<Vec<Action>>,
+    /// Re-evaluates the Shortcuts tab's warning line.
+    refresh_warning: RefCell<Option<Refresh>>,
 }
 
 impl State {
@@ -258,6 +279,7 @@ impl Form<'_> {
 /// The Settings window controller. Keep it alive while the window is open.
 pub struct SettingsWindow {
     window: Retained<NSWindow>,
+    state: Rc<State>,
     _targets: Vec<Retained<ActionTarget>>,
     _fields: Vec<Retained<ShortcutField>>,
 }
@@ -284,7 +306,13 @@ impl SettingsWindow {
         unsafe { window.setReleasedWhenClosed(false) };
         window.setTitle(&NSString::from_str("Lumora Settings"));
 
-        let state = Rc::new(State { settings: RefCell::new(settings), sink, home });
+        let state = Rc::new(State {
+            settings: RefCell::new(settings),
+            sink,
+            home,
+            taken: RefCell::new(Vec::new()),
+            refresh_warning: RefCell::new(None),
+        });
         let mut targets = Vec::new();
         let mut fields = Vec::new();
 
@@ -308,7 +336,20 @@ impl SettingsWindow {
         window.center();
         NSApplication::sharedApplication(mtm).activate();
         window.makeKeyAndOrderFront(None);
-        SettingsWindow { window, _targets: targets, _fields: fields }
+        SettingsWindow { window, state, _targets: targets, _fields: fields }
+    }
+
+    /// Mark shortcuts another app already holds: red field outline plus an
+    /// explanation under the list.
+    pub fn set_unavailable(&self, taken: &[Action]) {
+        *self.state.taken.borrow_mut() = taken.to_vec();
+        for (field, action) in self._fields.iter().zip(Action::ALL) {
+            field.set_invalid(taken.contains(&action));
+        }
+        let refresh = self.state.refresh_warning.borrow().clone();
+        if let Some(r) = refresh {
+            r(&self.state.settings.borrow());
+        }
     }
 
     /// Bring the existing window forward.
@@ -502,28 +543,34 @@ fn build_shortcuts(
     fields: &mut Vec<Retained<ShortcutField>>,
 ) {
     let mtm = form.mtm;
-    let warning = NSTextField::labelWithString(&NSString::from_str(""), mtm);
+    let warning = NSTextField::wrappingLabelWithString(&NSString::from_str(""), mtm);
     warning.setTextColor(Some(&objc2_app_kit::NSColor::systemRedColor()));
     warning.setFont(Some(&NSFont::systemFontOfSize_weight(typography::CAPTION, weight::MEDIUM)));
     let refresh_warning = {
         let warning = warning.clone();
+        let st = Rc::downgrade(state);
         move |s: &Settings| {
             let bound: Vec<Option<Hotkey>> = Action::ALL.iter().map(|a| s.shortcuts.get(*a)).collect();
-            let msg = find_conflicts(&bound)
-                .first()
-                .map(|c| match *c {
-                    Conflict::Duplicate(i, j) => {
-                        format!("“{}” and “{}” use the same shortcut.", Action::ALL[i].title(), Action::ALL[j].title())
-                    }
-                    Conflict::System(i) => {
-                        format!("“{}” conflicts with a macOS screenshot shortcut.", Action::ALL[i].title())
-                    }
-                })
-                .unwrap_or_default();
+            let conflict = find_conflicts(&bound).first().map(|c| match *c {
+                Conflict::Duplicate(i, j) => {
+                    trf(Msg::ConflictDuplicate, &[&Action::ALL[i].title(), &Action::ALL[j].title()])
+                }
+                Conflict::System(i) => trf(Msg::ConflictSystem, &[&Action::ALL[i].title()]),
+            });
+            // Then shortcuts the system refused at registration time.
+            let taken = || {
+                let st = st.upgrade()?;
+                let taken = st.taken.borrow();
+                let a = taken.iter().find(|a| s.shortcuts.get(**a).is_some())?;
+                let hk = s.shortcuts.get(*a)?;
+                Some(trf(Msg::ConflictTaken, &[&hk, &a.title()]))
+            };
+            let msg = conflict.or_else(taken).unwrap_or_default();
             warning.setStringValue(&NSString::from_str(&msg));
         }
     };
-    let refresh_warning = Rc::new(refresh_warning);
+    let refresh_warning: Refresh = Rc::new(refresh_warning);
+    *state.refresh_warning.borrow_mut() = Some(refresh_warning.clone());
     for action in Action::ALL {
         let st = state.clone();
         let rw = refresh_warning.clone();
@@ -541,8 +588,8 @@ fn build_shortcuts(
         form.add(&format!("{}:", action.title()), &field, ROW_H);
         fields.push(field);
     }
-    form.y -= 26.0;
-    warning.setFrame(cg_rect(Rect::new(CONTROL_X, form.y + 4.0, W - CONTROL_X - 30.0, 18.0)));
+    form.y -= 36.0;
+    warning.setFrame(cg_rect(Rect::new(CONTROL_X, form.y + 2.0, W - CONTROL_X - 30.0, 32.0)));
     form.view.addSubview(&warning);
     refresh_warning(&state.settings.borrow());
 
