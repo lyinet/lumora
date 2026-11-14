@@ -37,7 +37,16 @@ lipo -create -output "$APP/Contents/MacOS/lumora" \
   "target/x86_64-apple-darwin/release/lumora"
 lipo -info "$APP/Contents/MacOS/lumora"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" packaging/Info.plist > "$APP/Contents/Info.plist"
-# TODO(app-icon): render the code-drawn mark to AppIcon.icns (iconutil) here.
+# App icon: packaging/AppIcon.icns is generated (and committed) by
+# scripts/make_icon.py from the SVG. With ICONUTIL=1 on a Mac, rebuild it
+# here through Apple's iconutil from the same PNGs instead.
+if [[ "${ICONUTIL:-0}" == "1" ]] && command -v iconutil >/dev/null 2>&1 && command -v python3 >/dev/null 2>&1; then
+  ICONSET="$(mktemp -d)/AppIcon.iconset"
+  python3 scripts/make_icon.py --iconset "$ICONSET"
+  iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+else
+  cp packaging/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+fi
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 plutil -lint "$APP/Contents/Info.plist"
 
