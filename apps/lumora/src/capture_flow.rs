@@ -133,27 +133,19 @@ impl App {
         if mode == OverlayMode::Record {
             return self.on_record_target(&content, target);
         }
+        if mode == OverlayMode::Text {
+            self.set_mode(Mode::Idle);
+            return match frozen_image(&frozen, &target) {
+                Ok((image, _, _)) => self.recognize(image),
+                Err(e) => self.fail_with(Msg::ToastTextFailed, e),
+            };
+        }
         match target {
-            Target::Area(r) => {
+            Target::Area(_) | Target::Display(_) => {
                 self.set_mode(Mode::Idle);
-                let fd = frozen
-                    .iter()
-                    .find(|f| f.frame.contains(r.mid()))
-                    .or_else(|| frozen.iter().max_by(|a, b| overlap(a.frame, r).total_cmp(&overlap(b.frame, r))));
-                let Some(fd) = fd else { return self.fail(CaptureError::Empty) };
-                // TODO(multi-display): selections spanning displays are clipped to
-                // the display under their centre; stitch frozen frames instead.
-                let clipped = r.intersection(&fd.frame).map(|c| c.integral(fd.scale));
-                match (lumora_capture::image::crop(&fd.image, fd.frame, r), clipped) {
-                    (Ok(img), Some(frame)) => self.finish_capture(img, fd.scale, frame),
-                    (Err(e), _) => self.fail(e),
-                    _ => self.fail(CaptureError::Empty),
-                }
-            }
-            Target::Display(frame) => {
-                self.set_mode(Mode::Idle);
-                if let Some(fd) = frozen.iter().find(|f| f.frame == frame) {
-                    self.finish_capture(fd.image.clone(), fd.scale, fd.frame);
+                match frozen_image(&frozen, &target) {
+                    Ok((img, scale, frame)) => self.finish_capture(img, scale, frame),
+                    Err(e) => self.fail(e),
                 }
             }
             Target::Window(w) => {
@@ -168,6 +160,21 @@ impl App {
                 });
             }
         }
+    }
+
+    /// OCR an image and put the text on the clipboard, with a toast.
+    pub fn recognize(self: &Rc<Self>, image: CFRetained<CGImage>) {
+        lumora_capture::ocr::recognize_text(image, |res| {
+            on_main(move |app| match res {
+                Ok(text) if !text.trim().is_empty() => {
+                    lumora_capture::clipboard::copy_text(&text);
+                    let preview = lumora_core::ocr::preview(&text, 60);
+                    app.notify(Notice::Success(Msg::ToastTextCopied), Some(preview));
+                }
+                Ok(_) => app.notify(Notice::Warning(Msg::ToastNoText), Some(tr(Msg::ToastNoTextDetail).to_string())),
+                Err(e) => app.fail_with(Msg::ToastTextFailed, e),
+            })
+        });
     }
 
     pub fn capture_fullscreen(self: &Rc<Self>) {
@@ -286,6 +293,29 @@ pub fn error_text(e: &CaptureError) -> String {
         }
         CaptureError::Empty => tr(Msg::ErrNothing).to_string(),
     }
+}
+
+/// The pixels for an overlay target, cut from the frozen display frames:
+/// `(image, scale, frame in global points)`.
+fn frozen_image(frozen: &[FrozenDisplay], target: &Target) -> Result<(CFRetained<CGImage>, f64, Rect), CaptureError> {
+    let r = match target {
+        Target::Display(frame) => {
+            let fd = frozen.iter().find(|f| f.frame == *frame).ok_or(CaptureError::TargetGone("display"))?;
+            return Ok((fd.image.clone(), fd.scale, fd.frame));
+        }
+        Target::Area(r) => *r,
+        Target::Window(w) => w.frame,
+    };
+    let fd = frozen
+        .iter()
+        .find(|f| f.frame.contains(r.mid()))
+        .or_else(|| frozen.iter().max_by(|a, b| overlap(a.frame, r).total_cmp(&overlap(b.frame, r))))
+        .ok_or(CaptureError::Empty)?;
+    // TODO(multi-display): selections spanning displays are clipped to
+    // the display under their centre; stitch frozen frames instead.
+    let clipped = r.intersection(&fd.frame).map(|c| c.integral(fd.scale)).ok_or(CaptureError::Empty)?;
+    let img = lumora_capture::image::crop(&fd.image, fd.frame, r)?;
+    Ok((img, fd.scale, clipped))
 }
 
 fn overlap(a: Rect, b: Rect) -> f64 {
