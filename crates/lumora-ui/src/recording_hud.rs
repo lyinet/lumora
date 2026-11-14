@@ -10,6 +10,8 @@ use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSArray, NSNumber, NSString};
 use objc2_quartz_core::{CABasicAnimation, CAMediaTiming, CAShapeLayer, CATextLayer};
 
+use lumora_core::i18n::{tr, trf, Msg};
+
 use crate::events::{EventSink, UiEvent};
 use crate::tokens::{color, motion, size, typography};
 use crate::util::{
@@ -108,7 +110,7 @@ impl StopControl {
         let target = ActionTarget::new(mtm, move |_| sink(UiEvent::StopRecording));
         let symbol = NSImage::imageWithSystemSymbolName_accessibilityDescription(
             &NSString::from_str("stop.fill"),
-            Some(&NSString::from_str("Stop Recording")),
+            Some(&NSString::from_str(tr(Msg::StopRecording))),
         );
         let button = match symbol {
             // SAFETY: target outlives the button (owned by StopControl).
@@ -117,7 +119,7 @@ impl StopControl {
             },
             None => unsafe {
                 NSButton::buttonWithTitle_target_action(
-                    &NSString::from_str("Stop"),
+                    &NSString::from_str(tr(Msg::Stop)),
                     Some(&target),
                     Some(ActionTarget::action()),
                     mtm,
@@ -132,7 +134,8 @@ impl StopControl {
             l.setBackgroundColor(Some(&cg_color(color::RECORD)));
             l.setCornerRadius((h - 12.0) / 2.0);
         }
-        button.setToolTip(Some(&NSString::from_str("Stop Recording (⌥⇧R)")));
+        let tip = trf(Msg::StopRecordingTip, &[&lumora_core::Action::RecordScreen.default_shortcut()]);
+        button.setToolTip(Some(&NSString::from_str(&tip)));
         glass.addSubview(&button);
 
         glass.setWantsLayer(true);

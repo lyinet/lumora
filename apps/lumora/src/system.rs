@@ -23,6 +23,19 @@ pub fn now_parts() -> DateTimeParts {
     }
 }
 
+/// The user's preferred languages, most preferred first
+/// (`NSLocale.preferredLanguages`, e.g. `["zh-Hans-CN", "en-US"]`).
+pub fn preferred_languages() -> Vec<String> {
+    objc2_foundation::NSLocale::preferredLanguages().iter().map(|s| s.to_string()).collect()
+}
+
+/// Apply the language setting to the process-wide i18n state.
+pub fn apply_language(pref: lumora_core::i18n::LanguagePref) -> lumora_core::i18n::Language {
+    let lang = pref.resolve(&preferred_languages());
+    lumora_core::i18n::set_language(lang);
+    lang
+}
+
 pub fn home_dir() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"))
 }

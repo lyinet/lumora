@@ -161,7 +161,13 @@ impl App {
         let home = system::home_dir();
         let settings_path = Settings::default_path();
         let settings = settings_path.as_deref().map(Settings::load_or_default).unwrap_or_default();
-        log::info!("starting Lumora {} (settings: {:?})", env!("CARGO_PKG_VERSION"), settings_path);
+        let lang = system::apply_language(settings.general.language);
+        log::info!(
+            "starting Lumora {} (settings: {:?}, language: {})",
+            env!("CARGO_PKG_VERSION"),
+            settings_path,
+            lang.tag()
+        );
 
         let app = Rc::new_cyclic(|weak: &Weak<App>| {
             let w = weak.clone();
@@ -390,6 +396,7 @@ impl App {
 
     fn apply_settings(self: &Rc<Self>, new: Settings) {
         let login_changed = new.general.launch_at_login != self.settings.borrow().general.launch_at_login;
+        let language_changed = new.general.language != self.settings.borrow().general.language;
         *self.settings.borrow_mut() = new;
         let s = self.settings.borrow();
         if let Some(path) = &self.settings_path {
@@ -406,6 +413,26 @@ impl App {
         }
         drop(s);
         self.apply_hotkeys();
+        if language_changed {
+            self.apply_language();
+        }
+    }
+
+    /// Switch the UI language live: menus re-title, the Settings window is
+    /// rebuilt in place. Open editors keep their language until reopened.
+    fn apply_language(self: &Rc<Self>) {
+        let lang = system::apply_language(self.settings.borrow().general.language);
+        log::info!("language: {}", lang.tag());
+        self.status.relabel();
+        let reopen = self.settings_window.borrow_mut().take();
+        if let Some(old) = reopen.filter(|w| w.is_visible()) {
+            let origin = old.origin();
+            drop(old);
+            self.show_settings();
+            if let Some(w) = self.settings_window.borrow().as_ref() {
+                w.set_origin(origin);
+            }
+        }
     }
 
     fn apply_hotkeys(&self) {
