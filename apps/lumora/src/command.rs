@@ -10,6 +10,8 @@ pub enum Command {
     CaptureArea,
     CaptureFullscreen,
     CaptureWindow,
+    /// Select an area and copy its text (OCR).
+    CaptureText,
     /// Start (choose area) or stop a recording.
     ToggleRecording,
     OpenFolder,
@@ -24,6 +26,7 @@ impl From<Action> for Command {
             Action::CaptureArea => Command::CaptureArea,
             Action::CaptureFullscreen => Command::CaptureFullscreen,
             Action::CaptureWindow => Command::CaptureWindow,
+            Action::CaptureText => Command::CaptureText,
             Action::RecordScreen => Command::ToggleRecording,
             Action::OpenFolder => Command::OpenFolder,
         }

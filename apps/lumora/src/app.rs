@@ -214,6 +214,7 @@ impl App {
             Command::CaptureArea => self.begin_selection(lumora_ui::events::OverlayMode::Capture, false),
             Command::CaptureWindow => self.begin_selection(lumora_ui::events::OverlayMode::Capture, true),
             Command::CaptureFullscreen => self.capture_fullscreen(),
+            Command::CaptureText => log::warn!("Capture Text is not wired up yet"),
             Command::ToggleRecording => self.toggle_recording(),
             Command::OpenFolder => {
                 let folder = self.settings.borrow().save_folder(&self.home);
