@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/OWNER/lumora/actions/workflows/ci.yml"><img src="https://github.com/OWNER/lumora/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/lyinet/lumora/actions/workflows/ci.yml"><img src="https://github.com/lyinet/lumora/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0A84FF?style=flat-square" alt="许可证：MIT"></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-111111?style=flat-square&logo=apple&logoColor=white" alt="平台：macOS 14+">
   <img src="https://img.shields.io/badge/Rust-1.80%2B-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.80+">
@@ -117,7 +117,7 @@
 环境要求：macOS 14+、Xcode 命令行工具、Rust stable 1.80+。
 
 ```sh
-git clone https://github.com/OWNER/lumora.git
+git clone https://github.com/lyinet/lumora.git
 cd lumora
 
 # 在终端中运行调试版本

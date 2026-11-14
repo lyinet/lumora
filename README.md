@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/OWNER/lumora/actions/workflows/ci.yml"><img src="https://github.com/OWNER/lumora/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/lyinet/lumora/actions/workflows/ci.yml"><img src="https://github.com/lyinet/lumora/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0A84FF?style=flat-square" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-111111?style=flat-square&logo=apple&logoColor=white" alt="Platform: macOS 14+">
   <img src="https://img.shields.io/badge/Rust-1.80%2B-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.80+">
@@ -117,7 +117,7 @@ Option-Shift avoids clashing with macOS's own <kbd>⇧</kbd><kbd>⌘</kbd><kbd>3
 Requirements: macOS 14+, Xcode command-line tools, Rust stable 1.80+.
 
 ```sh
-git clone https://github.com/OWNER/lumora.git
+git clone https://github.com/lyinet/lumora.git
 cd lumora
 
 # Run a debug build from the terminal
