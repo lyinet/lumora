@@ -30,6 +30,47 @@ pub fn crop(image: &CGImage, image_frame: Rect, rect: Rect) -> Result<CFRetained
     CGImage::with_image_in_rect(Some(image), rect_to_cg(px)).ok_or(CaptureError::Empty)
 }
 
+/// One display's contribution to a stitched capture.
+pub struct StitchPart<'a> {
+    pub image: &'a CGImage,
+    /// Global frame (points) the image shows.
+    pub frame: Rect,
+    /// Region to take (global points).
+    pub area: Rect,
+    /// Destination in output pixels (y down).
+    pub dest: Rect,
+}
+
+/// Compose a `width`×`height` image from parts of several display frames
+/// (a selection spanning displays). Uncovered pixels are transparent.
+pub fn stitch(width: u32, height: u32, parts: &[StitchPart<'_>]) -> Result<CFRetained<CGImage>, CaptureError> {
+    use objc2_core_graphics::{
+        CGBitmapContextCreate, CGBitmapContextCreateImage, CGColorSpace, CGContext, CGImageAlphaInfo,
+        CGInterpolationQuality,
+    };
+    if width == 0 || height == 0 {
+        return Err(CaptureError::Empty);
+    }
+    let space = CGColorSpace::with_name(Some(unsafe { objc2_core_graphics::kCGColorSpaceSRGB }))
+        .or_else(CGColorSpace::new_device_rgb)
+        .ok_or_else(|| CaptureError::Framework("no colour space".into()))?;
+    let info = CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0;
+    // SAFETY: null data lets CG allocate; 8 bpc BGRA, CG computes row bytes.
+    let ctx = unsafe {
+        CGBitmapContextCreate(std::ptr::null_mut(), width as usize, height as usize, 8, 0, Some(&space), info)
+    }
+    .ok_or_else(|| CaptureError::Framework("could not create bitmap context".into()))?;
+    CGContext::set_interpolation_quality(Some(&ctx), CGInterpolationQuality::High);
+    let h = f64::from(height);
+    for p in parts {
+        let piece = crop(p.image, p.frame, p.area)?;
+        // CG draws in a y-up space.
+        let r = Rect::new(p.dest.min_x(), h - p.dest.max_y(), p.dest.width(), p.dest.height());
+        CGContext::draw_image(Some(&ctx), rect_to_cg(r), Some(&piece));
+    }
+    CGBitmapContextCreateImage(Some(&ctx)).ok_or(CaptureError::Empty)
+}
+
 /// A CPU copy of an image's pixels, used to read colours under the loupe.
 pub struct PixelBuffer {
     data: CFRetained<CFData>,

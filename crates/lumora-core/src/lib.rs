@@ -13,17 +13,21 @@
 //! [`geometry::flip_y`]).
 
 pub mod action;
+pub mod annotate;
 pub mod color;
 pub mod filename;
 pub mod format;
 pub mod geometry;
 pub mod hotkey;
+pub mod i18n;
 pub mod layout;
+pub mod ocr;
 pub mod recording;
 pub mod selection;
 pub mod settings;
 pub mod snap;
 pub mod spring;
+pub mod stitch;
 
 pub use action::Action;
 pub use geometry::{Point, Rect, Size};

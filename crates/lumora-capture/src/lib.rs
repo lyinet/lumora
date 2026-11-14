@@ -10,6 +10,7 @@
 //!   Retina DPI metadata.
 //! * [`clipboard`] — put a capture on the pasteboard.
 //! * [`recorder`] — `SCStream` → `AVAssetWriter` MP4 recording.
+//! * [`ocr`] — on-device text recognition (Vision).
 //! * [`permission`] — Screen Recording (TCC) preflight / request.
 //!
 //! All asynchronous APIs take `Send + 'static` completion closures which are
@@ -30,6 +31,8 @@ pub mod clipboard;
 pub mod content;
 #[cfg(target_os = "macos")]
 pub mod image;
+#[cfg(target_os = "macos")]
+pub mod ocr;
 #[cfg(target_os = "macos")]
 pub mod permission;
 #[cfg(target_os = "macos")]

@@ -17,7 +17,9 @@ use lumora_ui::quick_access::CardContent;
 use lumora_ui::recording_hud::{RecordingBorder, StopControl};
 use lumora_ui::util;
 
-use crate::app::{on_main, App, CaptureRecord, Mode, RecordTarget};
+use lumora_core::i18n::Msg;
+
+use crate::app::{on_main, App, CaptureRecord, Mode, Notice, RecordTarget};
 use crate::system;
 
 impl App {
@@ -38,6 +40,9 @@ impl App {
 
     /// Resolve the overlay's choice into a display + optional area.
     pub fn on_record_target(self: &Rc<Self>, content: &ShareableContent, target: Target) {
+        // TODO(multi-display-recording): one SCStream records one display, so
+        // an area spanning displays is clipped to the display it mostly
+        // covers (screenshots stitch; recordings would need two streams).
         let resolved = match target {
             Target::Area(r) => content
                 .display_for_rect(r)
@@ -109,7 +114,7 @@ impl App {
             Err(e) => {
                 self.status.set_recording(None);
                 let _ = self.session.borrow_mut().apply(Event::Cancel);
-                return self.fail(e);
+                return self.fail_with(Msg::ToastRecordingFailed, e);
             }
         };
         let target = match &*self.mode.borrow() {
@@ -132,7 +137,7 @@ impl App {
             Err(e) => {
                 self.status.set_recording(None);
                 let _ = self.session.borrow_mut().apply(Event::Cancel);
-                self.fail(e);
+                self.fail_with(Msg::ToastRecordingFailed, e);
             }
         }
     }
@@ -145,6 +150,7 @@ impl App {
             RecorderEvent::Failed(e) => {
                 log::error!("recording stopped: {e}");
                 self.stop_recording();
+                self.notify(Notice::Error(Msg::ToastRecordingFailed), Some(crate::capture_flow::error_text(&e)));
             }
         }
     }

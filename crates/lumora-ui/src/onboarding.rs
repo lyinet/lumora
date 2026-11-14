@@ -12,6 +12,8 @@ use objc2_app_kit::{
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::NSString;
 
+use lumora_core::i18n::{tr, trf, Msg};
+
 use crate::events::{EventSink, OnboardingAction, UiEvent};
 use crate::tokens::typography;
 use crate::util::{cg_rect, weight, ActionTarget};
@@ -36,11 +38,13 @@ impl std::fmt::Debug for Onboarding {
     }
 }
 
-const BODY_ASK: &str =
-    "Lumora captures your screen only when you ask it to — a shortcut, the menu bar, or a recording you start. \
-macOS requires you to allow Screen Recording once.\n\nClick Grant Access, then switch Lumora on in System Settings.";
-const BODY_DONE: &str =
-    "Screen Recording is allowed. Relaunch Lumora so macOS applies it, then press ⌥⇧4 to capture an area.";
+fn body_ask() -> &'static str {
+    tr(Msg::OnboardingAsk)
+}
+
+fn body_done() -> String {
+    trf(Msg::OnboardingDone, &[&lumora_core::Action::CaptureArea.default_shortcut()])
+}
 
 impl Onboarding {
     pub fn show(mtm: MainThreadMarker, sink: EventSink, granted: bool) -> Self {
@@ -59,7 +63,7 @@ impl Onboarding {
         window.setTitlebarAppearsTransparent(true);
         window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
         window.setMovableByWindowBackground(true);
-        window.setTitle(&NSString::from_str("Welcome to Lumora"));
+        window.setTitle(&NSString::from_str(tr(Msg::WelcomeTitle)));
 
         let bg = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(mtm), frame);
         bg.setMaterial(NSVisualEffectMaterial::UnderWindowBackground);
@@ -70,14 +74,16 @@ impl Onboarding {
         mark.setFrame(cg_rect(Rect::new((W - 96.0) / 2.0, H - 60.0 - 96.0, 96.0, 96.0)));
         bg.addSubview(&mark);
 
-        let title = NSTextField::labelWithString(&NSString::from_str("Welcome to Lumora"), mtm);
+        let title = NSTextField::labelWithString(&NSString::from_str(tr(Msg::WelcomeTitle)), mtm);
         title.setFont(Some(&NSFont::systemFontOfSize_weight(typography::TITLE, weight::BOLD)));
         title.setAlignment(NSTextAlignment::Center);
         title.setFrame(cg_rect(Rect::new(20.0, H - 196.0, W - 40.0, 30.0)));
         bg.addSubview(&title);
 
-        let body =
-            NSTextField::wrappingLabelWithString(&NSString::from_str(if granted { BODY_DONE } else { BODY_ASK }), mtm);
+        let body = NSTextField::wrappingLabelWithString(
+            &NSString::from_str(&if granted { body_done() } else { body_ask().to_string() }),
+            mtm,
+        );
         body.setFont(Some(&NSFont::systemFontOfSize_weight(typography::BODY, weight::REGULAR)));
         body.setAlignment(NSTextAlignment::Center);
         body.setFrame(cg_rect(Rect::new(44.0, 92.0, W - 88.0, 100.0)));
@@ -106,17 +112,17 @@ impl Onboarding {
             b
         };
         let (primary_action, primary_title) = if granted {
-            (OnboardingAction::Relaunch, "Relaunch")
+            (OnboardingAction::Relaunch, tr(Msg::Relaunch))
         } else {
-            (OnboardingAction::RequestAccess, "Grant Access")
+            (OnboardingAction::RequestAccess, tr(Msg::GrantAccess))
         };
-        let secondary = button("Open System Settings", 40.0, 180.0, OnboardingAction::OpenSystemSettings, false);
+        let secondary = button(tr(Msg::OpenSystemSettings), 40.0, 180.0, OnboardingAction::OpenSystemSettings, false);
         let primary = button(primary_title, W - 40.0 - 180.0, 180.0, primary_action, true);
         let later_sink = sink.clone();
         let later = ActionTarget::new(mtm, move |_| later_sink(UiEvent::Onboarding(OnboardingAction::Dismiss)));
         let later_btn = unsafe {
             NSButton::buttonWithTitle_target_action(
-                &NSString::from_str("Not Now"),
+                &NSString::from_str(tr(Msg::NotNow)),
                 Some(&later),
                 Some(ActionTarget::action()),
                 mtm,
@@ -139,8 +145,8 @@ impl Onboarding {
         if self.granted.replace(true) {
             return None;
         }
-        self.body.setStringValue(&NSString::from_str(BODY_DONE));
-        self.primary.setTitle(&NSString::from_str("Relaunch"));
+        self.body.setStringValue(&NSString::from_str(&body_done()));
+        self.primary.setTitle(&NSString::from_str(tr(Msg::Relaunch)));
         let t = ActionTarget::new(mtm, move |_| sink(UiEvent::Onboarding(OnboardingAction::Relaunch)));
         // SAFETY: the caller keeps the returned target alive.
         unsafe {

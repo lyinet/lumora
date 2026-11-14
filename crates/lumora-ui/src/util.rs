@@ -130,6 +130,69 @@ pub fn line_path(a: (f64, f64), b: (f64, f64)) -> CFRetained<CGPath> {
     unsafe { CFRetained::cast_unchecked(path) }
 }
 
+/// A Lumora vector path as a `CGPath` (same coordinates).
+pub fn cg_path(path: &lumora_core::annotate::path::Path) -> CFRetained<CGPath> {
+    use lumora_core::annotate::path::PathEl;
+    let m = CGMutablePath::new();
+    let p = Some(&*m);
+    let t = std::ptr::null();
+    for el in &path.els {
+        // SAFETY: valid mutable path, identity (null) transform.
+        unsafe {
+            match *el {
+                PathEl::MoveTo(a) => CGMutablePath::move_to_point(p, t, a.x, a.y),
+                PathEl::LineTo(a) => CGMutablePath::add_line_to_point(p, t, a.x, a.y),
+                PathEl::QuadTo(c, a) => CGMutablePath::add_quad_curve_to_point(p, t, c.x, c.y, a.x, a.y),
+                PathEl::CubicTo(c1, c2, a) => CGMutablePath::add_curve_to_point(p, t, c1.x, c1.y, c2.x, c2.y, a.x, a.y),
+                PathEl::Close => CGMutablePath::close_subpath(p),
+            }
+        }
+    }
+    // SAFETY: CGMutablePath is a subtype of CGPath.
+    unsafe { CFRetained::cast_unchecked(m) }
+}
+
+/// An 8-bit sRGB colour with alpha as a `CGColor`.
+pub fn cg_rgb8(c: lumora_core::color::Rgb8, alpha: f64) -> CFRetained<CGColor> {
+    CGColor::new_srgb(f64::from(c.r) / 255.0, f64::from(c.g) / 255.0, f64::from(c.b) / 255.0, alpha)
+}
+
+/// An 8-bit sRGB colour as an `NSColor`.
+pub fn ns_rgb8(c: lumora_core::color::Rgb8) -> Retained<NSColor> {
+    NSColor::colorWithSRGBRed_green_blue_alpha(
+        f64::from(c.r) / 255.0,
+        f64::from(c.g) / 255.0,
+        f64::from(c.b) / 255.0,
+        1.0,
+    )
+}
+
+/// Any `NSColor` converted to 8-bit sRGB (e.g. from the colour panel).
+pub fn rgb8_of(color: &NSColor) -> Option<lumora_core::color::Rgb8> {
+    let srgb = color.colorUsingColorSpace(&objc2_app_kit::NSColorSpace::sRGBColorSpace())?;
+    let ch = |v: f64| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+    Some(lumora_core::color::Rgb8::new(ch(srgb.redComponent()), ch(srgb.greenComponent()), ch(srgb.blueComponent())))
+}
+
+/// Size of `s` (possibly multi-line) in `font`.
+pub fn text_size(s: &str, font: &NSFont) -> (f64, f64) {
+    use objc2_foundation::NSDictionary;
+    let key = unsafe { objc2_app_kit::NSFontAttributeName };
+    let attrs = NSDictionary::<NSString, AnyObject>::from_slices(&[key], &[&**font]);
+    let probe = if s.is_empty() { " " } else { s };
+    // SAFETY: attribute dictionary with an NSFont value.
+    let size = unsafe { NSString::from_str(probe).sizeWithAttributes(Some(&attrs)) };
+    (size.width.ceil(), size.height.ceil())
+}
+
+/// An SF Symbol image (`None` on systems missing the symbol).
+pub fn symbol(name: &str, description: &str) -> Option<Retained<objc2_app_kit::NSImage>> {
+    objc2_app_kit::NSImage::imageWithSystemSymbolName_accessibilityDescription(
+        &NSString::from_str(name),
+        Some(&NSString::from_str(description)),
+    )
+}
+
 /// View a CF object as an `AnyObject` (all CF types are valid ObjC objects).
 pub fn cf_as_object<T: ?Sized>(cf: &T) -> &AnyObject {
     // SAFETY: CoreFoundation objects are toll-free usable as `id`.

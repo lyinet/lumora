@@ -10,6 +10,7 @@ use std::rc::Rc;
 use lumora_core::action::Action;
 use lumora_core::geometry::Rect;
 use lumora_core::hotkey::{find_conflicts, Conflict, Hotkey, Key, Modifiers};
+use lumora_core::i18n::{tr, trf, LanguagePref, Msg};
 use lumora_core::settings::{Codec, Settings};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol};
@@ -28,8 +29,8 @@ use crate::tokens::{color, radius, typography};
 use crate::util::{cg_color, cg_rect, mono_digits, set_text, text_layer, weight, ActionTarget};
 
 const W: f64 = 540.0;
-const H: f64 = 380.0;
-const TAB_H: f64 = 300.0;
+const H: f64 = 440.0;
+const TAB_H: f64 = 360.0;
 const LABEL_X: f64 = 24.0;
 const LABEL_W: f64 = 170.0;
 const CONTROL_X: f64 = 206.0;
@@ -42,6 +43,8 @@ const ROW_H: f64 = 30.0;
 pub struct ShortcutFieldIvars {
     current: Cell<Option<Hotkey>>,
     recording: Cell<bool>,
+    /// Another app holds this shortcut (registration failed).
+    invalid: Cell<bool>,
     label: RefCell<Option<Retained<CATextLayer>>>,
     on_change: Box<dyn Fn(Option<Hotkey>)>,
     on_recording: Box<dyn Fn(bool)>,
@@ -108,6 +111,7 @@ impl ShortcutField {
         let this = Self::alloc(mtm).set_ivars(ShortcutFieldIvars {
             current: Cell::new(current),
             recording: Cell::new(false),
+            invalid: Cell::new(false),
             label: RefCell::new(None),
             on_change: Box::new(on_change),
             on_recording: Box::new(on_recording),
@@ -138,15 +142,21 @@ impl ShortcutField {
     fn refresh(&self) {
         let recording = self.ivars().recording.get();
         let text = if recording {
-            "Type shortcut…".to_string()
+            tr(Msg::TypeShortcut).to_string()
         } else {
-            self.ivars().current.get().map(|h| h.to_string()).unwrap_or_else(|| "Click to record".into())
+            self.ivars().current.get().map(|h| h.to_string()).unwrap_or_else(|| tr(Msg::ClickToRecord).into())
         };
         if let Some(l) = self.ivars().label.borrow().as_ref() {
             set_text(l, &text);
         }
         if let Some(root) = self.layer() {
-            let border = if recording { color::ACCENT } else { color::HAIRLINE.with_alpha(0.25) };
+            let border = if recording {
+                color::ACCENT
+            } else if self.ivars().invalid.get() {
+                color::ERROR
+            } else {
+                color::HAIRLINE.with_alpha(0.25)
+            };
             root.setBorderColor(Some(&cg_color(border)));
         }
     }
@@ -181,7 +191,7 @@ impl ShortcutField {
             || mods.contains(Modifiers::COMMAND));
         if needs_modifier {
             if let Some(l) = self.ivars().label.borrow().as_ref() {
-                set_text(l, "Add ⌃, ⌥ or ⌘");
+                set_text(l, tr(Msg::AddModifier));
             }
             return;
         }
@@ -195,16 +205,27 @@ impl ShortcutField {
         self.ivars().current.set(h);
         self.refresh();
     }
+
+    fn set_invalid(&self, invalid: bool) {
+        self.ivars().invalid.set(invalid);
+        self.refresh();
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Window
 // ---------------------------------------------------------------------------
 
+type Refresh = Rc<dyn Fn(&Settings)>;
+
 struct State {
     settings: RefCell<Settings>,
     sink: EventSink,
     home: PathBuf,
+    /// Shortcuts the system refused to register (held by another app).
+    taken: RefCell<Vec<Action>>,
+    /// Re-evaluates the Shortcuts tab's warning line.
+    refresh_warning: RefCell<Option<Refresh>>,
 }
 
 impl State {
@@ -245,6 +266,21 @@ impl Form<'_> {
         self.view.addSubview(control);
     }
 
+    /// A right-aligned label on its own row (heading for an inline note).
+    fn label_only(&mut self, text: &str) {
+        self.y -= ROW_H - 10.0;
+        self.label(text);
+    }
+
+    /// A secondary note on the current row, in the control column.
+    fn note_inline(&mut self, text: &str) {
+        let l = NSTextField::labelWithString(&NSString::from_str(text), self.mtm);
+        l.setFont(Some(&NSFont::systemFontOfSize_weight(typography::CAPTION, weight::REGULAR)));
+        l.setTextColor(Some(&objc2_app_kit::NSColor::secondaryLabelColor()));
+        l.setFrame(cg_rect(Rect::new(CONTROL_X, self.y + 6.0, W - CONTROL_X - 24.0, 16.0)));
+        self.view.addSubview(&l);
+    }
+
     fn note(&mut self, text: &str) {
         self.y -= 20.0;
         let l = NSTextField::labelWithString(&NSString::from_str(text), self.mtm);
@@ -258,6 +294,7 @@ impl Form<'_> {
 /// The Settings window controller. Keep it alive while the window is open.
 pub struct SettingsWindow {
     window: Retained<NSWindow>,
+    state: Rc<State>,
     _targets: Vec<Retained<ActionTarget>>,
     _fields: Vec<Retained<ShortcutField>>,
 }
@@ -282,19 +319,25 @@ impl SettingsWindow {
             )
         };
         unsafe { window.setReleasedWhenClosed(false) };
-        window.setTitle(&NSString::from_str("Lumora Settings"));
+        window.setTitle(&NSString::from_str(tr(Msg::SettingsTitle)));
 
-        let state = Rc::new(State { settings: RefCell::new(settings), sink, home });
+        let state = Rc::new(State {
+            settings: RefCell::new(settings),
+            sink,
+            home,
+            taken: RefCell::new(Vec::new()),
+            refresh_warning: RefCell::new(None),
+        });
         let mut targets = Vec::new();
         let mut fields = Vec::new();
 
         let tabs = NSTabView::initWithFrame(NSTabView::alloc(mtm), cg_rect(Rect::new(12.0, 12.0, W - 24.0, H - 24.0)));
         let tab_frame = cg_rect(Rect::new(0.0, 0.0, W - 48.0, TAB_H));
         for (title, build) in [
-            ("General", build_general as TabBuilder),
-            ("Shortcuts", build_shortcuts as TabBuilder),
-            ("Capture", build_capture as TabBuilder),
-            ("Recording", build_recording as TabBuilder),
+            (tr(Msg::TabGeneral), build_general as TabBuilder),
+            (tr(Msg::TabShortcuts), build_shortcuts as TabBuilder),
+            (tr(Msg::TabCapture), build_capture as TabBuilder),
+            (tr(Msg::TabRecording), build_recording as TabBuilder),
         ] {
             let view = NSView::initWithFrame(NSView::alloc(mtm), tab_frame);
             let mut form = Form { mtm, view: &view, y: TAB_H - 16.0 };
@@ -308,7 +351,20 @@ impl SettingsWindow {
         window.center();
         NSApplication::sharedApplication(mtm).activate();
         window.makeKeyAndOrderFront(None);
-        SettingsWindow { window, _targets: targets, _fields: fields }
+        SettingsWindow { window, state, _targets: targets, _fields: fields }
+    }
+
+    /// Mark shortcuts another app already holds: red field outline plus an
+    /// explanation under the list.
+    pub fn set_unavailable(&self, taken: &[Action]) {
+        *self.state.taken.borrow_mut() = taken.to_vec();
+        for (field, action) in self._fields.iter().zip(Action::ALL) {
+            field.set_invalid(taken.contains(&action));
+        }
+        let refresh = self.state.refresh_warning.borrow().clone();
+        if let Some(r) = refresh {
+            r(&self.state.settings.borrow());
+        }
     }
 
     /// Bring the existing window forward.
@@ -319,6 +375,22 @@ impl SettingsWindow {
 
     pub fn is_visible(&self) -> bool {
         self.window.isVisible()
+    }
+
+    /// Window origin (AppKit global points), to reopen in the same place.
+    pub fn origin(&self) -> (f64, f64) {
+        let f = self.window.frame();
+        (f.origin.x, f.origin.y)
+    }
+
+    pub fn set_origin(&self, origin: (f64, f64)) {
+        self.window.setFrameOrigin(CGPoint::new(origin.0, origin.1));
+    }
+}
+
+impl Drop for SettingsWindow {
+    fn drop(&mut self) {
+        self.window.close();
     }
 }
 
@@ -399,7 +471,7 @@ fn build_general(
     let path_label = NSTextField::labelWithString(&NSString::from_str(&folder.display().to_string()), mtm);
     path_label.setFrame(cg_rect(Rect::new(0.0, 0.0, 200.0, 20.0)));
     path_label.setLineBreakMode(objc2_app_kit::NSLineBreakMode::ByTruncatingMiddle);
-    form.add("Save captures to:", &path_label, ROW_H);
+    form.add(tr(Msg::SaveCapturesTo), &path_label, ROW_H);
     let st = state.clone();
     let label_ref = path_label.clone();
     let choose = ActionTarget::new(mtm, move |_| {
@@ -408,7 +480,7 @@ fn build_general(
         panel.setCanChooseDirectories(true);
         panel.setCanChooseFiles(false);
         panel.setCanCreateDirectories(true);
-        panel.setPrompt(Some(&NSString::from_str("Choose")));
+        panel.setPrompt(Some(&NSString::from_str(tr(Msg::ChoosePrompt))));
         if panel.runModal() == objc2_app_kit::NSModalResponseOK {
             if let Some(path) = panel.URL().and_then(|u| u.path()).map(|p| PathBuf::from(p.to_string())) {
                 label_ref.setStringValue(&NSString::from_str(&path.display().to_string()));
@@ -418,7 +490,7 @@ fn build_general(
     });
     let b = unsafe {
         NSButton::buttonWithTitle_target_action(
-            &NSString::from_str("Choose…"),
+            &NSString::from_str(tr(Msg::Choose)),
             Some(&choose),
             Some(ActionTarget::action()),
             mtm,
@@ -446,35 +518,52 @@ fn build_general(
         field.setTarget(Some(&t));
         field.setAction(Some(ActionTarget::action()));
     }
-    form.add("File name:", &field, ROW_H);
+    form.add(tr(Msg::FileName), &field, ROW_H);
     targets.push(t);
-    form.note("Tokens: {date} {time} {YYYY} {MM} {DD} {hh} {mm} {ss} {kind}");
+    form.note(tr(Msg::FileNameTokens));
 
     checkbox(
         form,
         targets,
         state,
-        "After capture:",
-        "Copy to clipboard",
+        tr(Msg::AfterCapture),
+        tr(Msg::CopyToClipboard),
         |s| s.general.copy_to_clipboard,
         |s, v| s.general.copy_to_clipboard = v,
     );
-    checkbox(form, targets, state, "", "Save to disk", |s| s.general.save_to_disk, |s, v| s.general.save_to_disk = v);
     checkbox(
         form,
         targets,
         state,
         "",
-        "Show Quick Access card",
+        tr(Msg::SaveToDisk),
+        |s| s.general.save_to_disk,
+        |s, v| s.general.save_to_disk = v,
+    );
+    checkbox(
+        form,
+        targets,
+        state,
+        "",
+        tr(Msg::ShowQuickAccess),
         |s| s.general.show_quick_access,
         |s, v| s.general.show_quick_access = v,
+    );
+    checkbox(
+        form,
+        targets,
+        state,
+        "",
+        tr(Msg::OpenEditorAfterCapture),
+        |s| s.general.open_editor_after_capture,
+        |s, v| s.general.open_editor_after_capture = v,
     );
     popup(
         form,
         targets,
         state,
-        "Hide card after:",
-        &["3 seconds", "6 seconds", "10 seconds", "30 seconds"],
+        tr(Msg::HideCardAfter),
+        &[tr(Msg::Seconds3), tr(Msg::Seconds6), tr(Msg::Seconds10), tr(Msg::Seconds30)],
         |s| match s.general.quick_access_timeout as u32 {
             0..=4 => 0,
             5..=7 => 1,
@@ -483,16 +572,35 @@ fn build_general(
         },
         |s, i| s.general.quick_access_timeout = [3.0, 6.0, 10.0, 30.0][i.min(3)],
     );
-    checkbox(form, targets, state, "", "Play sounds", |s| s.general.play_sounds, |s, v| s.general.play_sounds = v);
     checkbox(
         form,
         targets,
         state,
         "",
-        "Launch at login",
+        tr(Msg::PlaySounds),
+        |s| s.general.play_sounds,
+        |s, v| s.general.play_sounds = v,
+    );
+    checkbox(
+        form,
+        targets,
+        state,
+        "",
+        tr(Msg::LaunchAtLogin),
         |s| s.general.launch_at_login,
         |s, v| s.general.launch_at_login = v,
     );
+    let labels: Vec<&str> = LanguagePref::ALL.iter().map(|l| l.label()).collect();
+    popup(
+        form,
+        targets,
+        state,
+        tr(Msg::LanguageLabel),
+        &labels,
+        |s| LanguagePref::ALL.iter().position(|l| *l == s.general.language).unwrap_or(0),
+        |s, i| s.general.language = LanguagePref::ALL[i.min(LanguagePref::ALL.len() - 1)],
+    );
+    form.note(tr(Msg::LanguageNote));
 }
 
 fn build_shortcuts(
@@ -502,28 +610,34 @@ fn build_shortcuts(
     fields: &mut Vec<Retained<ShortcutField>>,
 ) {
     let mtm = form.mtm;
-    let warning = NSTextField::labelWithString(&NSString::from_str(""), mtm);
+    let warning = NSTextField::wrappingLabelWithString(&NSString::from_str(""), mtm);
     warning.setTextColor(Some(&objc2_app_kit::NSColor::systemRedColor()));
     warning.setFont(Some(&NSFont::systemFontOfSize_weight(typography::CAPTION, weight::MEDIUM)));
     let refresh_warning = {
         let warning = warning.clone();
+        let st = Rc::downgrade(state);
         move |s: &Settings| {
             let bound: Vec<Option<Hotkey>> = Action::ALL.iter().map(|a| s.shortcuts.get(*a)).collect();
-            let msg = find_conflicts(&bound)
-                .first()
-                .map(|c| match *c {
-                    Conflict::Duplicate(i, j) => {
-                        format!("“{}” and “{}” use the same shortcut.", Action::ALL[i].title(), Action::ALL[j].title())
-                    }
-                    Conflict::System(i) => {
-                        format!("“{}” conflicts with a macOS screenshot shortcut.", Action::ALL[i].title())
-                    }
-                })
-                .unwrap_or_default();
+            let conflict = find_conflicts(&bound).first().map(|c| match *c {
+                Conflict::Duplicate(i, j) => {
+                    trf(Msg::ConflictDuplicate, &[&Action::ALL[i].title(), &Action::ALL[j].title()])
+                }
+                Conflict::System(i) => trf(Msg::ConflictSystem, &[&Action::ALL[i].title()]),
+            });
+            // Then shortcuts the system refused at registration time.
+            let taken = || {
+                let st = st.upgrade()?;
+                let taken = st.taken.borrow();
+                let a = taken.iter().find(|a| s.shortcuts.get(**a).is_some())?;
+                let hk = s.shortcuts.get(*a)?;
+                Some(trf(Msg::ConflictTaken, &[&hk, &a.title()]))
+            };
+            let msg = conflict.or_else(taken).unwrap_or_default();
             warning.setStringValue(&NSString::from_str(&msg));
         }
     };
-    let refresh_warning = Rc::new(refresh_warning);
+    let refresh_warning: Refresh = Rc::new(refresh_warning);
+    *state.refresh_warning.borrow_mut() = Some(refresh_warning.clone());
     for action in Action::ALL {
         let st = state.clone();
         let rw = refresh_warning.clone();
@@ -541,8 +655,8 @@ fn build_shortcuts(
         form.add(&format!("{}:", action.title()), &field, ROW_H);
         fields.push(field);
     }
-    form.y -= 26.0;
-    warning.setFrame(cg_rect(Rect::new(CONTROL_X, form.y + 4.0, W - CONTROL_X - 30.0, 18.0)));
+    form.y -= 36.0;
+    warning.setFrame(cg_rect(Rect::new(CONTROL_X, form.y + 2.0, W - CONTROL_X - 30.0, 32.0)));
     form.view.addSubview(&warning);
     refresh_warning(&state.settings.borrow());
 
@@ -559,7 +673,7 @@ fn build_shortcuts(
     });
     let b = unsafe {
         NSButton::buttonWithTitle_target_action(
-            &NSString::from_str("Restore Defaults"),
+            &NSString::from_str(tr(Msg::RestoreDefaults)),
             Some(&reset),
             Some(ActionTarget::action()),
             mtm,
@@ -568,7 +682,7 @@ fn build_shortcuts(
     b.sizeToFit();
     form.add("", &b, ROW_H);
     targets.push(reset);
-    form.note("Click a field and press keys. ⌫ clears, Esc cancels.");
+    form.note(tr(Msg::ShortcutsNote));
 }
 
 fn build_capture(
@@ -581,8 +695,8 @@ fn build_capture(
         form,
         targets,
         state,
-        "Area selection:",
-        "Show magnifier",
+        tr(Msg::AreaSelection),
+        tr(Msg::ShowMagnifier),
         |s| s.capture.show_magnifier,
         |s, v| s.capture.show_magnifier = v,
     );
@@ -591,7 +705,7 @@ fn build_capture(
         targets,
         state,
         "",
-        "Show crosshair guides",
+        tr(Msg::ShowCrosshair),
         |s| s.capture.show_crosshair,
         |s, v| s.capture.show_crosshair = v,
     );
@@ -600,7 +714,7 @@ fn build_capture(
         targets,
         state,
         "",
-        "Highlight windows on hover",
+        tr(Msg::HighlightWindows),
         |s| s.capture.window_picking,
         |s, v| s.capture.window_picking = v,
     );
@@ -608,8 +722,8 @@ fn build_capture(
         form,
         targets,
         state,
-        "Window capture:",
-        "Include window shadow",
+        tr(Msg::WindowCaptureLabel),
+        tr(Msg::IncludeShadow),
         |s| s.capture.window_shadow,
         |s, v| s.capture.window_shadow = v,
     );
@@ -617,12 +731,15 @@ fn build_capture(
         form,
         targets,
         state,
-        "Resolution:",
-        "Save at Retina (native) scale",
+        tr(Msg::ResolutionLabel),
+        tr(Msg::SaveRetina),
         |s| s.capture.retina,
         |s, v| s.capture.retina = v,
     );
-    form.note("Area captures are cropped from the frozen screen at native resolution.");
+    form.note(tr(Msg::CaptureNote));
+    form.y -= 8.0;
+    form.label_only(tr(Msg::TextRecognitionLabel));
+    form.note_inline(tr(Msg::TextRecognitionNote));
 }
 
 fn build_recording(
@@ -635,8 +752,8 @@ fn build_recording(
         form,
         targets,
         state,
-        "Frame rate:",
-        &["30 fps", "60 fps"],
+        tr(Msg::FrameRate),
+        &[tr(Msg::Fps30), tr(Msg::Fps60)],
         |s| usize::from(s.recording.fps >= 60),
         |s, i| s.recording.fps = if i == 1 { 60 } else { 30 },
     );
@@ -644,8 +761,8 @@ fn build_recording(
         form,
         targets,
         state,
-        "Video format:",
-        &["H.264 (most compatible)", "HEVC (smaller files)"],
+        tr(Msg::VideoFormat),
+        &[tr(Msg::H264), tr(Msg::Hevc)],
         |s| usize::from(s.recording.codec == Codec::Hevc),
         |s, i| s.recording.codec = if i == 1 { Codec::Hevc } else { Codec::H264 },
     );
@@ -653,8 +770,8 @@ fn build_recording(
         form,
         targets,
         state,
-        "Countdown:",
-        &["Off", "3 seconds", "5 seconds", "10 seconds"],
+        tr(Msg::Countdown),
+        &[tr(Msg::Off), tr(Msg::Seconds3), tr(Msg::Seconds5), tr(Msg::Seconds10)],
         |s| match s.recording.countdown {
             0 => 0,
             1..=3 => 1,
@@ -667,8 +784,8 @@ fn build_recording(
         form,
         targets,
         state,
-        "Include:",
-        "Mouse pointer",
+        tr(Msg::Include),
+        tr(Msg::MousePointer),
         |s| s.recording.show_cursor,
         |s, v| s.recording.show_cursor = v,
     );
@@ -677,10 +794,18 @@ fn build_recording(
         targets,
         state,
         "",
-        "System audio",
+        tr(Msg::SystemAudio),
         |s| s.recording.system_audio,
         |s, v| s.recording.system_audio = v,
     );
-    checkbox(form, targets, state, "", "Microphone", |s| s.recording.microphone, |s, v| s.recording.microphone = v);
-    form.note("Microphone capture requires macOS 15 or later.");
+    checkbox(
+        form,
+        targets,
+        state,
+        "",
+        tr(Msg::Microphone),
+        |s| s.recording.microphone,
+        |s, v| s.recording.microphone = v,
+    );
+    form.note(tr(Msg::MicrophoneNote));
 }

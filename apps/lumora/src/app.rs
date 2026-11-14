@@ -19,9 +19,11 @@ use dispatch2::DispatchQueue;
 use lumora_capture::content::ShareableContent;
 use lumora_capture::permission;
 use lumora_core::geometry::Rect;
+use lumora_core::i18n::{tr, Msg};
 use lumora_core::recording::RecordingSession;
 use lumora_core::settings::Settings;
 use lumora_ui::countdown::Countdown;
+use lumora_ui::editor::EditorWindow;
 use lumora_ui::events::{CardAction, EventSink, FrozenDisplay, OnboardingAction, UiEvent};
 use lumora_ui::onboarding::Onboarding;
 use lumora_ui::overlay::OverlayController;
@@ -29,6 +31,7 @@ use lumora_ui::pin::PinWindow;
 use lumora_ui::quick_access::{open_file, QuickAccess};
 use lumora_ui::recording_hud::{RecordingBorder, StopControl};
 use lumora_ui::settings_window::SettingsWindow;
+use lumora_ui::toast::{ToastCenter, ToastKind};
 use lumora_ui::util::ActionTarget;
 use objc2::rc::Retained;
 use objc2::MainThreadMarker;
@@ -107,6 +110,14 @@ impl Mode {
     }
 }
 
+/// A user-visible outcome for [`App::notify`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Notice {
+    Success(Msg),
+    Warning(Msg),
+    Error(Msg),
+}
+
 /// A capture shown in Quick Access.
 pub struct CaptureRecord {
     pub image: Option<CFRetained<CGImage>>,
@@ -133,6 +144,10 @@ pub struct App {
     pub quick: QuickAccess,
     pub captures: RefCell<HashMap<u64, CaptureRecord>>,
     pins: RefCell<HashMap<u64, PinWindow>>,
+    pub editors: RefCell<HashMap<u64, EditorWindow>>,
+    toasts: ToastCenter,
+    /// Actions whose shortcut another app already holds.
+    hotkey_failures: RefCell<Vec<lumora_core::Action>>,
     settings_window: RefCell<Option<SettingsWindow>>,
     onboarding: RefCell<Option<Onboarding>>,
     onboarding_target: RefCell<Option<Retained<ActionTarget>>>,
@@ -146,7 +161,13 @@ impl App {
         let home = system::home_dir();
         let settings_path = Settings::default_path();
         let settings = settings_path.as_deref().map(Settings::load_or_default).unwrap_or_default();
-        log::info!("starting Lumora {} (settings: {:?})", env!("CARGO_PKG_VERSION"), settings_path);
+        let lang = system::apply_language(settings.general.language);
+        log::info!(
+            "starting Lumora {} (settings: {:?}, language: {})",
+            env!("CARGO_PKG_VERSION"),
+            settings_path,
+            lang.tag()
+        );
 
         let app = Rc::new_cyclic(|weak: &Weak<App>| {
             let w = weak.clone();
@@ -169,6 +190,9 @@ impl App {
                 mode: RefCell::new(Mode::Idle),
                 captures: RefCell::new(HashMap::new()),
                 pins: RefCell::new(HashMap::new()),
+                editors: RefCell::new(HashMap::new()),
+                toasts: ToastCenter::new(mtm),
+                hotkey_failures: RefCell::new(Vec::new()),
                 settings_window: RefCell::new(None),
                 onboarding: RefCell::new(None),
                 onboarding_target: RefCell::new(None),
@@ -186,11 +210,23 @@ impl App {
         app
     }
 
+    /// Tell the user how something went, with a toast HUD.
+    pub fn notify(&self, notice: Notice, detail: Option<String>) {
+        let (kind, msg) = match notice {
+            Notice::Success(m) => (ToastKind::Success, m),
+            Notice::Warning(m) => (ToastKind::Warning, m),
+            Notice::Error(m) => (ToastKind::Error, m),
+        };
+        log::info!("toast: {}{}", tr(msg), detail.as_deref().map(|d| format!(" — {d}")).unwrap_or_default());
+        self.toasts.show(kind, tr(msg), detail.as_deref());
+    }
+
     pub fn shutdown(&self) {
         // Finalise an in-flight recording synchronously is not possible
         // here; dropping the recorder cancels it cleanly.
         self.mode.replace(Mode::Idle);
         self.quick.dismiss_all();
+        self.editors.borrow_mut().clear();
     }
 
     pub fn next_id(&self) -> u64 {
@@ -214,6 +250,7 @@ impl App {
             Command::CaptureArea => self.begin_selection(lumora_ui::events::OverlayMode::Capture, false),
             Command::CaptureWindow => self.begin_selection(lumora_ui::events::OverlayMode::Capture, true),
             Command::CaptureFullscreen => self.capture_fullscreen(),
+            Command::CaptureText => self.begin_selection(lumora_ui::events::OverlayMode::Text, false),
             Command::ToggleRecording => self.toggle_recording(),
             Command::OpenFolder => {
                 let folder = self.settings.borrow().save_folder(&self.home);
@@ -261,8 +298,12 @@ impl App {
             UiEvent::OverlayCancelled { .. } => self.set_mode(Mode::Idle),
             UiEvent::Card { id, action } => self.on_card_action(id, action),
             UiEvent::CardDismissed(id) => {
-                self.captures.borrow_mut().remove(&id);
+                // An open editor still needs the capture.
+                if !self.editors.borrow().contains_key(&id) {
+                    self.captures.borrow_mut().remove(&id);
+                }
             }
+            UiEvent::Editor { id, action } => self.on_editor(id, action),
             UiEvent::PinClosed(id) => {
                 self.pins.borrow_mut().remove(&id);
             }
@@ -332,6 +373,10 @@ impl App {
                 }
             }
             CardAction::DraggedOut => self.quick.dismiss(id),
+            CardAction::Annotate => {
+                self.open_editor(id);
+                self.quick.dismiss(id);
+            }
         }
     }
 
@@ -345,11 +390,13 @@ impl App {
             }
         }
         let w = SettingsWindow::show(self.mtm, self.settings.borrow().clone(), self.home.clone(), self.sink.clone());
+        w.set_unavailable(&self.hotkey_failures.borrow());
         *self.settings_window.borrow_mut() = Some(w);
     }
 
     fn apply_settings(self: &Rc<Self>, new: Settings) {
         let login_changed = new.general.launch_at_login != self.settings.borrow().general.launch_at_login;
+        let language_changed = new.general.language != self.settings.borrow().general.language;
         *self.settings.borrow_mut() = new;
         let s = self.settings.borrow();
         if let Some(path) = &self.settings_path {
@@ -366,14 +413,45 @@ impl App {
         }
         drop(s);
         self.apply_hotkeys();
+        if language_changed {
+            self.apply_language();
+        }
+    }
+
+    /// Switch the UI language live: menus re-title, the Settings window is
+    /// rebuilt in place. Open editors keep their language until reopened.
+    fn apply_language(self: &Rc<Self>) {
+        let lang = system::apply_language(self.settings.borrow().general.language);
+        log::info!("language: {}", lang.tag());
+        self.status.relabel();
+        let reopen = self.settings_window.borrow_mut().take();
+        if let Some(old) = reopen.filter(|w| w.is_visible()) {
+            let origin = old.origin();
+            drop(old);
+            self.show_settings();
+            if let Some(w) = self.settings_window.borrow().as_ref() {
+                w.set_origin(origin);
+            }
+        }
     }
 
     fn apply_hotkeys(&self) {
         let bindings = self.settings.borrow().shortcuts.bound();
-        let failed = self.hotkeys.borrow_mut().set(bindings);
-        for a in failed {
-            // TODO(hotkey-feedback): surface this in the Shortcuts tab.
+        let failed = self.hotkeys.borrow_mut().set(bindings.clone());
+        for a in &failed {
             log::warn!("shortcut for “{}” is in use by another app", a.title());
+        }
+        // Toast only for newly failing shortcuts, so re-applying settings
+        // doesn't nag; the Shortcuts tab always shows the full picture.
+        let previous = self.hotkey_failures.replace(failed.clone());
+        if let Some(a) = failed.iter().find(|a| !previous.contains(a)) {
+            if let Some((_, hk)) = bindings.iter().find(|(b, _)| b == a) {
+                let detail = lumora_core::i18n::trf(Msg::ToastShortcutTakenDetail, &[hk]);
+                self.notify(Notice::Warning(Msg::ToastShortcutTaken), Some(detail));
+            }
+        }
+        if let Some(w) = self.settings_window.borrow().as_ref() {
+            w.set_unavailable(&failed);
         }
     }
 

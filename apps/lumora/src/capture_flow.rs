@@ -12,12 +12,14 @@ use std::sync::{Arc, Mutex};
 
 use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
 use lumora_capture::content::ShareableContent;
+use lumora_capture::image::StitchPart;
 use lumora_capture::screenshot::{self, Shot, ShotOptions, ShotTarget};
 use lumora_capture::CaptureError;
 use lumora_core::filename::{render, unique_path, CaptureKind};
 use lumora_core::geometry::{Rect, Size};
 use lumora_core::selection::Target;
 use lumora_core::snap::WindowList;
+use lumora_core::stitch::{self, Source};
 use lumora_ui::events::{FrozenDisplay, OverlayMode};
 use lumora_ui::overlay::{OverlayConfig, OverlayController};
 use lumora_ui::quick_access::CardContent;
@@ -25,7 +27,9 @@ use lumora_ui::{shutter, util};
 use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGImage;
 
-use crate::app::{on_main, App, CaptureRecord, Mode};
+use lumora_core::i18n::{tr, trf, Msg};
+
+use crate::app::{on_main, App, CaptureRecord, Mode, Notice};
 use crate::system;
 
 fn background() -> dispatch2::DispatchRetained<DispatchQueue> {
@@ -113,9 +117,8 @@ impl App {
             mode,
             show_magnifier: s.capture.show_magnifier,
             show_crosshair: s.capture.show_crosshair,
-            // TODO(window-mode): a true window-only mode should also disable
-            // rubber-band selection; v0.1 forces hover picking on.
             window_picking: window_only || s.capture.window_picking,
+            window_only,
         };
         drop(s);
         let windows = WindowList::new(content.windows());
@@ -132,27 +135,19 @@ impl App {
         if mode == OverlayMode::Record {
             return self.on_record_target(&content, target);
         }
+        if mode == OverlayMode::Text {
+            self.set_mode(Mode::Idle);
+            return match frozen_image(&frozen, &target) {
+                Ok((image, _, _)) => self.recognize(image),
+                Err(e) => self.fail_with(Msg::ToastTextFailed, e),
+            };
+        }
         match target {
-            Target::Area(r) => {
+            Target::Area(_) | Target::Display(_) => {
                 self.set_mode(Mode::Idle);
-                let fd = frozen
-                    .iter()
-                    .find(|f| f.frame.contains(r.mid()))
-                    .or_else(|| frozen.iter().max_by(|a, b| overlap(a.frame, r).total_cmp(&overlap(b.frame, r))));
-                let Some(fd) = fd else { return self.fail(CaptureError::Empty) };
-                // TODO(multi-display): selections spanning displays are clipped to
-                // the display under their centre; stitch frozen frames instead.
-                let clipped = r.intersection(&fd.frame).map(|c| c.integral(fd.scale));
-                match (lumora_capture::image::crop(&fd.image, fd.frame, r), clipped) {
-                    (Ok(img), Some(frame)) => self.finish_capture(img, fd.scale, frame),
-                    (Err(e), _) => self.fail(e),
-                    _ => self.fail(CaptureError::Empty),
-                }
-            }
-            Target::Display(frame) => {
-                self.set_mode(Mode::Idle);
-                if let Some(fd) = frozen.iter().find(|f| f.frame == frame) {
-                    self.finish_capture(fd.image.clone(), fd.scale, fd.frame);
+                match frozen_image(&frozen, &target) {
+                    Ok((img, scale, frame)) => self.finish_capture(img, scale, frame),
+                    Err(e) => self.fail(e),
                 }
             }
             Target::Window(w) => {
@@ -167,6 +162,21 @@ impl App {
                 });
             }
         }
+    }
+
+    /// OCR an image and put the text on the clipboard, with a toast.
+    pub fn recognize(self: &Rc<Self>, image: CFRetained<CGImage>) {
+        lumora_capture::ocr::recognize_text(image, |res| {
+            on_main(move |app| match res {
+                Ok(text) if !text.trim().is_empty() => {
+                    lumora_capture::clipboard::copy_text(&text);
+                    let preview = lumora_core::ocr::preview(&text, 60);
+                    app.notify(Notice::Success(Msg::ToastTextCopied), Some(preview));
+                }
+                Ok(_) => app.notify(Notice::Warning(Msg::ToastNoText), Some(tr(Msg::ToastNoTextDetail).to_string())),
+                Err(e) => app.fail_with(Msg::ToastTextFailed, e),
+            })
+        });
     }
 
     pub fn capture_fullscreen(self: &Rc<Self>) {
@@ -209,7 +219,8 @@ impl App {
         }
         let point_size = Size::new(frame.width(), frame.height());
         let appkit_frame = util::flip(frame, self.mtm);
-        if s.general.show_quick_access {
+        let edit_now = s.general.open_editor_after_capture;
+        if s.general.show_quick_access && !edit_now {
             let to = self.quick.next_frame(point_size);
             shutter::play(self.mtm, &image, appkit_frame, Some(to), || {});
             self.quick.push(CardContent {
@@ -226,6 +237,9 @@ impl App {
             id,
             CaptureRecord { image: Some(image.clone()), scale, frame, file: file.clone(), temp, video: false },
         );
+        if edit_now {
+            self.open_editor(id);
+        }
 
         let copy = s.general.copy_to_clipboard;
         background().exec_async(move || {
@@ -242,24 +256,75 @@ impl App {
                     if copy {
                         lumora_capture::clipboard::copy_image(&image, scale, None);
                     }
+                    _app.notify(Notice::Error(Msg::ToastSaveFailed), Some(error_text(&e)));
                 }
             });
         });
     }
 
-    /// Reset to idle and surface an error.
+    /// Reset to idle and surface a capture error.
     pub fn fail(self: &Rc<Self>, e: CaptureError) {
-        log::error!("capture failed: {e}");
+        self.fail_with(Msg::ToastCaptureFailed, e);
+    }
+
+    /// Reset to idle and surface an error under `title` (a toast; the
+    /// onboarding panel for a missing permission).
+    pub fn fail_with(self: &Rc<Self>, title: Msg, e: CaptureError) {
+        log::error!("{}: {e}", tr(title));
         self.set_mode(Mode::Idle);
         if e == CaptureError::PermissionDenied {
             self.dispatch(crate::command::Command::ShowOnboarding);
         } else {
-            // TODO(error-toast): show a small HUD with the error instead of a beep.
-            objc2_app_kit::NSBeep();
+            self.notify(Notice::Error(title), Some(error_text(&e)));
         }
     }
 }
 
-fn overlap(a: Rect, b: Rect) -> f64 {
-    a.intersection(&b).map_or(0.0, |r| r.area())
+/// A localised one-line description of a capture error.
+pub fn error_text(e: &CaptureError) -> String {
+    match e {
+        CaptureError::PermissionDenied => tr(Msg::ErrPermission).to_string(),
+        CaptureError::TargetGone(what) => {
+            let what = if *what == "window" { tr(Msg::TargetWindow) } else { tr(Msg::TargetDisplay) };
+            trf(Msg::ErrTargetGone, &[&what])
+        }
+        CaptureError::Framework(s) => s.clone(),
+        CaptureError::Write { path, .. } => {
+            let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned());
+            trf(Msg::ErrWrite, &[&name.unwrap_or_else(|| path.clone())])
+        }
+        CaptureError::Empty => tr(Msg::ErrNothing).to_string(),
+    }
+}
+
+/// The pixels for an overlay target, cut from the frozen display frames:
+/// `(image, scale, frame in global points)`.
+fn frozen_image(frozen: &[FrozenDisplay], target: &Target) -> Result<(CFRetained<CGImage>, f64, Rect), CaptureError> {
+    let r = match target {
+        Target::Display(frame) => {
+            let fd = frozen.iter().find(|f| f.frame == *frame).ok_or(CaptureError::TargetGone("display"))?;
+            return Ok((fd.image.clone(), fd.scale, fd.frame));
+        }
+        Target::Area(r) => *r,
+        Target::Window(w) => w.frame,
+    };
+    // Selections may span displays: plan per-display pieces at the highest
+    // scale involved, and only composite when more than one is needed.
+    let sources: Vec<Source> = frozen.iter().map(|f| Source { frame: f.frame, scale: f.scale }).collect();
+    let plan = stitch::plan(r, &sources).ok_or(CaptureError::Empty)?;
+    if plan.is_single() {
+        let fd = &frozen[plan.pieces[0].source];
+        let img = lumora_capture::image::crop(&fd.image, fd.frame, plan.area)?;
+        return Ok((img, fd.scale, plan.area.integral(fd.scale)));
+    }
+    let parts: Vec<StitchPart<'_>> = plan
+        .pieces
+        .iter()
+        .map(|p| {
+            let fd = &frozen[p.source];
+            StitchPart { image: &fd.image, frame: fd.frame, area: p.area, dest: p.dest }
+        })
+        .collect();
+    let img = lumora_capture::image::stitch(plan.width, plan.height, &parts)?;
+    Ok((img, plan.scale, plan.area))
 }

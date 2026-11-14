@@ -28,6 +28,8 @@ use objc2_core_graphics::CGImage;
 use objc2_foundation::{NSArray, NSObject, NSString, NSTimer};
 use objc2_quartz_core::{kCAGravityResizeAspectFill, CALayer};
 
+use lumora_core::i18n::{tr, Msg};
+
 use crate::anim::WindowSpring;
 use crate::events::{CardAction, EventSink, UiEvent};
 use crate::tokens::{color, motion, radius, size, typography};
@@ -68,6 +70,10 @@ pub struct CardViewIvars {
     file: PathBuf,
     drag_image: Option<Retained<NSImage>>,
     on_hover: HoverHandler,
+    /// Recordings open on double-click instead of annotating.
+    video: bool,
+    /// Pending single-click "open", cancelled by a second click.
+    click_timer: RefCell<Option<Retained<NSTimer>>>,
     down_at: Cell<Option<CGPoint>>,
     dragging: Cell<bool>,
     tracking: RefCell<Option<Retained<NSTrackingArea>>>,
@@ -157,9 +163,25 @@ define_class!(
         }
 
         #[unsafe(method(mouseUp:))]
-        fn mouse_up(&self, _event: &NSEvent) {
-            if self.ivars().down_at.take().is_some() && !self.ivars().dragging.get() {
-                (self.ivars().sink)(UiEvent::Card { id: self.ivars().id, action: CardAction::Open });
+        fn mouse_up(&self, event: &NSEvent) {
+            if self.ivars().down_at.take().is_none() || self.ivars().dragging.get() {
+                return;
+            }
+            let (id, sink) = (self.ivars().id, self.ivars().sink.clone());
+            if let Some(t) = self.ivars().click_timer.borrow_mut().take() {
+                t.invalidate();
+            }
+            if event.clickCount() >= 2 {
+                // Double-click: annotate (recordings just open).
+                let action = if self.ivars().video { CardAction::Open } else { CardAction::Annotate };
+                sink(UiEvent::Card { id, action });
+            } else {
+                // Single click opens, once we know it isn't a double-click.
+                let timer = schedule_timer(NSEvent::doubleClickInterval(), false, move || {
+                    sink(UiEvent::Card { id, action: CardAction::Open });
+                    false
+                });
+                *self.ivars().click_timer.borrow_mut() = Some(timer);
             }
         }
     }
@@ -173,6 +195,7 @@ impl CardView {
         sink: EventSink,
         file: PathBuf,
         drag_image: Option<Retained<NSImage>>,
+        video: bool,
     ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(CardViewIvars {
             id,
@@ -180,6 +203,8 @@ impl CardView {
             file,
             drag_image,
             on_hover: RefCell::new(None),
+            video,
+            click_timer: RefCell::new(None),
             down_at: Cell::new(None),
             dragging: Cell::new(false),
             tracking: RefCell::new(None),
@@ -314,7 +339,15 @@ impl QuickAccess {
         let drag_image = content.image.as_ref().map(|img| {
             NSImage::initWithCGImage_size(NSImage::alloc(), img, CGSize::new(card_size.width, card_size.height))
         });
-        let view = CardView::new(mtm, local, content.id, inner.sink.clone(), content.file.clone(), drag_image);
+        let view = CardView::new(
+            mtm,
+            local,
+            content.id,
+            inner.sink.clone(),
+            content.file.clone(),
+            drag_image,
+            content.video_duration.is_some(),
+        );
         view.setWantsLayer(true);
 
         // Glass background.
@@ -503,16 +536,17 @@ fn build_buttons(
         l.setCornerRadius(radius::CARD_THUMB);
     }
     let mut actions = vec![
-        ("doc.on.doc", "Copy", CardAction::Copy),
-        ("square.and.arrow.down", "Save", CardAction::Save),
-        ("pin", "Pin to Screen", CardAction::Pin),
-        ("trash", "Delete", CardAction::Delete),
+        ("doc.on.doc", tr(Msg::Copy), CardAction::Copy),
+        ("square.and.arrow.down", tr(Msg::Save), CardAction::Save),
+        ("pencil.tip.crop.circle", tr(Msg::Annotate), CardAction::Annotate),
+        ("pin", tr(Msg::PinToScreen), CardAction::Pin),
+        ("trash", tr(Msg::Delete), CardAction::Delete),
     ];
     if is_video {
-        actions.retain(|a| a.2 != CardAction::Pin);
+        actions.retain(|a| a.2 != CardAction::Pin && a.2 != CardAction::Annotate);
     }
     let b = size::CARD_BUTTON;
-    let gap = 8.0;
+    let gap = 6.0;
     let total = actions.len() as f64 * b + (actions.len() as f64 - 1.0) * gap;
     let mut x = (frame.width() - total) / 2.0;
     let y = (frame.height() - b) / 2.0;

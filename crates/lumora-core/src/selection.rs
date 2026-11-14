@@ -40,6 +40,10 @@ pub struct Config {
     pub snap_threshold: f64,
     /// Whether hovering highlights windows and a click captures them.
     pub window_picking: bool,
+    /// Whether dragging draws a selection. `false` is window mode: a pure
+    /// click-to-pick, where drags do nothing and a click on the desktop is
+    /// ignored rather than capturing the display.
+    pub area_selection: bool,
 }
 
 impl Config {
@@ -53,7 +57,13 @@ impl Config {
             handle_radius: 8.0,
             snap_threshold: 6.0,
             window_picking: true,
+            area_selection: true,
         }
+    }
+
+    /// Window mode: click-to-pick only.
+    pub fn window_only(displays: Vec<Rect>) -> Self {
+        Config { window_picking: true, area_selection: false, ..Config::new(displays) }
     }
 }
 
@@ -259,7 +269,7 @@ impl SelectionMachine {
     }
 
     fn hover_index(&self, p: Point) -> Option<usize> {
-        if self.cfg.window_picking {
+        if self.cfg.window_picking || !self.cfg.area_selection {
             self.windows.index_at(p)
         } else {
             None
@@ -309,7 +319,16 @@ impl SelectionMachine {
         let p = self.clamp(raw);
         self.mouse = p;
         match self.phase {
-            Phase::Pressing { at, .. } => {
+            Phase::Pressing { at, window } => {
+                if !self.cfg.area_selection {
+                    // Window mode: keep highlighting what's under the pointer.
+                    let w = self.hover_index(p);
+                    if w != window {
+                        self.phase = Phase::Pressing { at, window: w };
+                        return Outcome::Redraw;
+                    }
+                    return Outcome::None;
+                }
                 if at.distance(p) <= self.cfg.click_tolerance {
                     return Outcome::None;
                 }
@@ -357,6 +376,10 @@ impl SelectionMachine {
             Phase::Pressing { at, window } => {
                 if let Some(w) = window.and_then(|i| self.windows.get(i)).cloned() {
                     return Outcome::Confirm(Target::Window(w));
+                }
+                if !self.cfg.area_selection {
+                    self.phase = Phase::Hovering { window: self.hover_index(p) };
+                    return Outcome::Redraw;
                 }
                 let display = self.cfg.displays.iter().find(|d| d.contains(at)).copied();
                 match display {
@@ -738,5 +761,46 @@ mod tests {
         assert_eq!(constrain_aspect(a, Point::new(50.0, 90.0), 2.0), Point::new(50.0, 75.0));
         assert_eq!(constrain_aspect(a, Point::new(110.0, 200.0), 1.0), Point::new(200.0, 200.0));
         assert_eq!(constrain_aspect(a, a, f64::NAN), a);
+    }
+
+    fn window_mode() -> SelectionMachine {
+        let m = machine();
+        let cfg = Config::window_only(m.config().displays.clone());
+        SelectionMachine::new(cfg, m.windows().clone())
+    }
+
+    #[test]
+    fn window_mode_never_rubber_bands() {
+        let mut m = window_mode();
+        m.handle(Input::MouseDown { at: Point::new(250.0, 250.0), clicks: 1 });
+        m.handle(Input::MouseDragged(Point::new(600.0, 600.0)));
+        assert!(m.selection().is_none());
+        assert!(!matches!(m.phase(), Phase::Dragging { .. }));
+        // Released over the desktop: nothing is captured, picking continues.
+        assert_eq!(m.handle(Input::MouseUp(Point::new(600.0, 600.0))), Outcome::Redraw);
+        assert!(matches!(m.phase(), Phase::Hovering { .. }));
+    }
+
+    #[test]
+    fn window_mode_picks_the_window_under_the_release() {
+        let mut m = window_mode();
+        m.handle(Input::MouseDown { at: Point::new(700.0, 700.0), clicks: 1 });
+        // Pressed on the desktop, released over the window: the window wins.
+        assert_eq!(m.handle(Input::MouseDragged(Point::new(300.0, 300.0))), Outcome::Redraw);
+        match m.handle(Input::MouseUp(Point::new(300.0, 300.0))) {
+            Outcome::Confirm(Target::Window(w)) => assert_eq!(w.id, 42),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn window_mode_ignores_desktop_clicks_and_still_hovers() {
+        let mut m = window_mode();
+        m.handle(Input::MouseMoved(Point::new(300.0, 300.0)));
+        assert_eq!(m.hovered_window().map(|w| w.id), Some(42));
+        m.handle(Input::MouseDown { at: Point::new(50.0, 50.0), clicks: 1 });
+        assert_eq!(m.handle(Input::MouseUp(Point::new(50.0, 50.0))), Outcome::Redraw);
+        m.handle(Input::MouseMoved(Point::new(300.0, 300.0)));
+        assert!(matches!(m.handle(Input::KeyDown(Key::Enter)), Outcome::Confirm(Target::Window(_))));
     }
 }

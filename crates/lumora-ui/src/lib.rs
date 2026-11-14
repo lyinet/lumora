@@ -20,6 +20,8 @@ pub mod anim;
 #[cfg(target_os = "macos")]
 pub mod countdown;
 #[cfg(target_os = "macos")]
+pub mod editor;
+#[cfg(target_os = "macos")]
 pub mod events;
 #[cfg(target_os = "macos")]
 pub mod icon;
@@ -37,5 +39,7 @@ pub mod recording_hud;
 pub mod settings_window;
 #[cfg(target_os = "macos")]
 pub mod shutter;
+#[cfg(target_os = "macos")]
+pub mod toast;
 #[cfg(target_os = "macos")]
 pub mod util;

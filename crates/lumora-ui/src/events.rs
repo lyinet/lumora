@@ -33,6 +33,8 @@ pub enum OverlayMode {
     Capture,
     /// Choose a region to record: live backdrop, red accent, no loupe.
     Record,
+    /// Choose a region to read text from (OCR): frozen backdrop, no loupe.
+    Text,
 }
 
 /// Buttons and gestures on a Quick Access card.
@@ -44,8 +46,36 @@ pub enum CardAction {
     Delete,
     /// Clicked the thumbnail: open in the default viewer.
     Open,
+    /// "Annotate" button or double-click: open the editor.
+    Annotate,
     /// Dropped into another app; the card dismisses itself.
     DraggedOut,
+}
+
+/// A flattened editor export.
+pub struct EditorImage {
+    pub image: CFRetained<CGImage>,
+    /// Pixels per point.
+    pub scale: f64,
+}
+
+impl std::fmt::Debug for EditorImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (w, h) = (CGImage::width(Some(&self.image)), CGImage::height(Some(&self.image)));
+        write!(f, "EditorImage({w}×{h} @{}x)", self.scale)
+    }
+}
+
+/// What the annotation editor tells the app.
+#[derive(Debug)]
+pub enum EditorAction {
+    /// ⌘C: the flattened image is already on the clipboard.
+    Copied(EditorImage),
+    /// ⌘S: write this over the capture's file.
+    Save(EditorImage),
+    /// The window closed. Carries the flattened image if there were
+    /// unsaved edits (so the card thumbnail can follow).
+    Closed(Option<EditorImage>),
 }
 
 /// Onboarding panel buttons.
@@ -74,6 +104,10 @@ pub enum UiEvent {
     /// The card timed out or was swiped away; the app may drop its data.
     CardDismissed(u64),
     PinClosed(u64),
+    Editor {
+        id: u64,
+        action: EditorAction,
+    },
     CountdownFinished,
     CountdownCancelled,
     StopRecording,

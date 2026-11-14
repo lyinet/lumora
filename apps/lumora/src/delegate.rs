@@ -57,6 +57,11 @@ define_class!(
             post_command(Command::CaptureWindow);
         }
 
+        #[unsafe(method(captureText:))]
+        fn capture_text(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::CaptureText);
+        }
+
         #[unsafe(method(toggleRecording:))]
         fn toggle_recording(&self, _sender: Option<&AnyObject>) {
             post_command(Command::ToggleRecording);

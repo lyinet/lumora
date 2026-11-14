@@ -13,6 +13,7 @@ use thiserror::Error;
 
 use crate::action::Action;
 use crate::hotkey::Hotkey;
+use crate::i18n::LanguagePref;
 
 /// Errors from loading or saving settings.
 #[derive(Debug, Error)]
@@ -44,10 +45,14 @@ pub struct General {
     pub copy_to_clipboard: bool,
     pub save_to_disk: bool,
     pub show_quick_access: bool,
+    /// Open the annotation editor right after every screenshot.
+    pub open_editor_after_capture: bool,
     /// Seconds before an un-hovered Quick Access card dismisses itself.
     pub quick_access_timeout: f64,
     pub play_sounds: bool,
     pub launch_at_login: bool,
+    /// UI language; `system` follows macOS's preferred languages.
+    pub language: LanguagePref,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -56,6 +61,7 @@ pub struct Shortcuts {
     pub capture_area: Option<Hotkey>,
     pub capture_fullscreen: Option<Hotkey>,
     pub capture_window: Option<Hotkey>,
+    pub capture_text: Option<Hotkey>,
     pub record_screen: Option<Hotkey>,
     pub open_folder: Option<Hotkey>,
 }
@@ -103,9 +109,11 @@ impl Default for General {
             copy_to_clipboard: true,
             save_to_disk: true,
             show_quick_access: true,
+            open_editor_after_capture: false,
             quick_access_timeout: 6.0,
             play_sounds: true,
             launch_at_login: false,
+            language: LanguagePref::System,
         }
     }
 }
@@ -117,6 +125,7 @@ impl Default for Shortcuts {
             capture_area: d(Action::CaptureArea),
             capture_fullscreen: d(Action::CaptureFullscreen),
             capture_window: d(Action::CaptureWindow),
+            capture_text: d(Action::CaptureText),
             record_screen: d(Action::RecordScreen),
             open_folder: d(Action::OpenFolder),
         }
@@ -129,6 +138,7 @@ impl Shortcuts {
             Action::CaptureArea => self.capture_area,
             Action::CaptureFullscreen => self.capture_fullscreen,
             Action::CaptureWindow => self.capture_window,
+            Action::CaptureText => self.capture_text,
             Action::RecordScreen => self.record_screen,
             Action::OpenFolder => self.open_folder,
         }
@@ -139,6 +149,7 @@ impl Shortcuts {
             Action::CaptureArea => &mut self.capture_area,
             Action::CaptureFullscreen => &mut self.capture_fullscreen,
             Action::CaptureWindow => &mut self.capture_window,
+            Action::CaptureText => &mut self.capture_text,
             Action::RecordScreen => &mut self.record_screen,
             Action::OpenFolder => &mut self.open_folder,
         };
@@ -321,10 +332,10 @@ mod tests {
     #[test]
     fn shortcuts_accessors() {
         let mut s = Shortcuts::default();
-        assert_eq!(s.bound().len(), 5);
+        assert_eq!(s.bound().len(), 6);
         s.set(Action::OpenFolder, None);
         assert_eq!(s.get(Action::OpenFolder), None);
-        assert_eq!(s.bound().len(), 4);
+        assert_eq!(s.bound().len(), 5);
     }
 
     #[test]
@@ -342,6 +353,18 @@ mod tests {
         assert_eq!(Settings::load_or_default(&path), Settings::default());
         assert!(path.with_extension("toml.bak").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn v01_files_gain_v02_defaults() {
+        // A v0.1 settings file has no capture_text, editor or language keys.
+        let s = Settings::from_toml("[general]\nplay_sounds = false\n[shortcuts]\ncapture_area = \"⌥⇧4\"\n").unwrap();
+        assert_eq!(s.shortcuts.capture_text, "⌥⇧2".parse().ok());
+        assert!(!s.general.open_editor_after_capture);
+        assert_eq!(s.general.language, LanguagePref::System);
+        let t = Settings::default().to_toml().unwrap();
+        assert!(t.contains("language = \"system\""));
+        assert!(t.contains("capture_text = \"⌥⇧2\""));
     }
 
     #[test]

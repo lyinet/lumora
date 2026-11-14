@@ -33,6 +33,24 @@ this document mirrors them. Change both together.
 
 Record mode swaps `ACCENT` for `RECORD` in the overlay.
 
+Editor and HUD additions:
+
+| Token | Value | Use |
+|---|---|---|
+| `EDITOR_BACKDROP` | `rgb(28,28,31)` | Canvas behind the image |
+| `TOOL_ACTIVE` | accent @ 90 % | Active-tool pill |
+| `CROP_DIM` | black @ 50 % | Outside a pending crop |
+| `SUCCESS` / `WARNING` / `ERROR` | `#30D158` / `#FFD60A` / `#FF453A` | Toast glyphs, invalid shortcut outline |
+
+Annotation palette (`annotate::style::PALETTE`): red `#FF3B30`, yellow
+`#FFCC00`, green `#34C759`, blue `#0A84FF`, ink `#1C1C1E`, white — plus a
+custom colour from `NSColorPanel`. Stroke widths thin / medium / thick =
+2 / 4 / 8 pt (highlighter 12 / 20 / 32, text 15 / 22 / 34, step badges
+24 / 32 / 44). Ink gets a soft shadow (black 30 %, 3 pt blur, 1 pt down);
+badge and text-pill labels are white unless the fill's luminance > 0.5.
+Arrows are one filled, tapered outline (shaft 40 % → 100 % of the width,
+swallowtail head ≈ 3.6 w + 9 long).
+
 ## Shape
 
 | Token | Radius (pt) |
@@ -45,11 +63,17 @@ Record mode swaps `ACCENT` for `RECORD` in the overlay.
 | Countdown tile | 40 |
 | Pin | 8 |
 | Button | 8 (card glyph buttons: circular, 30 pt) |
+| Editor tool pill | 7 |
+| Editor image | 6 |
+| Toast | height / 2 (max 22) |
 
 Sizes: card width 232, height 96–196 by aspect, margin 18, spacing 12, inset
 6; handles 9 pt circles (8 pt hit radius); pill height 24, padding 10, gap 10;
 loupe 15 × 15 px at 8 pt per pixel (120 pt) + 22 pt label; countdown 168 pt
-tile with a 112 pt, 5 pt-wide ring; stop control 132 × 40.
+tile with a 112 pt, 5 pt-wide ring; stop control 132 × 40; editor toolbar
+52 pt tall (30 pt glyph buttons, 18 pt swatches), canvas margin 28, editor
+minimum 760 × 420; toast 44 pt (58 with detail), 180–420 wide, 64 pt below
+the menu bar.
 
 ## Typography
 
@@ -79,6 +103,12 @@ the solver in `lumora-core`; unit tests enforce the bounds.)
 | `REFLOW` (`SMOOTH`) | 220 | 30 | 1.01 | 0.64 s | 0 % | Stack reflow, card slide-out |
 | `FLY` | 260 | 24 | 0.74 | 0.54 s | 3.0 % | Shutter capture → card |
 | `POP` (`BOUNCY`) | 260 | 14 | 0.43 | 1.0 s | 22 % | Countdown digits, handles appearing, pin drop |
+| `INSERT` | 380 | 24 | 0.62 | ≈0.6 s | 8.6 % | New annotation settling in (scale 0.85 → 1) |
+| `TOOL` (`SNAPPY`) | 420 | 30 | 0.73 | 0.48 s | 3.4 % | Active-tool pill sliding |
+| `TOAST` | 320 | 24 | 0.67 | ≈0.55 s | 5.8 % | Toast drop-in (12 pt) |
+
+(Settling times for INSERT/TOAST are approximate; unit tests bound them
+below 1.2 s and overshoot below 10 %.) Toasts stay 2.2 s (success) or 4 s (warning / error).
 
 Durations (ease-out): overlay dim fade-in **120 ms**, overlay fade-out 100 ms,
 shutter flash 180 ms (0 → 0.9 → 0 at 25 %), hover reveal 150 ms, marching
@@ -102,8 +132,18 @@ ants period 600 ms (dash 6 / gap 4). Frame-driven animations tick at 120 Hz.
 
 ## Iconography
 
+**App icon** (`scripts/make_icon.py` → `packaging/icon/AppIcon.svg`,
+`packaging/AppIcon.icns`): a superellipse (n = 5) body filled with an
+indigo `#5E5CE6` → `#7B5CF0` → violet `#BF5AF2` diagonal gradient, a soft
+central glow and top sheen, the mark's four white viewfinder brackets, and
+a pale lens with six indigo→violet aperture blades and a specular dot.
+Edit the script, not the SVG.
+
 The mark — four viewfinder brackets around a lens dot — is drawn in code
 (`lumora_ui::icon`) at any size: a template image in the menu bar, a red dot
 while recording, and a colour version on onboarding. Card actions use SF
-Symbols: `doc.on.doc`, `square.and.arrow.down`, `pin`, `trash`; recording uses
-`stop.fill`.
+Symbols: `doc.on.doc`, `square.and.arrow.down`, `pencil.tip.crop.circle`,
+`pin`, `trash`; recording uses `stop.fill`. Editor tools: `cursorarrow`,
+`arrow.up.right`, `rectangle`, `circle`, `line.diagonal`, `scribble`,
+`highlighter`, `textformat`, `1.circle`, `square.grid.3x3.middle.filled`,
+`light.max`, `crop`.

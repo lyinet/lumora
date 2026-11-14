@@ -13,6 +13,8 @@ mod command;
 #[cfg(target_os = "macos")]
 mod delegate;
 #[cfg(target_os = "macos")]
+mod editor_flow;
+#[cfg(target_os = "macos")]
 mod hotkeys;
 mod logger;
 #[cfg(target_os = "macos")]
