@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  core-linux:
+    name: Core tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test platform-independent crates
+        run: cargo test --locked -p lumora-core -p lumora-ui -p lumora-capture
+
+  macos:
+    name: macOS (fmt, clippy, test, universal .app)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+      - name: clippy (arm64)
+        run: cargo clippy --locked --workspace --all-targets --target aarch64-apple-darwin -- -D warnings
+      - name: clippy (x86_64)
+        run: cargo clippy --locked --workspace --all-targets --target x86_64-apple-darwin -- -D warnings
+      - name: test
+        run: cargo test --locked --workspace
+      - name: Install create-dmg
+        run: brew install create-dmg
+      - name: Build universal app + DMG (ad-hoc signed)
+        env:
+          SIGN_IDENTITY: "-"
+        run: scripts/bundle.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lumora-dmg
+          path: dist/*.dmg
+          if-no-files-found: error

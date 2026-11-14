@@ -1,0 +1,32 @@
+[package]
+name = "lumora-capture"
+description = "ScreenCaptureKit + AVFoundation wrappers: shareable content, screenshots, stream recording."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+lumora-core.workspace = true
+log.workspace = true
+objc2.workspace = true
+block2.workspace = true
+dispatch2.workspace = true
+objc2-foundation.workspace = true
+objc2-app-kit.workspace = true
+objc2-core-foundation.workspace = true
+objc2-core-graphics.workspace = true
+objc2-screen-capture-kit.workspace = true
+objc2-av-foundation.workspace = true
+objc2-core-media.workspace = true
+objc2-core-video.workspace = true
+objc2-image-io.workspace = true
+objc2-uniform-type-identifiers.workspace = true
+
+[lints]
+workspace = true

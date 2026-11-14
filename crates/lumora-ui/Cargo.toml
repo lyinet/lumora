@@ -1,0 +1,27 @@
+[package]
+name = "lumora-ui"
+description = "Native AppKit + Core Animation UI for Lumora: overlay, HUDs, Quick Access, pins, settings."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+lumora-core.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+lumora-capture.workspace = true
+objc2.workspace = true
+block2.workspace = true
+dispatch2.workspace = true
+objc2-foundation.workspace = true
+objc2-app-kit.workspace = true
+objc2-quartz-core.workspace = true
+objc2-core-foundation.workspace = true
+objc2-core-graphics.workspace = true
+objc2-uniform-type-identifiers.workspace = true
+
+[lints]
+workspace = true

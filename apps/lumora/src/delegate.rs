@@ -1,0 +1,93 @@
+//! `NSApplicationDelegate` and menu action receiver.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use objc2::rc::Retained;
+use objc2::runtime::{AnyObject, NSObjectProtocol};
+use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2_app_kit::NSApplicationDelegate;
+use objc2_foundation::{NSNotification, NSObject};
+
+use crate::app::{post_command, App};
+use crate::command::Command;
+
+pub struct DelegateIvars {
+    app: RefCell<Option<Rc<App>>>,
+}
+
+define_class!(
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "LumoraAppDelegate"]
+    #[ivars = DelegateIvars]
+    pub struct AppDelegate;
+
+    unsafe impl NSObjectProtocol for AppDelegate {}
+
+    unsafe impl NSApplicationDelegate for AppDelegate {
+        #[unsafe(method(applicationDidFinishLaunching:))]
+        fn did_finish_launching(&self, _notification: &NSNotification) {
+            let app = App::start(self.mtm(), self);
+            *self.ivars().app.borrow_mut() = Some(app);
+        }
+
+        #[unsafe(method(applicationWillTerminate:))]
+        fn will_terminate(&self, _notification: &NSNotification) {
+            if let Some(app) = self.ivars().app.borrow_mut().take() {
+                app.shutdown();
+            }
+        }
+    }
+
+    // Menu actions. Each forwards to the central dispatcher.
+    impl AppDelegate {
+        #[unsafe(method(captureArea:))]
+        fn capture_area(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::CaptureArea);
+        }
+
+        #[unsafe(method(captureFullscreen:))]
+        fn capture_fullscreen(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::CaptureFullscreen);
+        }
+
+        #[unsafe(method(captureWindow:))]
+        fn capture_window(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::CaptureWindow);
+        }
+
+        #[unsafe(method(toggleRecording:))]
+        fn toggle_recording(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::ToggleRecording);
+        }
+
+        #[unsafe(method(openFolder:))]
+        fn open_folder(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::OpenFolder);
+        }
+
+        #[unsafe(method(showSettings:))]
+        fn show_settings(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::ShowSettings);
+        }
+
+        #[unsafe(method(showOnboarding:))]
+        fn show_onboarding(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::ShowOnboarding);
+        }
+
+        #[unsafe(method(quit:))]
+        fn quit(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::Quit);
+        }
+    }
+);
+
+impl AppDelegate {
+    pub fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(DelegateIvars { app: RefCell::new(None) });
+        // SAFETY: NSObject's designated initialiser.
+        unsafe { msg_send![super(this), init] }
+    }
+}

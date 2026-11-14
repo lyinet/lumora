@@ -1,0 +1,265 @@
+//! Screenshot flows: area / window (via the overlay) and fullscreen.
+//!
+//! Area capture freezes every display first (one `SCScreenshotManager` grab
+//! per display, in parallel), shows the overlay over those frozen frames,
+//! and crops the final image from the frozen frame — so what you select is
+//! exactly what you get, even for video or animations. Window capture uses
+//! a desktop-independent window filter instead, which captures the window
+//! cleanly (with its shadow) even if it is partially covered.
+
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+
+use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
+use lumora_capture::content::ShareableContent;
+use lumora_capture::screenshot::{self, Shot, ShotOptions, ShotTarget};
+use lumora_capture::CaptureError;
+use lumora_core::filename::{render, unique_path, CaptureKind};
+use lumora_core::geometry::{Rect, Size};
+use lumora_core::selection::Target;
+use lumora_core::snap::WindowList;
+use lumora_ui::events::{FrozenDisplay, OverlayMode};
+use lumora_ui::overlay::{OverlayConfig, OverlayController};
+use lumora_ui::quick_access::CardContent;
+use lumora_ui::{shutter, util};
+use objc2_core_foundation::CFRetained;
+use objc2_core_graphics::CGImage;
+
+use crate::app::{on_main, App, CaptureRecord, Mode};
+use crate::system;
+
+fn background() -> dispatch2::DispatchRetained<DispatchQueue> {
+    DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated))
+}
+
+impl App {
+    fn shot_options(&self) -> ShotOptions {
+        let s = self.settings.borrow();
+        ShotOptions { show_cursor: false, retina: s.capture.retina, window_shadow: s.capture.window_shadow }
+    }
+
+    /// Start an overlay session (capture or record).
+    pub fn begin_selection(self: &Rc<Self>, mode: OverlayMode, window_only: bool) {
+        if !self.mode.borrow().is_idle() || !self.require_permission() {
+            return;
+        }
+        self.set_mode(Mode::Preparing);
+        ShareableContent::fetch(move |res| on_main(move |app| app.on_content_for_selection(res, mode, window_only)));
+    }
+
+    fn on_content_for_selection(
+        self: &Rc<Self>,
+        res: Result<ShareableContent, CaptureError>,
+        mode: OverlayMode,
+        window_only: bool,
+    ) {
+        let content = match res {
+            Ok(c) => Arc::new(c),
+            Err(e) => return self.fail(e),
+        };
+        if mode == OverlayMode::Record {
+            return self.open_overlay(mode, window_only, content, Vec::new());
+        }
+        // Freeze every display in parallel; open the overlay when all land.
+        let displays = content.displays();
+        if displays.is_empty() {
+            return self.fail(CaptureError::TargetGone("display"));
+        }
+        type Slot = (Vec<Option<(u32, Shot)>>, usize, Option<CaptureError>);
+        let pending: Arc<Mutex<Slot>> =
+            Arc::new(Mutex::new(((0..displays.len()).map(|_| None).collect(), displays.len(), None)));
+        let opts = ShotOptions { window_shadow: false, ..self.shot_options() };
+        for (i, d) in displays.iter().enumerate() {
+            let pending = pending.clone();
+            let content_for_done = content.clone();
+            let id = d.id;
+            screenshot::capture(&content, ShotTarget::Display(id), opts, move |res| {
+                let Ok(mut slot) = pending.lock() else { return };
+                match res {
+                    Ok(shot) => slot.0[i] = Some((id, shot)),
+                    Err(e) => slot.2 = Some(e),
+                }
+                slot.1 -= 1;
+                if slot.1 == 0 {
+                    let shots: Vec<(u32, Shot)> = slot.0.drain(..).flatten().collect();
+                    let err = slot.2.take();
+                    on_main(move |app| match (shots.is_empty(), err) {
+                        (true, Some(e)) => app.fail(e),
+                        _ => app.open_overlay(mode, window_only, content_for_done, shots),
+                    });
+                }
+            });
+        }
+    }
+
+    fn open_overlay(
+        self: &Rc<Self>,
+        mode: OverlayMode,
+        window_only: bool,
+        content: Arc<ShareableContent>,
+        shots: Vec<(u32, Shot)>,
+    ) {
+        if !matches!(*self.mode.borrow(), Mode::Preparing) {
+            return; // cancelled meanwhile
+        }
+        let frozen: Rc<Vec<FrozenDisplay>> = Rc::new(
+            shots
+                .into_iter()
+                .map(|(id, s)| FrozenDisplay { id, frame: s.frame, scale: s.scale, image: s.image })
+                .collect(),
+        );
+        let s = self.settings.borrow();
+        let config = OverlayConfig {
+            mode,
+            show_magnifier: s.capture.show_magnifier,
+            show_crosshair: s.capture.show_crosshair,
+            // TODO(window-mode): a true window-only mode should also disable
+            // rubber-band selection; v0.1 forces hover picking on.
+            window_picking: window_only || s.capture.window_picking,
+        };
+        drop(s);
+        let windows = WindowList::new(content.windows());
+        let overlay = OverlayController::show(self.mtm, config, frozen.clone(), windows, self.sink.clone());
+        self.set_mode(Mode::Selecting { overlay, content, frozen });
+    }
+
+    pub fn on_overlay_confirmed(self: &Rc<Self>, mode: OverlayMode, target: Target) {
+        if !matches!(*self.mode.borrow(), Mode::Selecting { .. }) {
+            return;
+        }
+        let Mode::Selecting { overlay, content, frozen } = self.mode.replace(Mode::Preparing) else { return };
+        drop(overlay);
+        if mode == OverlayMode::Record {
+            return self.on_record_target(&content, target);
+        }
+        match target {
+            Target::Area(r) => {
+                self.set_mode(Mode::Idle);
+                let fd = frozen
+                    .iter()
+                    .find(|f| f.frame.contains(r.mid()))
+                    .or_else(|| frozen.iter().max_by(|a, b| overlap(a.frame, r).total_cmp(&overlap(b.frame, r))));
+                let Some(fd) = fd else { return self.fail(CaptureError::Empty) };
+                // TODO(multi-display): selections spanning displays are clipped to
+                // the display under their centre; stitch frozen frames instead.
+                let clipped = r.intersection(&fd.frame).map(|c| c.integral(fd.scale));
+                match (lumora_capture::image::crop(&fd.image, fd.frame, r), clipped) {
+                    (Ok(img), Some(frame)) => self.finish_capture(img, fd.scale, frame),
+                    (Err(e), _) => self.fail(e),
+                    _ => self.fail(CaptureError::Empty),
+                }
+            }
+            Target::Display(frame) => {
+                self.set_mode(Mode::Idle);
+                if let Some(fd) = frozen.iter().find(|f| f.frame == frame) {
+                    self.finish_capture(fd.image.clone(), fd.scale, fd.frame);
+                }
+            }
+            Target::Window(w) => {
+                screenshot::capture(&content, ShotTarget::Window(w.id), self.shot_options(), move |res| {
+                    on_main(move |app| {
+                        app.set_mode(Mode::Idle);
+                        match res {
+                            Ok(shot) => app.finish_capture(shot.image, shot.scale, shot.frame),
+                            Err(e) => app.fail(e),
+                        }
+                    })
+                });
+            }
+        }
+    }
+
+    pub fn capture_fullscreen(self: &Rc<Self>) {
+        if !self.mode.borrow().is_idle() || !self.require_permission() {
+            return;
+        }
+        self.set_mode(Mode::Preparing);
+        let display_id = util::screen_under_mouse(self.mtm).map(|s| util::screen_id(&s)).unwrap_or(0);
+        let opts = self.shot_options();
+        ShareableContent::fetch(move |res| match res {
+            Ok(content) => {
+                let id =
+                    if display_id == 0 { content.displays().first().map(|d| d.id).unwrap_or(0) } else { display_id };
+                screenshot::capture(&content, ShotTarget::Display(id), opts, move |res| {
+                    on_main(move |app| {
+                        app.set_mode(Mode::Idle);
+                        match res {
+                            Ok(shot) => app.finish_capture(shot.image, shot.scale, shot.frame),
+                            Err(e) => app.fail(e),
+                        }
+                    })
+                });
+            }
+            Err(e) => on_main(move |app| app.fail(e)),
+        });
+    }
+
+    /// Common tail of every screenshot: name, shutter, Quick Access card,
+    /// background PNG encode, then clipboard.
+    pub fn finish_capture(self: &Rc<Self>, image: CFRetained<CGImage>, scale: f64, frame: Rect) {
+        let id = self.next_id();
+        let s = self.settings.borrow().clone();
+        let stem = render(&s.general.filename_template, &system::now_parts(), CaptureKind::Screenshot);
+        let (dir, temp) =
+            if s.general.save_to_disk { (s.save_folder(&self.home), false) } else { (system::temp_dir(), true) };
+        let file = unique_path(&dir, &stem, CaptureKind::Screenshot.extension(), |p| p.exists());
+
+        if s.general.play_sounds {
+            system::play_shutter();
+        }
+        let point_size = Size::new(frame.width(), frame.height());
+        let appkit_frame = util::flip(frame, self.mtm);
+        if s.general.show_quick_access {
+            let to = self.quick.next_frame(point_size);
+            shutter::play(self.mtm, &image, appkit_frame, Some(to), || {});
+            self.quick.push(CardContent {
+                id,
+                image: Some(image.clone()),
+                point_size,
+                file: file.clone(),
+                video_duration: None,
+            });
+        } else {
+            shutter::play(self.mtm, &image, appkit_frame, None, || {});
+        }
+        self.captures.borrow_mut().insert(
+            id,
+            CaptureRecord { image: Some(image.clone()), scale, frame, file: file.clone(), temp, video: false },
+        );
+
+        let copy = s.general.copy_to_clipboard;
+        background().exec_async(move || {
+            let result = lumora_capture::image::write_png(&image, &file, scale);
+            on_main(move |_app| match result {
+                Ok(()) => {
+                    log::info!("saved {}", file.display());
+                    if copy {
+                        lumora_capture::clipboard::copy_image(&image, scale, Some(&file));
+                    }
+                }
+                Err(e) => {
+                    log::error!("{e}");
+                    if copy {
+                        lumora_capture::clipboard::copy_image(&image, scale, None);
+                    }
+                }
+            });
+        });
+    }
+
+    /// Reset to idle and surface an error.
+    pub fn fail(self: &Rc<Self>, e: CaptureError) {
+        log::error!("capture failed: {e}");
+        self.set_mode(Mode::Idle);
+        if e == CaptureError::PermissionDenied {
+            self.dispatch(crate::command::Command::ShowOnboarding);
+        } else {
+            // TODO(error-toast): show a small HUD with the error instead of a beep.
+            objc2_app_kit::NSBeep();
+        }
+    }
+}
+
+fn overlap(a: Rect, b: Rect) -> f64 {
+    a.intersection(&b).map_or(0.0, |r| r.area())
+}
