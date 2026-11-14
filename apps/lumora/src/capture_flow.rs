@@ -12,12 +12,14 @@ use std::sync::{Arc, Mutex};
 
 use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
 use lumora_capture::content::ShareableContent;
+use lumora_capture::image::StitchPart;
 use lumora_capture::screenshot::{self, Shot, ShotOptions, ShotTarget};
 use lumora_capture::CaptureError;
 use lumora_core::filename::{render, unique_path, CaptureKind};
 use lumora_core::geometry::{Rect, Size};
 use lumora_core::selection::Target;
 use lumora_core::snap::WindowList;
+use lumora_core::stitch::{self, Source};
 use lumora_ui::events::{FrozenDisplay, OverlayMode};
 use lumora_ui::overlay::{OverlayConfig, OverlayController};
 use lumora_ui::quick_access::CardContent;
@@ -306,18 +308,23 @@ fn frozen_image(frozen: &[FrozenDisplay], target: &Target) -> Result<(CFRetained
         Target::Area(r) => *r,
         Target::Window(w) => w.frame,
     };
-    let fd = frozen
+    // Selections may span displays: plan per-display pieces at the highest
+    // scale involved, and only composite when more than one is needed.
+    let sources: Vec<Source> = frozen.iter().map(|f| Source { frame: f.frame, scale: f.scale }).collect();
+    let plan = stitch::plan(r, &sources).ok_or(CaptureError::Empty)?;
+    if plan.is_single() {
+        let fd = &frozen[plan.pieces[0].source];
+        let img = lumora_capture::image::crop(&fd.image, fd.frame, plan.area)?;
+        return Ok((img, fd.scale, plan.area.integral(fd.scale)));
+    }
+    let parts: Vec<StitchPart<'_>> = plan
+        .pieces
         .iter()
-        .find(|f| f.frame.contains(r.mid()))
-        .or_else(|| frozen.iter().max_by(|a, b| overlap(a.frame, r).total_cmp(&overlap(b.frame, r))))
-        .ok_or(CaptureError::Empty)?;
-    // TODO(multi-display): selections spanning displays are clipped to
-    // the display under their centre; stitch frozen frames instead.
-    let clipped = r.intersection(&fd.frame).map(|c| c.integral(fd.scale)).ok_or(CaptureError::Empty)?;
-    let img = lumora_capture::image::crop(&fd.image, fd.frame, r)?;
-    Ok((img, fd.scale, clipped))
-}
-
-fn overlap(a: Rect, b: Rect) -> f64 {
-    a.intersection(&b).map_or(0.0, |r| r.area())
+        .map(|p| {
+            let fd = &frozen[p.source];
+            StitchPart { image: &fd.image, frame: fd.frame, area: p.area, dest: p.dest }
+        })
+        .collect();
+    let img = lumora_capture::image::stitch(plan.width, plan.height, &parts)?;
+    Ok((img, plan.scale, plan.area))
 }

@@ -40,6 +40,9 @@ impl App {
 
     /// Resolve the overlay's choice into a display + optional area.
     pub fn on_record_target(self: &Rc<Self>, content: &ShareableContent, target: Target) {
+        // TODO(multi-display-recording): one SCStream records one display, so
+        // an area spanning displays is clipped to the display it mostly
+        // covers (screenshots stitch; recordings would need two streams).
         let resolved = match target {
             Target::Area(r) => content
                 .display_for_rect(r)
