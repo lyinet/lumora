@@ -1,62 +1,127 @@
-# Lumora
+<p align="center">
+  <img src="assets/readme/logo.svg" width="112" height="112" alt="Lumora app icon">
+</p>
 
-**Screenshots and screen recordings that feel like they shipped with macOS.**
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/readme/hero-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="assets/readme/hero-light.svg">
+    <img src="assets/readme/hero-light.svg" width="100%" alt="Lumora — Capture, beautifully. A macOS desktop with Lumora's area-selection overlay: dimmed backdrop, crisp cutout, size pill, pixel loupe and Quick Access cards.">
+  </picture>
+</p>
 
-Lumora is a menu-bar app for macOS 14+ that captures an area, a window or the
-whole screen, records video with system audio, and hands you the result in a
-floating Quick Access card — with fluid, spring-based motion everywhere. It's
-written in Rust on top of native AppKit, Core Animation and ScreenCaptureKit:
-no web views, no Electron, a few MB on disk, instant to launch.
+<p align="center">
+  <b>Screenshots and screen recordings that feel like they shipped with macOS.</b><br>
+  A native menu-bar app written in Rust on AppKit, Core Animation and ScreenCaptureKit.
+</p>
 
-> Status: **v0.1, pre-release.** Everything type-checks for Apple Silicon and
-> Intel, and the platform-independent core is unit-tested, but v0.1 has not
-> been run on real hardware yet. See [STATUS.md](STATUS.md).
+<p align="center">
+  <a href="https://github.com/OWNER/lumora/actions/workflows/ci.yml"><img src="https://github.com/OWNER/lumora/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-0A84FF?style=flat-square" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/macOS-14%2B-111111?style=flat-square&logo=apple&logoColor=white" alt="Platform: macOS 14+">
+  <img src="https://img.shields.io/badge/Rust-1.80%2B-DEA584?style=flat-square&logo=rust&logoColor=white" alt="Rust 1.80+">
+  <img src="https://img.shields.io/badge/status-early%20alpha-FF9F0A?style=flat-square" alt="Status: early alpha">
+</p>
 
-## Highlights
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#keyboard-shortcuts">Shortcuts</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#roadmap">Roadmap</a> ·
+  <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-- **Area capture on a frozen frame** — the screen holds still while you
-  select, so video and animations can't change what you get. A dimmed
-  backdrop with a crisp cutout, crosshair guides, a live `W × H` pill, and a
-  pixel loupe with the hex colour under the cursor (press **C** to copy it).
-- **Window snapping** — hover to highlight the frontmost window, click to
-  capture it cleanly (with its shadow, even if something covers it). While
-  dragging, edges stick to nearby window and display edges (hold ⌥ to
-  disable).
-- **Keyboard precision** — Space to move the selection while dragging, ⇧ to
-  lock the aspect ratio, arrows to nudge 1 pt (⇧ = 10 pt, ⌥ = resize), Enter
-  or double-click to confirm, Esc to cancel.
-- **Retina-correct output** — PNGs at native pixel density with DPI metadata
-  so they display at the right size everywhere, named
-  `Lumora 2026-11-15 at 04.30.12.png`, copied to the clipboard.
-- **Quick Access** — a glass card slides in bottom-left on a spring. Hover for
-  Copy / Save / Pin / Delete, drag it straight into Slack, Mail or Finder.
-  Stacks up to three, auto-hides after 6 s unless you're hovering.
-- **Pin to screen** — float any capture above your windows; scroll to zoom,
-  ⌥-scroll to fade, double-click or Esc to close.
-- **Screen recording** — area or full screen to H.264 or HEVC MP4 at 30/60
-  fps, cursor on/off, system audio, microphone (macOS 15+), a 3-2-1 countdown
-  ring, a red timer in the menu bar, a floating stop button, and a
-  marching-ants border that never appears in the video.
+<br>
 
-## Default shortcuts
+> [!NOTE]
+> **Lumora is in early alpha (v0.1).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested — but it **has not been run on real hardware yet**, so expect rough edges. Hardware bring-up is the next milestone. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
 
-| Action | Shortcut |
+## Features
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="assets/readme/feature-area.svg" width="100%" alt="Area capture: the hovered window is highlighted in blue and can be captured with one click">
+      <h3>Area capture, window snapping</h3>
+      <p>The screen freezes while you select, so video can't change what you get. Dimmed backdrop, crisp cutout, live <code>W × H</code> pill and a pixel loupe with the hex colour under the cursor. Hover to highlight a window and click to capture it cleanly — with its shadow, even if something covers it. Edges stick to nearby windows and displays as you drag.</p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="assets/readme/feature-quick-access.svg" width="100%" alt="Quick Access: a stack of glass cards bottom-left, one being dragged into a chat window">
+      <h3>Quick Access</h3>
+      <p>Every capture lands in a glass card that slides in bottom-left on a spring. Hover for Copy, Save, Pin and Delete, or drag the card straight into Slack, Mail or Finder. Cards stack up to three, reflow smoothly and auto-hide after 6&nbsp;s unless you're hovering.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <img src="assets/readme/feature-pin.svg" width="100%" alt="Pin to screen: a capture floating above an editor window with a zoom label">
+      <h3>Pin to screen</h3>
+      <p>Float any capture above your windows as a reference. Scroll to zoom, <kbd>⌥</kbd>-scroll to fade, drag to move, double-click or <kbd>Esc</kbd> to close.</p>
+    </td>
+    <td width="50%" valign="top">
+      <img src="assets/readme/feature-recording.svg" width="100%" alt="Screen recording: a red marching-ants border, a 3-2-1 countdown ring and a red timer in the menu bar">
+      <h3>Screen recording</h3>
+      <p>Record an area or the full screen to H.264 or HEVC MP4 at 30 or 60 fps, with cursor on or off, system audio and microphone (macOS 15+). A 3-2-1 countdown ring, a red timer in the menu bar, a floating stop button, and a marching-ants border that never appears in the video.</p>
+    </td>
+  </tr>
+</table>
+
+**And the details that make it feel right:**
+
+- **Retina-correct output** — PNGs at native pixel density with DPI metadata, so they display at the right size everywhere. Named like `Lumora 2026-11-15 at 04.30.12.png` and copied to the clipboard.
+- **Keyboard precision** — move, aspect-lock and nudge a selection to the point without touching the mouse (see below).
+- **Motion with physics** — every appear, snap, nudge and reflow is a damped spring that keeps its velocity when interrupted. Direct manipulation is never animated, so the selection never lags your pointer.
+- **Shutter, then fly** — a flash over the region, then the capture shrinks onto its card while the card slides in.
+
+## Keyboard shortcuts
+
+Option-Shift avoids clashing with macOS's own <kbd>⇧</kbd><kbd>⌘</kbd><kbd>3</kbd>/<kbd>4</kbd>/<kbd>5</kbd>. Rebind everything in **Settings → Shortcuts**.
+
+| Global | Shortcut |
 |---|---|
-| Capture Area | ⌥⇧4 |
-| Capture Fullscreen | ⌥⇧3 |
-| Capture Window | ⌥⇧5 |
-| Record Screen (start/stop) | ⌥⇧R |
-| Open Captures Folder | ⌥⇧O |
+| Capture area | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>4</kbd> |
+| Capture fullscreen | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>3</kbd> |
+| Capture window | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>5</kbd> |
+| Record screen (start / stop) | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>R</kbd> |
+| Open captures folder | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>O</kbd> |
 
-Option-Shift avoids clashing with macOS's own ⇧⌘3/4/5. Rebind them in
-Settings → Shortcuts (click a field and press keys).
+| In the capture overlay | Key |
+|---|---|
+| Move the selection while dragging | <kbd>Space</kbd> |
+| Lock the aspect ratio | <kbd>⇧</kbd> |
+| Nudge 1 pt · 10 pt · resize | <kbd>←</kbd> <kbd>↑</kbd> <kbd>→</kbd> <kbd>↓</kbd> · with <kbd>⇧</kbd> · with <kbd>⌥</kbd> |
+| Temporarily disable edge snapping | hold <kbd>⌥</kbd> while dragging |
+| Copy the colour under the loupe (hex) | <kbd>C</kbd> |
+| Confirm (or double-click) | <kbd>Enter</kbd> |
+| Cancel | <kbd>Esc</kbd> |
 
-## Building
+## Why Lumora
 
-Requirements: macOS 14+, Xcode command-line tools, Rust stable (1.80+).
+<table>
+  <tr>
+    <td width="50%" valign="top"><b>Native to the core</b><br>Rust over AppKit, Core Animation and ScreenCaptureKit through typed <code>objc2</code> bindings. No web view, no Electron, no runtime to ship.</td>
+    <td width="50%" valign="top"><b>Closed-form spring physics</b><br>Motion comes from an analytic damped-oscillator solver in <code>lumora-core</code>, shared by Core Animation layers and window animations, with unit tests pinning settle times and overshoot.</td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top"><b>Tiny native binary</b><br>A menu-bar app that compiles to a single native executable, built with thin LTO and stripped symbols in release.</td>
+    <td width="50%" valign="top"><b>Open source, MIT</b><br>Readable, documented code with a strict crate layering, <code>SAFETY:</code> comments on every unsafe block and design tokens mirrored in <a href="DESIGN.md">DESIGN.md</a>.</td>
+  </tr>
+</table>
+
+## Install
+
+**Homebrew cask — coming soon.** A signed and notarized build will follow hardware bring-up ([roadmap](#roadmap)). Until then, build from source.
+
+### Build from source
+
+Requirements: macOS 14+, Xcode command-line tools, Rust stable 1.80+.
 
 ```sh
-# Run a debug build from the terminal (permission prompts will name your terminal)
+git clone https://github.com/OWNER/lumora.git
+cd lumora
+
+# Run a debug build from the terminal
+# (permission prompts will name your terminal app)
 cargo run -p lumora
 
 # Universal (arm64 + x86_64) app bundle + DMG, ad-hoc signed
@@ -69,20 +134,21 @@ SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
 NOTARY_PROFILE=lumora-notary scripts/bundle.sh
 ```
 
-Screen Recording permission is tied to the app's code signature. Ad-hoc
-builds get a new identity each time, so macOS will ask again after every
-rebuild — use a stable signing identity for day-to-day development.
+> [!TIP]
+> Screen Recording permission is tied to the app's code signature. Ad-hoc builds get a new identity each time, so macOS asks again after every rebuild — use a stable signing identity for day-to-day development.
 
-### Developing on Linux / CI
+<details>
+<summary><b>Developing on Linux or in CI</b></summary>
+
+<br>
 
 The pure-logic crates build and test anywhere:
 
 ```sh
-cargo test -p lumora-core -p lumora-ui     # geometry, springs, selection, settings, hotkeys, tokens
+cargo test -p lumora-core -p lumora-ui   # geometry, springs, selection, settings, hotkeys, tokens
 ```
 
-With the Apple targets installed you can type-check the whole app from any
-host:
+With the Apple targets installed you can type-check the whole app from any host:
 
 ```sh
 rustup target add aarch64-apple-darwin x86_64-apple-darwin
@@ -90,21 +156,106 @@ cargo check --workspace --target aarch64-apple-darwin
 cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnings
 ```
 
-## Settings
+</details>
 
-Stored as TOML at `~/Library/Application Support/Lumora/settings.toml`.
-Missing keys fall back to defaults, unknown keys are ignored, and a corrupt
-file is moved aside to `settings.toml.bak`. Logs go to stderr; set
-`LUMORA_LOG=debug` for more.
+<details>
+<summary><b>Settings & logs</b></summary>
 
-## Project docs
+<br>
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — crates, threading, data flow
-- [DESIGN.md](DESIGN.md) — design tokens and motion specs
-- [ROADMAP.md](ROADMAP.md) — what's next
-- [STATUS.md](STATUS.md) — what compiles, what's tested, known risks
-- [CHANGELOG.md](CHANGELOG.md)
+Settings are stored as TOML at `~/Library/Application Support/Lumora/settings.toml`. Missing keys fall back to defaults, unknown keys are ignored, and a corrupt file is moved aside to `settings.toml.bak`. Logs go to stderr; set `LUMORA_LOG=debug` for more.
+
+</details>
+
+## Architecture
+
+<p align="center">
+  <img src="assets/readme/architecture.svg" width="720" alt="Four crates, dependencies pointing down: apps/lumora, lumora-ui, lumora-capture, lumora-core">
+</p>
+
+A Cargo workspace of four crates with a strict dependency direction. Logic that doesn't need the OS lives in the bottom crate and is tested on every host; every crate above it is a thin, typed layer over Apple frameworks.
+
+| Crate | What it owns |
+|---|---|
+| [`apps/lumora`](apps/lumora) | The binary: `NSApplication`, status item, Carbon hotkeys, app state and capture/record flows |
+| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation: overlay, Quick Access, pins, shutter, countdown, recording HUD, settings, onboarding |
+| [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit, ImageIO, AVFoundation, pasteboard |
+| [`lumora-core`](crates/lumora-core) | Pure Rust: geometry, springs, selection state machine, snapping, settings, file names, hotkey parsing, layout, recording state machine |
+
+Deep dives: [ARCHITECTURE.md](ARCHITECTURE.md) (threading, data flow, coordinate spaces) · [DESIGN.md](DESIGN.md) (colour, shape, type and motion tokens).
+
+## Roadmap
+
+**v0.1 — written, type-checked, awaiting hardware testing**
+
+- [x] Menu-bar app with global, rebindable shortcuts and conflict detection
+- [x] Area overlay on frozen frames: dim + cutout, crosshair, size pill, pixel loupe, window highlight, edge snapping, keyboard nudging
+- [x] Fullscreen and window capture; Retina PNGs with DPI metadata; clipboard
+- [x] Shutter flash, fly-to-card, Quick Access cards with drag-out
+- [x] Pin to screen
+- [x] Screen recording: H.264/HEVC, 30/60 fps, system audio, mic (macOS 15+), countdown, menu-bar timer, stop control
+- [x] Settings window, launch at login, Screen Recording onboarding
+- [x] Universal bundle script and CI
+
+**v0.1.x — make it real (hardware bring-up)**
+
+- [ ] Run on Apple Silicon + Intel, macOS 14 and 15; fix what the type checker couldn't catch
+- [ ] App icon (`.icns`) generated from the code-drawn mark
+- [ ] Microphone on macOS 14 via `AVCaptureSession`
+- [ ] ProMotion-synchronised window springs (`NSScreen.displayLink`)
+- [ ] Diagnostics: `os_log` subsystem, opt-in crash reports
+- [ ] Dedicated window-only mode
+- [ ] Selections spanning several displays
+
+<details>
+<summary><b>Further out — v0.2 annotate · v0.3 record like a pro · v0.4 share · later</b></summary>
+
+<br>
+
+**v0.2 — annotate**
+
+- [ ] Annotation editor: arrows, shapes, text, highlighter, blur/pixelate, numbered steps, crop
+- [ ] Background and padding presets ("beautify") with rounded corners and shadow
+- [ ] Scrolling capture, self-timer, capture previous area
+- [ ] OCR — copy text from any region
+
+**v0.3 — record like a pro**
+
+- [ ] Pause/resume, trim on the card, GIF export
+- [ ] Click and keystroke overlays, webcam bubble
+- [ ] Per-app audio selection, 4K/HDR options
+
+**v0.4 — share**
+
+- [ ] Cloud links (bring-your-own S3/R2 first), history browser
+- [ ] Shortcuts.app and URL-scheme automation, Sparkle updates
+
+**Later**
+
+- [ ] Mac App Store variant
+- [ ] Localisation (zh-Hans first, then ja, de, fr, es)
+
+</details>
+
+Full details in [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md).
+
+## Contributing
+
+Contributions are very welcome — and right now the most valuable one is simply **running Lumora on a Mac**. If you try it, please open an issue with your chip, macOS version and what worked or broke.
+
+- **Before a larger change**, open an issue to talk it through.
+- **Keep CI green:** `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings` (on a Mac, or with `--target aarch64-apple-darwin` elsewhere), and `cargo test` (the core crates run on any host).
+- **Design tokens live in two places** — `crates/lumora-ui/src/tokens.rs` and [DESIGN.md](DESIGN.md). Change both together.
+- **Unsafe code** stays confined to FFI calls, each with a `SAFETY:` comment.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE) © Lumora contributors
+
+<br>
+
+<p align="center">
+  <img src="assets/readme/logo.svg" width="40" height="40" alt="">
+  <br>
+  <sub>Built with Rust, AppKit and a lot of springs.</sub>
+</p>
