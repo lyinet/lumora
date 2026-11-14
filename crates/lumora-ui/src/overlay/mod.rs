@@ -19,6 +19,7 @@ use std::rc::{Rc, Weak};
 use lumora_capture::image::PixelBuffer;
 use lumora_core::format;
 use lumora_core::geometry::{Point, Rect, Size};
+use lumora_core::i18n::{tr, trf, Msg};
 use lumora_core::layout::{loupe_frame, loupe_sample, pill_frame};
 use lumora_core::selection::{Config, Input, Outcome, Phase, SelectionMachine, Target};
 use lumora_core::snap::WindowList;
@@ -44,6 +45,8 @@ pub struct OverlayConfig {
     pub show_magnifier: bool,
     pub show_crosshair: bool,
     pub window_picking: bool,
+    /// Window mode: click-to-pick only, no rubber band.
+    pub window_only: bool,
 }
 
 struct ScreenOverlay {
@@ -101,12 +104,18 @@ impl OverlayController {
         let ph = primary_height(mtm);
         let screens = NSScreen::screens(mtm);
         let frames: Vec<Rect> = screens.iter().map(|s| quartz_frame(&s, ph)).collect();
-        let mut cfg = Config::new(frames);
-        cfg.window_picking = config.window_picking;
+        let mut cfg = if config.window_only { Config::window_only(frames) } else { Config::new(frames) };
+        cfg.window_picking = config.window_picking || config.window_only;
         cfg.handle_radius = size::HANDLE_HIT;
         let machine = SelectionMachine::new(cfg, windows);
         let pixels = frozen.iter().map(|_| OnceCell::new()).collect();
 
+        let hint = tr(match (config.mode, config.window_only) {
+            (OverlayMode::Record, _) => Msg::HintRecord,
+            (OverlayMode::Text, _) => Msg::HintText,
+            (OverlayMode::Capture, true) => Msg::HintWindow,
+            (OverlayMode::Capture, false) => Msg::HintCapture,
+        });
         let inner = Rc::new_cyclic(|weak: &Weak<Inner>| {
             let overlays = screens
                 .iter()
@@ -115,7 +124,9 @@ impl OverlayController {
                     let scale = screen.backingScaleFactor();
                     let id = screen_id(&screen);
                     let backdrop: Option<&CGImage> = match config.mode {
-                        OverlayMode::Capture => frozen.iter().find(|f| f.id == id).map(|f| &*f.image),
+                        OverlayMode::Capture | OverlayMode::Text => {
+                            frozen.iter().find(|f| f.id == id).map(|f| &*f.image)
+                        }
                         OverlayMode::Record => None,
                     };
                     let appkit_frame = screen.frame();
@@ -134,7 +145,7 @@ impl OverlayController {
                         objc2_core_foundation::CGPoint::new(0.0, 0.0),
                         appkit_frame.size,
                     );
-                    let view = OverlayView::new(mtm, local, frame, scale, backdrop, config.mode, weak.clone());
+                    let view = OverlayView::new(mtm, local, frame, scale, backdrop, config.mode, hint, weak.clone());
                     panel.setContentView(Some(&view));
                     ScreenOverlay { panel, view, frame, scale }
                 })
@@ -428,7 +439,8 @@ impl Inner {
             cg_rect(Rect::new(s.x as f64, s.y as f64, s.w as f64, s.h as f64)),
         )?;
         let hex = self.color_under_mouse().map(|c| c.hex()).unwrap_or_else(|| "—".into());
-        let label = if t < self.copied_until.get() { format!("Copied {hex}") } else { format!("{hex}   {px}, {py}") };
+        let label =
+            if t < self.copied_until.get() { trf(Msg::CopiedHex, &[&hex]) } else { format!("{hex}   {px}, {py}") };
         let side = size::LOUPE_GRID as f64 * size::LOUPE_CELL;
         let container = Size::new(side, side + 6.0 + size::LOUPE_LABEL_HEIGHT);
         let screen = self.screen_frame_at(mouse).map(|(f, _)| f).unwrap_or(fd.frame);

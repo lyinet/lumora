@@ -19,9 +19,11 @@ use dispatch2::DispatchQueue;
 use lumora_capture::content::ShareableContent;
 use lumora_capture::permission;
 use lumora_core::geometry::Rect;
+use lumora_core::i18n::{tr, Msg};
 use lumora_core::recording::RecordingSession;
 use lumora_core::settings::Settings;
 use lumora_ui::countdown::Countdown;
+use lumora_ui::editor::EditorWindow;
 use lumora_ui::events::{CardAction, EventSink, FrozenDisplay, OnboardingAction, UiEvent};
 use lumora_ui::onboarding::Onboarding;
 use lumora_ui::overlay::OverlayController;
@@ -107,6 +109,15 @@ impl Mode {
     }
 }
 
+/// A user-visible outcome for [`App::notify`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Warning is used once the toast HUD lands.
+pub enum Notice {
+    Success(Msg),
+    Warning(Msg),
+    Error(Msg),
+}
+
 /// A capture shown in Quick Access.
 pub struct CaptureRecord {
     pub image: Option<CFRetained<CGImage>>,
@@ -133,6 +144,7 @@ pub struct App {
     pub quick: QuickAccess,
     pub captures: RefCell<HashMap<u64, CaptureRecord>>,
     pins: RefCell<HashMap<u64, PinWindow>>,
+    pub editors: RefCell<HashMap<u64, EditorWindow>>,
     settings_window: RefCell<Option<SettingsWindow>>,
     onboarding: RefCell<Option<Onboarding>>,
     onboarding_target: RefCell<Option<Retained<ActionTarget>>>,
@@ -169,6 +181,7 @@ impl App {
                 mode: RefCell::new(Mode::Idle),
                 captures: RefCell::new(HashMap::new()),
                 pins: RefCell::new(HashMap::new()),
+                editors: RefCell::new(HashMap::new()),
                 settings_window: RefCell::new(None),
                 onboarding: RefCell::new(None),
                 onboarding_target: RefCell::new(None),
@@ -186,11 +199,21 @@ impl App {
         app
     }
 
+    /// Tell the user how something went.
+    // TODO(error-toast): replaced by the toast HUD.
+    pub fn notify(&self, notice: Notice, detail: Option<String>) {
+        let msg = match notice {
+            Notice::Success(m) | Notice::Warning(m) | Notice::Error(m) => m,
+        };
+        log::info!("{}{}", tr(msg), detail.map(|d| format!(": {d}")).unwrap_or_default());
+    }
+
     pub fn shutdown(&self) {
         // Finalise an in-flight recording synchronously is not possible
         // here; dropping the recorder cancels it cleanly.
         self.mode.replace(Mode::Idle);
         self.quick.dismiss_all();
+        self.editors.borrow_mut().clear();
     }
 
     pub fn next_id(&self) -> u64 {
@@ -262,8 +285,12 @@ impl App {
             UiEvent::OverlayCancelled { .. } => self.set_mode(Mode::Idle),
             UiEvent::Card { id, action } => self.on_card_action(id, action),
             UiEvent::CardDismissed(id) => {
-                self.captures.borrow_mut().remove(&id);
+                // An open editor still needs the capture.
+                if !self.editors.borrow().contains_key(&id) {
+                    self.captures.borrow_mut().remove(&id);
+                }
             }
+            UiEvent::Editor { id, action } => self.on_editor(id, action),
             UiEvent::PinClosed(id) => {
                 self.pins.borrow_mut().remove(&id);
             }
@@ -333,6 +360,10 @@ impl App {
                 }
             }
             CardAction::DraggedOut => self.quick.dismiss(id),
+            CardAction::Annotate => {
+                self.open_editor(id);
+                self.quick.dismiss(id);
+            }
         }
     }
 

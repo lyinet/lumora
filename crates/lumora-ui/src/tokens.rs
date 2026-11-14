@@ -68,6 +68,16 @@ pub mod color {
     pub const HANDLE_STROKE: Rgba = Rgba::hex(0x0A84FF, 1.0);
     /// Card button glyph tint and hover background.
     pub const BUTTON_BG: Rgba = Rgba::new(0.0, 0.0, 0.0, 0.55);
+    /// Editor canvas backdrop (behind the image).
+    pub const EDITOR_BACKDROP: Rgba = Rgba::new(0.11, 0.11, 0.12, 1.0);
+    /// Active-tool pill behind toolbar glyphs.
+    pub const TOOL_ACTIVE: Rgba = Rgba::hex(0x0A84FF, 0.9);
+    /// Crop tool: dim outside the pending crop.
+    pub const CROP_DIM: Rgba = Rgba::new(0.0, 0.0, 0.0, 0.5);
+    /// Toast glyph tints.
+    pub const SUCCESS: Rgba = Rgba::hex(0x30D158, 1.0);
+    pub const WARNING: Rgba = Rgba::hex(0xFFD60A, 1.0);
+    pub const ERROR: Rgba = Rgba::hex(0xFF453A, 1.0);
 }
 
 /// Corner radii (points).
@@ -80,6 +90,12 @@ pub mod radius {
     pub const COUNTDOWN: f64 = 40.0;
     pub const PIN: f64 = 8.0;
     pub const BUTTON: f64 = 8.0;
+    /// Editor toolbar glyph buttons and active-tool pill.
+    pub const TOOL: f64 = 7.0;
+    /// Image corners on the editor canvas.
+    pub const EDITOR_IMAGE: f64 = 6.0;
+    /// Toast HUD (fully rounded at its height).
+    pub const TOAST: f64 = 22.0;
 }
 
 /// Fixed sizes (points).
@@ -108,6 +124,23 @@ pub mod size {
     pub const STOP_HUD_WIDTH: f64 = 132.0;
     pub const STOP_HUD_HEIGHT: f64 = 40.0;
     pub const STATUS_ICON: f64 = 18.0;
+    /// Annotation editor.
+    pub const EDITOR_TOOLBAR_HEIGHT: f64 = 52.0;
+    pub const EDITOR_TOOL_BUTTON: f64 = 30.0;
+    pub const EDITOR_TOOL_GAP: f64 = 2.0;
+    pub const EDITOR_SWATCH: f64 = 18.0;
+    pub const EDITOR_CANVAS_MARGIN: f64 = 28.0;
+    pub const EDITOR_MIN_WIDTH: f64 = 760.0;
+    pub const EDITOR_MIN_HEIGHT: f64 = 420.0;
+    /// Leading inset that clears the traffic-light buttons.
+    pub const EDITOR_TRAFFIC_LIGHTS: f64 = 78.0;
+    /// Selection handles on annotations (diameter, screen points).
+    pub const EDITOR_HANDLE: f64 = 9.0;
+    /// Toast HUD.
+    pub const TOAST_HEIGHT: f64 = 44.0;
+    pub const TOAST_MIN_WIDTH: f64 = 180.0;
+    pub const TOAST_MAX_WIDTH: f64 = 420.0;
+    pub const TOAST_TOP: f64 = 64.0;
 }
 
 /// Type scale. All text uses SF Pro (the system font); numerals that change
@@ -149,6 +182,17 @@ pub mod motion {
     pub const FLY: Spring = Spring::new(1.0, 260.0, 24.0);
     /// Countdown digit pop and handle appearance.
     pub const POP: Spring = Spring::BOUNCY;
+    /// A new annotation settling in (k = 380, c = 24: a hint of overshoot).
+    pub const INSERT: Spring = Spring::new(1.0, 380.0, 24.0);
+    /// Active-tool pill sliding between toolbar buttons.
+    pub const TOOL: Spring = Spring::SNAPPY;
+    /// Toast HUD drop-in.
+    pub const TOAST: Spring = Spring::new(1.0, 320.0, 24.0);
+    /// How long toasts stay up (success / warning+error).
+    pub const TOAST_SHORT: f64 = 2.2;
+    pub const TOAST_LONG: f64 = 4.0;
+    /// Toast fade-out.
+    pub const TOAST_OUT: f64 = 0.22;
     /// Settling threshold used to derive CA durations from springs.
     pub const SETTLE_EPSILON: f64 = 1e-3;
 }
@@ -167,7 +211,16 @@ mod tests {
 
     #[test]
     fn springs_settle_quickly_enough_for_ui() {
-        for s in [motion::SELECTION, motion::CARD, motion::REFLOW, motion::FLY, motion::POP] {
+        for s in [
+            motion::SELECTION,
+            motion::CARD,
+            motion::REFLOW,
+            motion::FLY,
+            motion::POP,
+            motion::INSERT,
+            motion::TOOL,
+            motion::TOAST,
+        ] {
             let t = s.settling_time(motion::SETTLE_EPSILON);
             assert!(t < 1.2, "{s:?} settles in {t}s");
         }
@@ -175,6 +228,9 @@ mod tests {
         assert!(motion::CARD.overshoot() < 0.05);
         assert!(motion::REFLOW.overshoot() < 0.01);
         assert!(motion::POP.overshoot() > 0.1);
+        // Insertion is subtle: some life, far less than the countdown pop.
+        assert!(motion::INSERT.overshoot() > 0.01 && motion::INSERT.overshoot() < 0.1);
+        assert!(motion::TOAST.overshoot() < 0.1);
     }
 
     #[test]

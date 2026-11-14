@@ -203,6 +203,7 @@ fn shape(fill: Option<crate::tokens::Rgba>, stroke: Option<crate::tokens::Rgba>,
 }
 
 impl OverlayView {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         mtm: MainThreadMarker,
         frame: CGRect,
@@ -210,6 +211,7 @@ impl OverlayView {
         scale: f64,
         backdrop: Option<&CGImage>,
         mode: OverlayMode,
+        hint: &str,
         controller: Weak<Inner>,
     ) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(OverlayViewIvars {
@@ -223,7 +225,7 @@ impl OverlayView {
         root.setGeometryFlipped(true);
         this.setLayer(Some(&root));
         this.setWantsLayer(true);
-        let _ = this.ivars().layers.set(build_layers(&root, screen, scale, backdrop, mode));
+        let _ = this.ivars().layers.set(build_layers(&root, screen, scale, backdrop, mode, hint));
         this
     }
 
@@ -356,10 +358,17 @@ impl OverlayView {
     }
 }
 
-fn build_layers(root: &CALayer, screen: Rect, scale: f64, backdrop: Option<&CGImage>, mode: OverlayMode) -> Layers {
+fn build_layers(
+    root: &CALayer,
+    screen: Rect,
+    scale: f64,
+    backdrop: Option<&CGImage>,
+    mode: OverlayMode,
+    hint: &str,
+) -> Layers {
     let bounds = Rect::new(0.0, 0.0, screen.width(), screen.height());
     let accent = match mode {
-        OverlayMode::Capture => color::ACCENT,
+        OverlayMode::Capture | OverlayMode::Text => color::ACCENT,
         OverlayMode::Record => color::RECORD,
     };
 
@@ -485,12 +494,7 @@ fn build_layers(root: &CALayer, screen: Rect, scale: f64, backdrop: Option<&CGIm
     root.addSublayer(&loupe);
 
     // Hint pill, top centre.
-    let hint_text = match mode {
-        OverlayMode::Capture => {
-            "Drag to select  ·  Click a window  ·  Space move  ·  ⇧ lock ratio  ·  C copy colour  ·  Esc"
-        }
-        OverlayMode::Record => "Drag to choose an area to record  ·  Click for full screen  ·  Esc to cancel",
-    };
+    let hint_text = hint;
     let hint_font = objc2_app_kit::NSFont::systemFontOfSize_weight(typography::CAPTION, weight::MEDIUM);
     let w = crate::util::text_width(hint_text, &hint_font) + 2.0 * size::PILL_PADDING + 8.0;
     let hint = CALayer::new();

@@ -113,9 +113,8 @@ impl App {
             mode,
             show_magnifier: s.capture.show_magnifier,
             show_crosshair: s.capture.show_crosshair,
-            // TODO(window-mode): a true window-only mode should also disable
-            // rubber-band selection; v0.1 forces hover picking on.
             window_picking: window_only || s.capture.window_picking,
+            window_only,
         };
         drop(s);
         let windows = WindowList::new(content.windows());
@@ -209,7 +208,8 @@ impl App {
         }
         let point_size = Size::new(frame.width(), frame.height());
         let appkit_frame = util::flip(frame, self.mtm);
-        if s.general.show_quick_access {
+        let edit_now = s.general.open_editor_after_capture;
+        if s.general.show_quick_access && !edit_now {
             let to = self.quick.next_frame(point_size);
             shutter::play(self.mtm, &image, appkit_frame, Some(to), || {});
             self.quick.push(CardContent {
@@ -226,6 +226,9 @@ impl App {
             id,
             CaptureRecord { image: Some(image.clone()), scale, frame, file: file.clone(), temp, video: false },
         );
+        if edit_now {
+            self.open_editor(id);
+        }
 
         let copy = s.general.copy_to_clipboard;
         background().exec_async(move || {
