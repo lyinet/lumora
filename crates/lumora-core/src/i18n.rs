@@ -296,6 +296,31 @@ messages! {
     ToastShortcutTakenDetail => "{0} is used by another app. Choose another in Settings.", "{0} 已被其他应用占用，请在设置中更换。";
     ToastTextFailed => "Text recognition failed", "文字识别失败";
 
+    // -- beautify -----------------------------------------------------------------
+    Beautify => "Beautify", "美化";
+    BeautifyBackground => "Background", "背景";
+    BeautifyPadding => "Padding", "内边距";
+    BeautifyCornerRadius => "Corner radius", "圆角";
+    BeautifyShadow => "Shadow", "阴影";
+    BeautifyAutoBalance => "Auto-balance", "自动平衡";
+    BeautifyAspectRatio => "Aspect ratio", "宽高比";
+    BeautifyAspectAuto => "Auto", "自动";
+    BeautifyWindowChrome => "Window frame", "窗口外框";
+    BeautifyChromeLight => "Light", "浅色";
+    BeautifyChromeDark => "Dark", "深色";
+    BeautifyNone => "None", "无";
+    BeautifySolid => "Solid colour", "纯色";
+    BeautifyGradient => "Gradient", "渐变";
+    BeautifyImage => "Image…", "图片…";
+    PresetSunset => "Sunset", "日落";
+    PresetOcean => "Ocean", "海洋";
+    PresetAurora => "Aurora", "极光";
+    PresetPeach => "Peach", "蜜桃";
+    PresetMint => "Mint", "薄荷";
+    PresetGraphite => "Graphite", "石墨";
+    PresetLavender => "Lavender", "薰衣草";
+    PresetMidnight => "Midnight", "午夜";
+
     // -- errors -------------------------------------------------------------------
     ErrPermission => "Lumora needs Screen Recording permission.", "Lumora 需要“屏幕录制”权限。";
     ErrTargetGone => "The {0} to capture is no longer available.", "要截取的{0}已不可用。";
