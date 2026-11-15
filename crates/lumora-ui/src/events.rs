@@ -52,11 +52,16 @@ pub enum CardAction {
     DraggedOut,
 }
 
-/// A flattened editor export.
+/// A flattened editor export, plus the editable state it came from (for
+/// the `.lumora` document saved next to it).
 pub struct EditorImage {
     pub image: CFRetained<CGImage>,
     /// Pixels per point.
     pub scale: f64,
+    /// The annotations (and crop) that `image` flattens.
+    pub document: lumora_core::annotate::Document,
+    /// The editor's beautify style at export time.
+    pub beautify: lumora_core::beautify::BeautifyStyle,
 }
 
 impl std::fmt::Debug for EditorImage {

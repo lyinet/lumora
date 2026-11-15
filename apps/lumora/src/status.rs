@@ -105,6 +105,9 @@ impl StatusBar {
         let open = menu_item(mtm, Action::OpenFolder.title(), sel!(openFolder:), target);
         menu.addItem(&open);
         action_items.push((Action::OpenFolder, open));
+        let open_doc = menu_item(mtm, tr(Msg::OpenDocumentMenu), sel!(openLumoraDocument:), target);
+        open_doc.setKeyEquivalent(&NSString::from_str("o"));
+        menu.addItem(&open_doc);
         menu.addItem(&NSMenuItem::separatorItem(mtm));
         let settings_item = menu_item(mtm, tr(Msg::SettingsMenu), sel!(showSettings:), target);
         settings_item.setKeyEquivalent(&NSString::from_str(","));
@@ -124,6 +127,7 @@ impl StatusBar {
             action_items,
             record_item: record_item.expect("record item exists"),
             fixed_items: vec![
+                (Msg::OpenDocumentMenu, open_doc),
                 (Msg::SettingsMenu, settings_item),
                 (Msg::PermissionMenu, permission_item),
                 (Msg::QuitLumora, quit),

@@ -15,6 +15,16 @@ All notable changes to Lumora are documented here. The format follows
   annotation editor with a live Core Animation preview; the last style is
   remembered (Settings) and applied to saved, copied and dragged-out images
   when enabled.
+- **Editable .lumora documents** — every saved screenshot gets a
+  `<name>.lumora` next to its PNG holding the original capture, its
+  annotations and (when enabled) the beautify style; editor saves keep it in
+  sync. Reopen it from the menu bar (Open…, ⌘O in the menu), by
+  double-clicking it in Finder, or with Annotate on its Quick Access card —
+  every arrow, label and crop stays editable. Written atomically; skipped
+  when "Save to disk" is off; toggle in Settings → General ("Also save an
+  editable .lumora document", on by default). Lumora registers the
+  `app.lumora.document` type (`.lumora`, `application/x-lumora`) as its
+  owner. Damaged or newer-format files open with an explanatory alert.
 
 ## [0.2.0] — 2026-11-15 (unreleased, not yet hardware-tested)
 

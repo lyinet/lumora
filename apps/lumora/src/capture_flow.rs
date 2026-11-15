@@ -29,7 +29,7 @@ use objc2_core_graphics::CGImage;
 
 use lumora_core::i18n::{tr, trf, Msg};
 
-use crate::app::{on_main, App, CaptureRecord, Mode, Notice};
+use crate::app::{on_main, App, CaptureRecord, Editable, Mode, Notice};
 use crate::system;
 
 fn background() -> dispatch2::DispatchRetained<DispatchQueue> {
@@ -212,7 +212,11 @@ impl App {
         let stem = render(&s.general.filename_template, &system::now_parts(), CaptureKind::Screenshot);
         let (dir, temp) =
             if s.general.save_to_disk { (s.save_folder(&self.home), false) } else { (system::temp_dir(), true) };
-        let file = unique_path(&dir, &stem, CaptureKind::Screenshot.extension(), |p| p.exists());
+        // Skip names whose `.lumora` sibling exists too (an orphaned document
+        // must not be overwritten).
+        let file = unique_path(&dir, &stem, CaptureKind::Screenshot.extension(), |p| {
+            lumora_core::lumora_doc::pair_taken(p, |q| q.exists())
+        });
 
         if s.general.play_sounds {
             system::play_shutter();
@@ -233,10 +237,22 @@ impl App {
         } else {
             shutter::play(self.mtm, &image, appkit_frame, None, || {});
         }
-        self.captures.borrow_mut().insert(
-            id,
-            CaptureRecord { image: Some(image.clone()), scale, frame, file: file.clone(), temp, video: false },
-        );
+        let rec = CaptureRecord {
+            image: Some(image.clone()),
+            scale,
+            frame,
+            file: file.clone(),
+            temp,
+            video: false,
+            editable: Some(Editable::new(image.clone(), scale)),
+        };
+        // The editable document keeps the original capture (not the
+        // beautified export) plus the beautify style, when enabled.
+        let job = self.doc_job(&rec);
+        self.captures.borrow_mut().insert(id, rec);
+        if let Some(job) = job {
+            self.spawn_doc_write(job);
+        }
         if edit_now {
             self.open_editor(id);
         }

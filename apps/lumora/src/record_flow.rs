@@ -212,6 +212,7 @@ impl App {
                             file: path.clone(),
                             temp,
                             video: true,
+                            editable: None,
                         },
                     );
                     if show_card {

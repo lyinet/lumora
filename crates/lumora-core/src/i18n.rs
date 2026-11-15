@@ -153,6 +153,7 @@ messages! {
     RecordScreen => "Record Screen", "录制屏幕";
     StopRecording => "Stop Recording", "停止录制";
     OpenCapturesFolder => "Open Captures Folder", "打开截图文件夹";
+    OpenDocumentMenu => "Open…", "打开…";
     SettingsMenu => "Settings…", "设置…";
     PermissionMenu => "Screen Recording Permission…", "屏幕录制权限…";
     QuitLumora => "Quit Lumora", "退出 Lumora";
@@ -203,6 +204,7 @@ messages! {
     AfterCapture => "After capture:", "截图后：";
     CopyToClipboard => "Copy to clipboard", "拷贝到剪贴板";
     SaveToDisk => "Save to disk", "保存到磁盘";
+    SaveEditableDocument => "Also save an editable .lumora document", "同时保存可编辑的 .lumora 文档";
     ShowQuickAccess => "Show Quick Access card", "显示快速访问卡片";
     OpenEditorAfterCapture => "Open annotation editor", "打开标注编辑器";
     HideCardAfter => "Hide card after:", "卡片隐藏时间：";
@@ -328,6 +330,9 @@ messages! {
     ErrTargetGone => "The {0} to capture is no longer available.", "要截取的{0}已不可用。";
     ErrNothing => "Nothing to capture.", "没有可截取的内容。";
     ErrWrite => "Could not write {0}.", "无法写入 {0}。";
+    ErrOpenDocument => "Couldn’t open “{0}”", "无法打开“{0}”";
+    ErrDocumentDetail => "This Lumora document can’t be read: {0}", "无法读取此 Lumora 文档：{0}";
+    ErrDocumentImage => "the embedded image couldn’t be decoded", "无法解码内嵌的图像";
     TargetDisplay => "display", "显示器";
     TargetWindow => "window", "窗口";
 }

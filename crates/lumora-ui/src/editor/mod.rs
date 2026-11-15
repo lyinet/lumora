@@ -135,6 +135,17 @@ impl std::fmt::Debug for EditorWindow {
     }
 }
 
+/// Flatten `doc` onto `base` (at `scale` pixels per point) outside an open
+/// editor, e.g. for the thumbnail of a reopened `.lumora` document. Main
+/// thread only.
+pub fn flatten_document(
+    base: &CGImage,
+    scale: f64,
+    doc: &lumora_core::annotate::Document,
+) -> Option<CFRetained<CGImage>> {
+    flatten(base, scale, doc, &mut RedactionCache::default())
+}
+
 impl EditorWindow {
     /// Adopt a beautify style changed elsewhere (Settings, another
     /// editor): updates the panel, the live preview and later exports.
@@ -153,7 +164,10 @@ impl EditorWindow {
     /// Open an editor for capture `id`. `image` is the capture at `scale`
     /// pixels per point; `file_name` titles the window. `beautify` is
     /// applied to copied and dragged exports when its `enabled` is set (the
-    /// app applies it to ⌘S writes itself).
+    /// app applies it to ⌘S writes itself). `document` restores earlier
+    /// annotations (a reopened `.lumora` file); its size must match the
+    /// image's point size, otherwise it is ignored.
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         mtm: MainThreadMarker,
         id: u64,
@@ -161,11 +175,16 @@ impl EditorWindow {
         scale: f64,
         file_name: &str,
         beautify: BeautifyStyle,
+        document: Option<lumora_core::annotate::Document>,
         sink: EventSink,
     ) -> Self {
         let scale = scale.max(1.0);
         let px = (CGImage::width(Some(&image)) as f64, CGImage::height(Some(&image)) as f64);
         let doc_size = Size::new(px.0 / scale, px.1 / scale);
+        let document = document.filter(|d| {
+            let s = d.size();
+            (s.width - doc_size.width).abs() < 0.5 && (s.height - doc_size.height).abs() < 0.5
+        });
 
         // Window: image + margins + toolbar, within 90 % of the screen.
         let visible = crate::util::screen_under_mouse(mtm)
@@ -305,7 +324,10 @@ impl EditorWindow {
                 mtm,
                 id,
                 sink,
-                editor: RefCell::new(Editor::new(doc_size)),
+                editor: RefCell::new(match document {
+                    Some(d) => Editor::with_document(d),
+                    None => Editor::new(doc_size),
+                }),
                 base: image,
                 scale,
                 file_name: file_name.to_string(),
@@ -959,6 +981,17 @@ impl State {
         flatten(&self.base, self.scale, ed.document(), &mut self.redactions.borrow_mut())
     }
 
+    /// The flattened image plus the state it was made from.
+    fn editor_image(&self) -> Option<EditorImage> {
+        let image = self.flatten()?;
+        Some(EditorImage {
+            image,
+            scale: self.scale,
+            document: self.editor.borrow().document().clone(),
+            beautify: self.beautify.borrow().clone(),
+        })
+    }
+
     /// The flattened image with the beautify style applied (if enabled).
     fn export_image(&self) -> Option<CFRetained<CGImage>> {
         let image = self.flatten()?;
@@ -967,23 +1000,16 @@ impl State {
     }
 
     fn copy(&self) {
-        let Some(image) = self.flatten() else { return };
-        let style = self.beautify.borrow().clone();
-        let out = lumora_capture::beautify_render::beautify_for_export(image.clone(), &style, self.scale);
+        let Some(img) = self.editor_image() else { return };
+        let out = lumora_capture::beautify_render::beautify_for_export(img.image.clone(), &img.beautify, self.scale);
         lumora_capture::clipboard::copy_image(&out, self.scale, None);
-        (self.sink)(UiEvent::Editor {
-            id: self.id,
-            action: EditorAction::Copied(EditorImage { image, scale: self.scale }),
-        });
+        (self.sink)(UiEvent::Editor { id: self.id, action: EditorAction::Copied(img) });
     }
 
     fn save(&self) {
-        let Some(image) = self.flatten() else { return };
+        let Some(img) = self.editor_image() else { return };
         self.saved_revision.set(self.editor.borrow().document().revision());
-        (self.sink)(UiEvent::Editor {
-            id: self.id,
-            action: EditorAction::Save(EditorImage { image, scale: self.scale }),
-        });
+        (self.sink)(UiEvent::Editor { id: self.id, action: EditorAction::Save(img) });
     }
 
     /// Flatten to a temp PNG for drag-and-drop.
@@ -1026,7 +1052,7 @@ impl State {
             unsafe { panel.setTarget(None) };
         }
         let dirty = self.editor.borrow().document().revision() != self.saved_revision.get();
-        let image = if dirty { self.flatten().map(|image| EditorImage { image, scale: self.scale }) } else { None };
+        let image = if dirty { self.editor_image() } else { None };
         (self.sink)(UiEvent::Editor { id: self.id, action: EditorAction::Closed(image) });
     }
 }

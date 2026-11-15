@@ -38,6 +38,50 @@
 	<string>Lumora captures your screen only when you take a screenshot or start a recording.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Lumora records your microphone only when you enable it for a screen recording.</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>app.lumora.document</string>
+			<key>UTTypeDescription</key>
+			<string>Lumora Document</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.content</string>
+			</array>
+			<key>UTTypeIconFile</key>
+			<string>AppIcon</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>lumora</string>
+				</array>
+				<key>public.mime-type</key>
+				<array>
+					<string>application/x-lumora</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Lumora Document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>CFBundleTypeIconFile</key>
+			<string>AppIcon</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>app.lumora.document</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 Lumora contributors. MIT License.</string>
 </dict>

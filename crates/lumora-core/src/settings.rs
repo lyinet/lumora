@@ -47,6 +47,10 @@ pub struct General {
     pub filename_template: String,
     pub copy_to_clipboard: bool,
     pub save_to_disk: bool,
+    /// Also write an editable `.lumora` document (original capture +
+    /// annotations + beautify) next to each saved screenshot. Ignored when
+    /// `save_to_disk` is off. Missing in pre-v0.3 files (defaults on).
+    pub save_editable_document: bool,
     pub show_quick_access: bool,
     /// Open the annotation editor right after every screenshot.
     pub open_editor_after_capture: bool,
@@ -111,6 +115,7 @@ impl Default for General {
             filename_template: crate::filename::DEFAULT_TEMPLATE.to_string(),
             copy_to_clipboard: true,
             save_to_disk: true,
+            save_editable_document: true,
             show_quick_access: true,
             open_editor_after_capture: false,
             quick_access_timeout: 6.0,
@@ -263,6 +268,12 @@ impl Settings {
         self.beautify.validate();
     }
 
+    /// Whether fresh captures also get a `.lumora` document: only when they
+    /// are saved to disk at all.
+    pub fn writes_editable_document(&self) -> bool {
+        self.general.save_to_disk && self.general.save_editable_document
+    }
+
     /// Resolved save folder for a given home directory.
     pub fn save_folder(&self, home: &Path) -> PathBuf {
         self.general.save_folder.clone().unwrap_or_else(|| home.join("Desktop"))
@@ -313,6 +324,19 @@ mod tests {
         assert_eq!(s.recording.codec, Codec::Hevc);
         assert!(s.recording.show_cursor);
         assert_eq!(s.general, General::default());
+    }
+
+    #[test]
+    fn editable_document_defaults_on_for_old_files() {
+        let old = Settings::from_toml("[general]\nsave_to_disk = true\ncopy_to_clipboard = false\n").unwrap();
+        assert!(old.general.save_editable_document);
+        assert!(old.writes_editable_document());
+        let off = Settings::from_toml("[general]\nsave_editable_document = false\n").unwrap();
+        assert!(!off.general.save_editable_document);
+        assert!(!off.writes_editable_document());
+        let no_disk = Settings::from_toml("[general]\nsave_to_disk = false\n").unwrap();
+        assert!(no_disk.general.save_editable_document);
+        assert!(!no_disk.writes_editable_document(), "never without save_to_disk");
     }
 
     #[test]

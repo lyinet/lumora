@@ -29,8 +29,8 @@ use crate::tokens::{color, radius, typography};
 use crate::util::{cg_color, cg_rect, mono_digits, set_text, text_layer, weight, ActionTarget};
 
 const W: f64 = 540.0;
-const H: f64 = 440.0;
-const TAB_H: f64 = 360.0;
+const H: f64 = 470.0;
+const TAB_H: f64 = 390.0;
 const LABEL_X: f64 = 24.0;
 const LABEL_W: f64 = 170.0;
 const CONTROL_X: f64 = 206.0;
@@ -545,6 +545,15 @@ fn build_general(
         tr(Msg::SaveToDisk),
         |s| s.general.save_to_disk,
         |s, v| s.general.save_to_disk = v,
+    );
+    checkbox(
+        form,
+        targets,
+        state,
+        "",
+        tr(Msg::SaveEditableDocument),
+        |s| s.general.save_editable_document,
+        |s, v| s.general.save_editable_document = v,
     );
     checkbox(
         form,

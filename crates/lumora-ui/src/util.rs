@@ -536,3 +536,38 @@ impl KeyCatcherView {
 
 /// Key code for Escape.
 pub const KEY_ESCAPE: u16 = 53;
+
+// ---------------------------------------------------------------------------
+// Open panel and alerts
+// ---------------------------------------------------------------------------
+
+/// Run a modal open panel for files with `extension` (several may be
+/// chosen). Activates the app first so the panel comes to the front of a
+/// menu-bar app. Returns the chosen paths (empty when cancelled).
+pub fn choose_files_with_extension(mtm: MainThreadMarker, extension: &str) -> Vec<std::path::PathBuf> {
+    use objc2_uniform_type_identifiers::UTType;
+    objc2_app_kit::NSApplication::sharedApplication(mtm).activate();
+    let panel = objc2_app_kit::NSOpenPanel::openPanel(mtm);
+    panel.setCanChooseDirectories(false);
+    panel.setCanChooseFiles(true);
+    panel.setAllowsMultipleSelection(true);
+    // A dynamic type when the app isn't registered (unbundled dev builds)
+    // still filters by extension.
+    if let Some(t) = UTType::typeWithFilenameExtension(&NSString::from_str(extension)) {
+        panel.setAllowedContentTypes(&objc2_foundation::NSArray::from_retained_slice(&[t]));
+    }
+    if panel.runModal() != objc2_app_kit::NSModalResponseOK {
+        return Vec::new();
+    }
+    panel.URLs().iter().filter_map(|u| u.path()).map(|p| std::path::PathBuf::from(p.to_string())).collect()
+}
+
+/// Show a modal warning alert with a title and detail text.
+pub fn warning_alert(mtm: MainThreadMarker, title: &str, detail: &str) {
+    objc2_app_kit::NSApplication::sharedApplication(mtm).activate();
+    let alert = objc2_app_kit::NSAlert::new(mtm);
+    alert.setAlertStyle(objc2_app_kit::NSAlertStyle::Warning);
+    alert.setMessageText(&NSString::from_str(title));
+    alert.setInformativeText(&NSString::from_str(detail));
+    alert.runModal();
+}

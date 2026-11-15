@@ -25,6 +25,8 @@
 //! [`ShapeDto`], …) with lossless conversions both ways, so the in-memory
 //! model can change without silently changing the file format.
 
+use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -72,6 +74,8 @@ pub enum DocError {
     Invalid(String),
     #[error("embedded image is not a PNG")]
     NotPng,
+    #[error("{0}")]
+    Io(String),
 }
 
 // -- DTOs ----------------------------------------------------------------------
@@ -494,6 +498,69 @@ fn migrate_v0_to_v1(mut json: Value) -> Result<Value, DocError> {
     Ok(json)
 }
 
+// -- files ---------------------------------------------------------------------
+
+/// The `.lumora` document that sits next to a capture's exported image
+/// (same directory, same stem).
+pub fn doc_path_for(image: &Path) -> PathBuf {
+    image.with_extension(EXTENSION)
+}
+
+/// The PNG export that sits next to a `.lumora` document.
+pub fn export_path_for(doc: &Path) -> PathBuf {
+    doc.with_extension("png")
+}
+
+/// Whether `path` names a `.lumora` document (extension, case-insensitive).
+pub fn is_doc_path(path: &Path) -> bool {
+    path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case(EXTENSION))
+}
+
+/// Name-clash test for a new capture saved as `image`: taken when either
+/// the image or its `.lumora` sibling already exists, so a fresh capture
+/// never overwrites an orphaned document. Pass it to
+/// [`crate::filename::unique_path`] as `|p| pair_taken(p, exists)`.
+pub fn pair_taken(image: &Path, exists: impl Fn(&Path) -> bool) -> bool {
+    exists(image) || exists(&doc_path_for(image))
+}
+
+/// The hidden sibling an atomic write of `path` goes through:
+/// `.<file name>.<pid>.tmp` in the same directory (so the final rename
+/// never crosses volumes).
+pub fn temp_path_for(path: &Path) -> PathBuf {
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "document".into());
+    path.with_file_name(format!(".{name}.{}.tmp", std::process::id()))
+}
+
+/// Write `bytes` to `path` atomically: write and sync a temp sibling, then
+/// rename it over `path`. Readers see the old file or the new one, never a
+/// partial write. The temp file is removed on failure.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = temp_path_for(path);
+    let result = (|| {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        f.sync_all()?;
+        drop(f);
+        std::fs::rename(&tmp, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// Read and decode a `.lumora` file. I/O failures come back as
+/// [`DocError::Io`].
+pub fn read(path: &Path) -> Result<LumoraDoc, DocError> {
+    let bytes = std::fs::read(path).map_err(|e| DocError::Io(e.to_string()))?;
+    LumoraDoc::decode(&bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -753,5 +820,58 @@ mod tests {
         let back = LumoraDoc::decode(&bytes).unwrap();
         assert_eq!(back.to_annotations().unwrap(), d.items());
         assert_eq!(back, file);
+    }
+
+    // -- files -------------------------------------------------------------------
+
+    #[test]
+    fn sibling_paths() {
+        let png = Path::new("/caps/Lumora 2026-11-16 at 00.40.12.png");
+        let doc = doc_path_for(png);
+        assert_eq!(doc, Path::new("/caps/Lumora 2026-11-16 at 00.40.12.lumora"));
+        assert_eq!(export_path_for(&doc), png);
+        assert!(is_doc_path(&doc));
+        assert!(is_doc_path(Path::new("a/B.LUMORA")));
+        assert!(!is_doc_path(png));
+        assert!(!is_doc_path(Path::new("lumora")));
+    }
+
+    #[test]
+    fn pair_clash_checks_both_files() {
+        let png = Path::new("/c/shot.png");
+        assert!(!pair_taken(png, |_| false));
+        assert!(pair_taken(png, |p| p == Path::new("/c/shot.png")));
+        assert!(pair_taken(png, |p| p == Path::new("/c/shot.lumora")));
+        // With unique_path: an orphaned document pushes the new capture on.
+        let taken = [PathBuf::from("/c/shot.lumora")];
+        let got = crate::filename::unique_path(Path::new("/c"), "shot", "png", |p| {
+            pair_taken(p, |q| taken.iter().any(|t| t == q))
+        });
+        assert_eq!(got, Path::new("/c/shot (2).png"));
+    }
+
+    #[test]
+    fn temp_path_is_a_hidden_sibling() {
+        let t = temp_path_for(Path::new("/c/shot.lumora"));
+        assert_eq!(t.parent(), Some(Path::new("/c")));
+        let name = t.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with(".shot.lumora.") && name.ends_with(".tmp"), "{name}");
+    }
+
+    #[test]
+    fn atomic_write_and_read_back() {
+        let dir = std::env::temp_dir().join(format!("lumora-doc-test-{}", std::process::id()));
+        let path = dir.join("nested").join("shot.lumora");
+        let d = sample_document();
+        let file = LumoraDoc::from_editor_state(&d, PNG.to_vec(), IMAGE, None, 7);
+        write_atomic(&path, &file.encode()).unwrap();
+        assert_eq!(read(&path).unwrap(), file);
+        // Overwrite in place; no temp file is left behind.
+        write_atomic(&path, b"garbage").unwrap();
+        assert_eq!(read(&path), Err(DocError::BadMagic));
+        let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap()).unwrap().flatten().collect();
+        assert_eq!(leftovers.len(), 1);
+        assert!(matches!(read(&dir.join("missing.lumora")), Err(DocError::Io(_))));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
