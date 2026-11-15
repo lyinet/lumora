@@ -7,6 +7,26 @@ All notable changes to Lumora are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Recording → step-by-step tutorial** — "Make Tutorial" on a recording's
+  Quick Access card (shown when it has a click log) and "Make Tutorial from
+  Recording…" in the menu bar (open panel for `.mp4` / `.mov`; a recording
+  that already has a `.steps.json` reopens with its edits). Steps come from
+  `events.json` (`lumora_core::tutorial`): clicks outside the recorded area
+  are dropped, double / rapid clicks on the same spot (≤ 0.4 s, ≤ 24 px)
+  merge, clicks < 0.15 s apart collapse, at most 40 steps. For each step a
+  frame 0.12 s after the click is read with `AVAssetImageGenerator` (zero
+  tolerance), a ring is drawn at the click with Core Graphics, the frame is
+  cropped around it (aspect-preserving, ≥ 640 pt or half the frame) and
+  saved as `<stem>.tutorial/step-NN.png`, and Vision reads a strip around the
+  click for an OCR hint. Titles: local templates ("Click “Save”", "Click in
+  <window>" / "点击“保存”", "在 <窗口> 中点击") or, with AI on and Settings →
+  AI → "Write tutorial steps with AI" (default on), the provider writes
+  `{title, detail}` JSON from text only (click kind, app, window title, OCR
+  hint — no images) in the output language; a tolerant parser falls back to
+  local titles. The tutorial window lists thumbnail + editable title / detail
+  + delete per step with Export Markdown…, Export HTML… (one self-contained
+  file, base64 images, light / dark) and Copy Markdown. Edits are saved to
+  `<stem>.steps.json` (`schema_version` 1).
 - **Click ripples** — while recording, a global + local mouse-down monitor
   draws a spring-and-fade ring at each click (left blue, right / ⌃-click
   orange, other buttons purple) on a transparent, click-through, all-Spaces
@@ -70,6 +90,9 @@ All notable changes to Lumora are documented here. The format follows
   for tables).
 
 ### Fixed
+- Saving a temporary recording from its Quick Access card now moves its
+  `.events.json` with it, and Delete trashes it, so the click log never
+  strands in the temp folder.
 - The editor toolbar no longer overflows at the 760 pt minimum window width:
   a pure `layout::toolbar_overflow` decides on every resize which trailing
   items of the tool strip (options, stroke widths, colours, then tools from

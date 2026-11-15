@@ -286,6 +286,16 @@ pub(super) fn build_ai(form: &mut Form<'_>, state: &Rc<State>, targets: &mut Vec
         caption(form, tr(Msg::AiVisionHint), Rect::new(CONTROL_X + 20.0, form.y + 4.0, W - CONTROL_X - 50.0, 16.0));
     vision_hint.setTextColor(Some(&NSColor::systemOrangeColor()));
 
+    checkbox(
+        form,
+        targets,
+        state,
+        tr(Msg::AiTutorialLabel),
+        tr(Msg::AiTutorialSteps),
+        |s| s.ai.tutorial_steps,
+        |s, v| s.ai.tutorial_steps = v,
+    );
+
     let timeout = text_field(form, tr(Msg::AiTimeout), &ai.timeout_secs.to_string(), 60.0);
     timeout.setAlignment(objc2_app_kit::NSTextAlignment::Right);
     caption(form, tr(Msg::AiSecondsUnit), Rect::new(CONTROL_X + 68.0, form.y + 7.0, 160.0, 16.0));

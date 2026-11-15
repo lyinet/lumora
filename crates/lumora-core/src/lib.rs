@@ -34,6 +34,7 @@ pub mod settings;
 pub mod snap;
 pub mod spring;
 pub mod stitch;
+pub mod tutorial;
 
 pub use action::Action;
 pub use geometry::{Point, Rect, Size};

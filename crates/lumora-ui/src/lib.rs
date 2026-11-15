@@ -48,4 +48,6 @@ pub mod text_result;
 #[cfg(target_os = "macos")]
 pub mod toast;
 #[cfg(target_os = "macos")]
+pub mod tutorial_window;
+#[cfg(target_os = "macos")]
 pub mod util;

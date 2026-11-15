@@ -96,6 +96,11 @@ define_class!(
             post_command(Command::OpenDocument);
         }
 
+        #[unsafe(method(makeTutorial:))]
+        fn make_tutorial(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::MakeTutorial);
+        }
+
         #[unsafe(method(showSettings:))]
         fn show_settings(&self, _sender: Option<&AnyObject>) {
             post_command(Command::ShowSettings);

@@ -562,6 +562,50 @@ pub fn choose_files_with_extension(mtm: MainThreadMarker, extension: &str) -> Ve
     panel.URLs().iter().filter_map(|u| u.path()).map(|p| std::path::PathBuf::from(p.to_string())).collect()
 }
 
+/// Run a modal open panel for one file whose extension is one of
+/// `extensions`. Returns `None` when cancelled.
+pub fn choose_file_with_extensions(mtm: MainThreadMarker, extensions: &[&str]) -> Option<std::path::PathBuf> {
+    use objc2_uniform_type_identifiers::UTType;
+    objc2_app_kit::NSApplication::sharedApplication(mtm).activate();
+    let panel = objc2_app_kit::NSOpenPanel::openPanel(mtm);
+    panel.setCanChooseDirectories(false);
+    panel.setCanChooseFiles(true);
+    panel.setAllowsMultipleSelection(false);
+    let types: Vec<_> =
+        extensions.iter().filter_map(|e| UTType::typeWithFilenameExtension(&NSString::from_str(e))).collect();
+    if !types.is_empty() {
+        panel.setAllowedContentTypes(&objc2_foundation::NSArray::from_retained_slice(&types));
+    }
+    if panel.runModal() != objc2_app_kit::NSModalResponseOK {
+        return None;
+    }
+    panel.URL().and_then(|u| u.path()).map(|p| std::path::PathBuf::from(p.to_string()))
+}
+
+/// Run a modal save panel starting in `dir` with `name`, restricted to
+/// `extension`. Returns the chosen path, or `None` when cancelled.
+pub fn choose_save_path(
+    mtm: MainThreadMarker,
+    dir: &std::path::Path,
+    name: &str,
+    extension: &str,
+) -> Option<std::path::PathBuf> {
+    use objc2_uniform_type_identifiers::UTType;
+    objc2_app_kit::NSApplication::sharedApplication(mtm).activate();
+    let panel = objc2_app_kit::NSSavePanel::savePanel(mtm);
+    panel.setNameFieldStringValue(&NSString::from_str(name));
+    panel.setCanCreateDirectories(true);
+    let url = objc2_foundation::NSURL::fileURLWithPath(&NSString::from_str(&dir.to_string_lossy()));
+    panel.setDirectoryURL(Some(&url));
+    if let Some(t) = UTType::typeWithFilenameExtension(&NSString::from_str(extension)) {
+        panel.setAllowedContentTypes(&objc2_foundation::NSArray::from_retained_slice(&[t]));
+    }
+    if panel.runModal() != objc2_app_kit::NSModalResponseOK {
+        return None;
+    }
+    panel.URL().and_then(|u| u.path()).map(|p| std::path::PathBuf::from(p.to_string()))
+}
+
 /// Show a modal warning alert with a title and detail text.
 pub fn warning_alert(mtm: MainThreadMarker, title: &str, detail: &str) {
     objc2_app_kit::NSApplication::sharedApplication(mtm).activate();

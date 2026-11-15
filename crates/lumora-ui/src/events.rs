@@ -50,6 +50,19 @@ pub enum CardAction {
     Annotate,
     /// Dropped into another app; the card dismisses itself.
     DraggedOut,
+    /// "Make Tutorial" (recordings with a click log).
+    Tutorial,
+}
+
+/// What the tutorial window tells the app. Each carries the tutorial with
+/// the window's current edits.
+#[derive(Debug)]
+pub enum TutorialAction {
+    ExportMarkdown(Box<lumora_core::tutorial::Tutorial>),
+    ExportHtml(Box<lumora_core::tutorial::Tutorial>),
+    CopyMarkdown(Box<lumora_core::tutorial::Tutorial>),
+    /// The window closed (the app saves `.steps.json` and drops it).
+    Closed(Box<lumora_core::tutorial::Tutorial>),
 }
 
 /// A flattened editor export, plus the editable state it came from (for
@@ -216,6 +229,11 @@ pub enum UiEvent {
     Onboarding(OnboardingAction),
     /// The Capture Text result panel.
     TextResult(TextResultAction),
+    /// A tutorial window (`id` from `TutorialWindow::show`).
+    Tutorial {
+        id: u64,
+        action: TutorialAction,
+    },
     /// The AI tab needs the stored API key for `provider`; the app reads
     /// the Keychain and answers with `SettingsWindow::set_ai_key`.
     AiKeyRequested(lumora_core::ai::AiProvider),

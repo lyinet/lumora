@@ -49,3 +49,5 @@ pub mod permission;
 pub mod recorder;
 #[cfg(target_os = "macos")]
 pub mod screenshot;
+#[cfg(target_os = "macos")]
+pub mod tutorial;

@@ -280,6 +280,7 @@ impl App {
                 point_size,
                 file: file.clone(),
                 video_duration: None,
+                tutorial: false,
             });
         } else {
             shutter::play(self.mtm, &image, appkit_frame, None, || {});

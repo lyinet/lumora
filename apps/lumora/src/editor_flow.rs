@@ -124,6 +124,7 @@ impl App {
             point_size: Size::new(rec.frame.width(), rec.frame.height()),
             file: rec.file.clone(),
             video_duration: None,
+            tutorial: false,
         };
         self.captures.borrow_mut().insert(new_id, rec);
         self.quick.push(content);

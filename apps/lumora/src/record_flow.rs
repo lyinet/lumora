@@ -359,6 +359,7 @@ impl App {
         DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
             move || {
                 let thumb = recorder::thumbnail(&path, 640.0);
+                let tutorial = App::can_make_tutorial(&path);
                 on_main(move |app| {
                     app.captures.borrow_mut().insert(
                         id,
@@ -379,6 +380,7 @@ impl App {
                             point_size: Size::new(frame.width(), frame.height()),
                             file: path,
                             video_duration: Some(duration),
+                            tutorial,
                         });
                     }
                 });

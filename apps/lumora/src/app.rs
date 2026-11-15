@@ -202,6 +202,10 @@ pub struct App {
     pub text_panel: RefCell<Option<lumora_ui::text_result::TextResultPanel>>,
     /// Its running AI request.
     pub text_job: RefCell<Option<crate::ai_write_flow::AiJob>>,
+    /// Open tutorial windows, by id.
+    pub tutorials: RefCell<HashMap<u64, crate::tutorial_flow::OpenTutorial>>,
+    /// Movies whose tutorial is being made.
+    pub tutorial_busy: RefCell<std::collections::HashSet<PathBuf>>,
 }
 
 impl App {
@@ -251,6 +255,8 @@ impl App {
                 ai_jobs: RefCell::new(HashMap::new()),
                 text_panel: RefCell::new(None),
                 text_job: RefCell::new(None),
+                tutorials: RefCell::new(HashMap::new()),
+                tutorial_busy: RefCell::new(std::collections::HashSet::new()),
             }
         });
         APP.with(|a| *a.borrow_mut() = Rc::downgrade(&app));
@@ -315,6 +321,7 @@ impl App {
                 system::open_folder(&folder);
             }
             Command::OpenDocument => self.open_document_panel(),
+            Command::MakeTutorial => self.choose_recording_for_tutorial(),
             Command::ShowSettings => self.show_settings(),
             Command::ShowOnboarding => self.show_onboarding(),
             Command::Quit => NSApplication::sharedApplication(self.mtm).terminate(None),
@@ -374,6 +381,7 @@ impl App {
             UiEvent::ShortcutRecording(on) => self.hotkeys.borrow_mut().suspend(on),
             UiEvent::Onboarding(action) => self.on_onboarding(action),
             UiEvent::TextResult(action) => self.on_text_result(action),
+            UiEvent::Tutorial { id, action } => self.on_tutorial(id, action),
             UiEvent::AiKeyRequested(provider) => self.on_ai_key_requested(provider),
             UiEvent::AiKeySave { provider, key } => self.on_ai_key_save(provider, key),
             UiEvent::AiTestConnection { id, settings, key } => self.on_ai_test_connection(id, *settings, key),
@@ -412,6 +420,10 @@ impl App {
                             .or_else(|_| std::fs::copy(&rec.file, &dest).map(|_| ()))
                             .is_ok()
                         {
+                            // Sidecars (click log, tutorial) follow the movie.
+                            if rec.video {
+                                move_sidecars(&rec.file, &dest);
+                            }
                             rec.file = dest;
                             rec.temp = false;
                         }
@@ -439,6 +451,12 @@ impl App {
                     if rec.editable.is_some() && doc.exists() {
                         system::trash(&doc);
                     }
+                    if rec.video {
+                        let log = lumora_core::click_log::sidecar_path(&rec.file);
+                        if log.exists() {
+                            system::trash(&log);
+                        }
+                    }
                 }
                 self.quick.dismiss(id);
             }
@@ -448,6 +466,13 @@ impl App {
                 }
             }
             CardAction::DraggedOut => self.quick.dismiss(id),
+            CardAction::Tutorial => {
+                let movie = self.captures.borrow().get(&id).map(|rec| rec.file.clone());
+                if let Some(movie) = movie {
+                    self.make_tutorial(movie);
+                }
+                self.quick.dismiss(id);
+            }
             CardAction::Annotate => {
                 self.open_editor(id);
                 self.quick.dismiss(id);
@@ -610,5 +635,14 @@ impl App {
                 drop(o);
             }
         }
+    }
+}
+
+/// Move a recording's `.events.json` along with it (best effort). The
+/// tutorial is only made later, so there is nothing else to move yet.
+fn move_sidecars(from: &std::path::Path, to: &std::path::Path) {
+    let (a, b) = (lumora_core::click_log::sidecar_path(from), lumora_core::click_log::sidecar_path(to));
+    if a.exists() && std::fs::rename(&a, &b).or_else(|_| std::fs::copy(&a, &b).map(|_| ())).is_err() {
+        log::warn!("could not move {}", a.display());
     }
 }

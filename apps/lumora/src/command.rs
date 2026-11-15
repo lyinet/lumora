@@ -17,6 +17,8 @@ pub enum Command {
     OpenFolder,
     /// Choose `.lumora` documents to reopen in the editor.
     OpenDocument,
+    /// Choose a recording and make a step-by-step tutorial from it.
+    MakeTutorial,
     ShowSettings,
     ShowOnboarding,
     Quit,

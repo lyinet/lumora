@@ -49,6 +49,8 @@ pub struct CardContent {
     pub file: PathBuf,
     /// Recording duration; shows a play badge and disables Pin.
     pub video_duration: Option<f64>,
+    /// Offer "Make Tutorial" (a recording with a click log).
+    pub tutorial: bool,
 }
 
 impl std::fmt::Debug for CardContent {
@@ -393,8 +395,14 @@ impl QuickAccess {
         }
 
         // Hover buttons.
-        let (buttons, targets) =
-            build_buttons(mtm, thumb_frame, content.id, content.video_duration.is_some(), &inner.sink);
+        let (buttons, targets) = build_buttons(
+            mtm,
+            thumb_frame,
+            content.id,
+            content.video_duration.is_some(),
+            content.tutorial,
+            &inner.sink,
+        );
         buttons.setAlphaValue(0.0);
         view.addSubview(&buttons);
 
@@ -527,6 +535,7 @@ fn build_buttons(
     frame: Rect,
     id: u64,
     is_video: bool,
+    tutorial: bool,
     sink: &EventSink,
 ) -> (Retained<NSView>, Vec<Retained<ActionTarget>>) {
     let overlay = NSView::initWithFrame(NSView::alloc(mtm), cg_rect(frame));
@@ -544,6 +553,10 @@ fn build_buttons(
     ];
     if is_video {
         actions.retain(|a| a.2 != CardAction::Pin && a.2 != CardAction::Annotate);
+    }
+    if tutorial {
+        let at = actions.len() - 1; // before Delete
+        actions.insert(at, ("list.number", tr(Msg::MakeTutorial), CardAction::Tutorial));
     }
     let b = size::CARD_BUTTON;
     let gap = 6.0;
