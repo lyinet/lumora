@@ -192,6 +192,8 @@ pub struct App {
     permission_poll: RefCell<Option<Retained<NSTimer>>>,
     next_id: Cell<u64>,
     pub session: RefCell<RecordingSession>,
+    /// Running AI writing requests, by editor (capture) id.
+    pub ai_jobs: RefCell<HashMap<u64, crate::ai_write_flow::AiJob>>,
 }
 
 impl App {
@@ -237,6 +239,7 @@ impl App {
                 permission_poll: RefCell::new(None),
                 next_id: Cell::new(1),
                 session: RefCell::new(RecordingSession::default()),
+                ai_jobs: RefCell::new(HashMap::new()),
             }
         });
         APP.with(|a| *a.borrow_mut() = Rc::downgrade(&app));
@@ -436,7 +439,7 @@ impl App {
 
     // -- settings -------------------------------------------------------------
 
-    fn show_settings(self: &Rc<Self>) {
+    pub(crate) fn show_settings(self: &Rc<Self>) {
         if let Some(w) = self.settings_window.borrow().as_ref() {
             if w.is_visible() {
                 w.focus(self.mtm);
@@ -466,9 +469,11 @@ impl App {
             }
         }
         let beautify = s.beautify.clone();
+        let ai_enabled = s.ai.enabled;
         drop(s);
         for editor in self.editors.borrow().values() {
             editor.set_beautify(beautify.clone());
+            editor.set_ai_enabled(ai_enabled);
         }
         self.apply_hotkeys();
         if language_changed {

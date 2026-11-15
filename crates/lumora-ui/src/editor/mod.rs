@@ -28,6 +28,7 @@
 //! [`render::flatten`] at the capture's native scale and go to the app as
 //! [`EditorAction`]s; the editor never writes the capture file itself.
 
+mod ai_sheet;
 mod beautify_panel;
 mod render;
 mod toolbar;
@@ -37,6 +38,9 @@ use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
+use lumora_core::ai::{
+    clean_output, error_opens_settings, plan_insert, text_of, wrap, AiError, AiTaskKind, InsertPlan,
+};
 use lumora_core::annotate::document::{Annotation, AnnotationId};
 use lumora_core::annotate::editor::{Editor, Effect, Input, Key, Tool};
 use lumora_core::annotate::render::{ops_bounds, render as render_ops};
@@ -49,20 +53,22 @@ use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{sel, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSAutoresizingMaskOptions, NSBackingStoreType, NSColorPanel, NSEvent, NSEventModifierFlags,
-    NSFocusRingType, NSImage, NSTextField, NSView, NSWindow, NSWindowStyleMask, NSWindowTitleVisibility,
+    NSFocusRingType, NSImage, NSMenu, NSMenuItem, NSTextField, NSView, NSWindow, NSWindowStyleMask,
+    NSWindowTitleVisibility,
 };
 use objc2_core_foundation::{CFRetained, CGPoint, CGSize};
 use objc2_core_graphics::CGImage;
 use objc2_foundation::{NSArray, NSString};
 use objc2_quartz_core::{CAGradientLayer, CALayer, CAShapeLayer, CATransaction, CATransform3D};
 
+use self::ai_sheet::{AiSheet, Phase, SheetEvent, SheetHandler};
 use self::beautify_panel::{cg_rgba, choose_background_image, set_gradient, BeautifyPanel, PanelEvent, PanelHandler};
 
 use self::render::{annotation_font, build_layer, flatten, LayerContext, RedactionCache};
 pub use self::toolbar::ToolbarAction;
 use self::toolbar::{Toolbar, ToolbarHandler};
 use self::views::{CanvasView, DragTile, EditorWindowDelegate, Pointer};
-use crate::events::{EditorAction, EditorImage, EventSink, UiEvent};
+use crate::events::{AiWriteRequest, EditorAction, EditorImage, EventSink, UiEvent};
 use crate::tokens::{color, motion, radius, size};
 use crate::util::{
     cf_as_object, cg_color, cg_path, cg_rect, ease_scalar, rect, rgb8_of, spring_scalar, text_size, without_actions,
@@ -82,6 +88,13 @@ struct TextEdit {
     id: Option<AnnotationId>,
     origin: Point,
     _target: Retained<ActionTarget>,
+}
+
+/// The AI request the result sheet belongs to.
+struct AiJob {
+    kind: AiTaskKind,
+    /// The text annotation Polish / Translate worked on.
+    source: Option<AnnotationId>,
 }
 
 pub(crate) struct State {
@@ -121,6 +134,14 @@ pub(crate) struct State {
     closed: Cell<bool>,
     _delegate: Retained<EditorWindowDelegate>,
     color_target: Retained<ActionTarget>,
+    ai_sheet: AiSheet,
+    ai_enabled: Cell<bool>,
+    /// Id of the request being streamed (0 = none).
+    ai_request: Cell<u64>,
+    ai_next: Cell<u64>,
+    ai_job: RefCell<Option<AiJob>>,
+    /// Targets of the AI menu's items (rebuilt each time it opens).
+    ai_menu_targets: RefCell<Vec<Retained<ActionTarget>>>,
 }
 
 /// An open editor. Keep it alive while the window is open; the app drops it
@@ -304,6 +325,14 @@ impl EditorWindow {
             let panel = BeautifyPanel::new(mtm, canvas_frame.width(), canvas_frame.height(), panel_handler);
             panel.sync(&beautify);
             container.addSubview(&panel.view);
+            let w = weak.clone();
+            let sheet_handler: SheetHandler = Rc::new(move |e| {
+                if let Some(s) = w.upgrade() {
+                    State::sheet_event(&s, e);
+                }
+            });
+            let ai_sheet = AiSheet::new(mtm, content_rect.width(), sheet_handler);
+            container.addSubview(&ai_sheet.view);
             let toolbar = Toolbar::new(mtm, content_rect.width(), content_rect.height(), handler, drag.clone());
             toolbar.set_beautify_state(false, beautify.enabled);
             container.addSubview(&toolbar.view);
@@ -357,6 +386,12 @@ impl EditorWindow {
                 closed: Cell::new(false),
                 _delegate: delegate.clone(),
                 color_target,
+                ai_sheet,
+                ai_enabled: Cell::new(false),
+                ai_request: Cell::new(0),
+                ai_next: Cell::new(1),
+                ai_job: RefCell::new(None),
+                ai_menu_targets: RefCell::new(Vec::new()),
             }
         });
         *canvas.ivars().state.borrow_mut() = Rc::downgrade(&state);
@@ -382,6 +417,36 @@ impl EditorWindow {
     pub fn focus(&self) {
         NSApplication::sharedApplication(self.state.mtm).activate();
         self.state.window.makeKeyAndOrderFront(None);
+    }
+
+    /// Turn the AI writing menu on or off (Settings → AI).
+    pub fn set_ai_enabled(&self, enabled: bool) {
+        self.state.ai_enabled.set(enabled);
+        self.state.toolbar.set_ai_enabled(enabled);
+    }
+
+    /// Streamed text for AI request `request`; stale ids are ignored.
+    pub fn ai_delta(&self, request: u64, delta: &str) {
+        let s = &self.state;
+        if s.closed.get() || request == 0 || request != s.ai_request.get() {
+            return;
+        }
+        s.ai_sheet.append(delta);
+    }
+
+    /// AI request `request` ended: the full text, or why it failed. Stale
+    /// ids (stopped, retried, closed) are ignored.
+    pub fn ai_finished(&self, request: u64, result: Result<String, AiError>) {
+        let s = &self.state;
+        if s.closed.get() || request == 0 || request != s.ai_request.get() {
+            return;
+        }
+        s.ai_request.set(0);
+        match result {
+            Ok(text) => s.ai_sheet.finish(&clean_output(&text)),
+            Err(AiError::Cancelled) => s.ai_sheet.stopped(&clean_output(&s.ai_sheet.text())),
+            Err(e) => s.ai_sheet.fail(&e.user_message(), error_opens_settings(&e)),
+        }
     }
 
     /// Close the window (emits [`EditorAction::Closed`]).
@@ -425,6 +490,7 @@ impl State {
     /// discrete changes such as toggling the panel or the window frame).
     fn layout_with(&self, animate: bool) {
         let b = rect(self.canvas.bounds());
+        self.ai_sheet.fit(b.width());
         let shown = self.wanted_shown();
         if shown.is_empty() {
             return;
@@ -605,6 +671,9 @@ impl State {
             126 => Some(Key::Nudge(0, -1)),
             _ => None,
         };
+        if key == Some(Key::Escape) && this.ai_sheet.is_open() {
+            return State::sheet_event(this, SheetEvent::Close);
+        }
         if let Some(key) = key {
             let effect = this.editor.borrow_mut().handle(Input::Key { key, shift });
             return State::apply(this, effect);
@@ -651,6 +720,7 @@ impl State {
             "z" => State::toolbar_action(this, if shift { ToolbarAction::Redo } else { ToolbarAction::Undo }),
             "c" => State::toolbar_action(this, ToolbarAction::Copy),
             "s" => State::toolbar_action(this, ToolbarAction::Save),
+            "j" if !shift => State::toolbar_action(this, ToolbarAction::Ai),
             "w" => this.window.performClose(None),
             "]" => {
                 let e = this.editor.borrow_mut().bring_to_front();
@@ -717,11 +787,205 @@ impl State {
                     State::toggle_panel(this);
                     Effect::None
                 }
+                ToolbarAction::Ai => {
+                    drop(ed);
+                    State::show_ai_menu(this);
+                    Effect::None
+                }
             }
         };
         State::apply(this, effect);
         // Tool/option changes with nothing selected still need the toolbar.
         this.sync(None);
+    }
+
+    // -- AI writing -------------------------------------------------------------
+
+    /// Pop up the AI menu under the toolbar button: the six tasks, with
+    /// Translate as a submenu of target languages.
+    fn show_ai_menu(this: &Rc<State>) {
+        if !this.ai_enabled.get() {
+            return;
+        }
+        let mtm = this.mtm;
+        let mut targets = Vec::new();
+        let item = |kind: AiTaskKind, title: &str, targets: &mut Vec<Retained<ActionTarget>>| {
+            let weak = Rc::downgrade(this);
+            let target = ActionTarget::new(mtm, move |_| {
+                if let Some(s) = weak.upgrade() {
+                    State::ai_run(&s, kind);
+                }
+            });
+            // SAFETY: the target is kept alive in `ai_menu_targets`.
+            let it = unsafe {
+                NSMenuItem::initWithTitle_action_keyEquivalent(
+                    NSMenuItem::alloc(mtm),
+                    &NSString::from_str(title),
+                    Some(ActionTarget::action()),
+                    &NSString::new(),
+                )
+            };
+            unsafe { it.setTarget(Some(&target)) };
+            targets.push(target);
+            it
+        };
+        let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(tr(Msg::AiMenu)));
+        menu.setAutoenablesItems(false);
+        for kind in AiTaskKind::MENU {
+            match kind {
+                AiTaskKind::Translate(_) => {
+                    let parent = unsafe {
+                        NSMenuItem::initWithTitle_action_keyEquivalent(
+                            NSMenuItem::alloc(mtm),
+                            &NSString::from_str(tr(Msg::AiTaskTranslate)),
+                            None,
+                            &NSString::new(),
+                        )
+                    };
+                    let sub = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(tr(Msg::AiTaskTranslate)));
+                    for lang in lumora_core::i18n::Language::ALL {
+                        let k = AiTaskKind::Translate(lang);
+                        sub.addItem(&item(k, lumora_core::ai::language_name(lang), &mut targets));
+                    }
+                    parent.setSubmenu(Some(&sub));
+                    menu.addItem(&parent);
+                }
+                k => {
+                    if k == AiTaskKind::Polish {
+                        menu.addItem(&NSMenuItem::separatorItem(mtm));
+                    }
+                    menu.addItem(&item(k, &k.title(), &mut targets));
+                }
+            }
+        }
+        *this.ai_menu_targets.borrow_mut() = targets;
+        let button = this.toolbar.ai_button();
+        let b = button.bounds();
+        // Below the button (toolbar views are not flipped: y = 0 is the bottom).
+        let at = if button.isFlipped() { CGPoint::new(0.0, b.size.height + 4.0) } else { CGPoint::new(0.0, -4.0) };
+        menu.popUpMenuPositioningItem_atLocation_inView(None, at, Some(button));
+    }
+
+    /// Start `kind`: stop any running request, pick the source text
+    /// annotation (Polish / Translate), open the sheet and ask the app.
+    fn ai_run(this: &Rc<State>, kind: AiTaskKind) {
+        if this.closed.get() {
+            return;
+        }
+        State::end_text_edit(this);
+        let previous = this.ai_request.replace(0);
+        if previous != 0 {
+            (this.sink)(UiEvent::Editor { id: this.id, action: EditorAction::AiCancel(previous) });
+        }
+        let (source, document) = {
+            let ed = this.editor.borrow();
+            let source = if kind.uses_selection() { text_of(ed.document(), ed.selected()) } else { None };
+            (source, ed.document().clone())
+        };
+        let request = this.ai_next.get();
+        this.ai_next.set(request + 1);
+        this.ai_request.set(request);
+        *this.ai_job.borrow_mut() = Some(AiJob { kind, source: source.as_ref().map(|(id, _)| *id) });
+        let status = if kind.needs_ocr(source.is_some()) { Msg::AiReadingText } else { Msg::AiWriting };
+        this.ai_sheet.begin(&kind.title(), status, kind.replaces_source() && source.is_some());
+        let req = AiWriteRequest {
+            request,
+            kind,
+            source_text: source.map(|(_, t)| t),
+            document,
+            base: this.base.clone(),
+            scale: this.scale,
+        };
+        (this.sink)(UiEvent::Editor { id: this.id, action: EditorAction::AiWrite(Box::new(req)) });
+    }
+
+    fn sheet_event(this: &Rc<State>, event: SheetEvent) {
+        if this.closed.get() {
+            return;
+        }
+        match event {
+            SheetEvent::Stop => {
+                let id = this.ai_request.replace(0);
+                if id != 0 {
+                    (this.sink)(UiEvent::Editor { id: this.id, action: EditorAction::AiCancel(id) });
+                }
+                this.ai_sheet.stopped(&clean_output(&this.ai_sheet.text()));
+            }
+            SheetEvent::Retry => {
+                let kind = this.ai_job.borrow().as_ref().map(|j| j.kind);
+                if let Some(kind) = kind {
+                    // Retry works on the same annotation when it is still selected.
+                    let source = this.ai_job.borrow().as_ref().and_then(|j| j.source);
+                    if source.is_some() && this.editor.borrow().selected() != source {
+                        let e = this.editor.borrow_mut().select(source);
+                        State::apply(this, e);
+                    }
+                    State::ai_run(this, kind);
+                }
+            }
+            SheetEvent::Copy => {
+                let text = this.ai_sheet.text();
+                if !text.trim().is_empty() {
+                    lumora_capture::clipboard::copy_text(&text);
+                    this.ai_sheet.note(tr(Msg::AiCopied));
+                }
+            }
+            SheetEvent::Insert => State::ai_insert(this),
+            SheetEvent::OpenSettings => {
+                (this.sink)(UiEvent::Editor { id: this.id, action: EditorAction::OpenAiSettings });
+            }
+            SheetEvent::Close => {
+                let id = this.ai_request.replace(0);
+                if id != 0 {
+                    (this.sink)(UiEvent::Editor { id: this.id, action: EditorAction::AiCancel(id) });
+                }
+                this.ai_sheet.hide();
+                *this.ai_job.borrow_mut() = None;
+                this.window.makeFirstResponder(Some(&this.canvas));
+            }
+        }
+    }
+
+    /// "Insert as Text" / "Replace Text": one undoable edit.
+    fn ai_insert(this: &Rc<State>) {
+        if this.ai_sheet.phase() != Phase::Done {
+            return;
+        }
+        let text = this.ai_sheet.text();
+        if text.trim().is_empty() {
+            return;
+        }
+        let Some((kind, source)) = this.ai_job.borrow().as_ref().map(|j| (j.kind, j.source)) else { return };
+        State::end_text_edit(this);
+        let effect = {
+            let mut ed = this.editor.borrow_mut();
+            let doc = ed.document();
+            let vis = doc.visible_rect();
+            let font_size = match source.and_then(|id| doc.get(id)) {
+                Some(a) if kind.replaces_source() => a.style.width.font_size(),
+                _ => ed.style().width.font_size(),
+            };
+            // Wrap to ~80 % of the visible width (average glyph ≈ 0.58 em).
+            let columns = ((vis.width() * 0.8) / (font_size * 0.58)).floor().max(8.0) as usize;
+            let text = wrap(&text, columns);
+            let (w, h) = text_size(&text, &annotation_font(font_size));
+            let size = Size::new(w, h);
+            match plan_insert(kind, source, doc, size) {
+                InsertPlan::Replace(id) => {
+                    let origin = match doc.get(id).map(|a| &a.shape) {
+                        Some(Shape::Text { origin, .. }) => *origin,
+                        _ => vis.origin,
+                    };
+                    ed.commit_text(Some(id), origin, &text, size)
+                }
+                InsertPlan::Insert(at) => ed.commit_text(None, at, &text, size),
+            }
+        };
+        State::apply(this, effect);
+        this.sync(None);
+        this.ai_sheet.hide();
+        *this.ai_job.borrow_mut() = None;
+        this.window.makeFirstResponder(Some(&this.canvas));
     }
 
     // -- beautify -------------------------------------------------------------
@@ -1045,6 +1309,10 @@ impl State {
             return;
         }
         State::end_text_edit(self);
+        let ai = self.ai_request.replace(0);
+        if ai != 0 {
+            (self.sink)(UiEvent::Editor { id: self.id, action: EditorAction::AiCancel(ai) });
+        }
         self.panel.deactivate_well();
         if NSColorPanel::sharedColorPanelExists(self.mtm) {
             let panel = NSColorPanel::sharedColorPanel(self.mtm);

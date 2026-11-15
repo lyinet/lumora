@@ -8,6 +8,8 @@
 #[cfg(target_os = "macos")]
 mod ai_flow;
 #[cfg(target_os = "macos")]
+mod ai_write_flow;
+#[cfg(target_os = "macos")]
 mod app;
 #[cfg(target_os = "macos")]
 mod capture_flow;

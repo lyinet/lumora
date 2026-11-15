@@ -386,6 +386,18 @@ messages! {
     AiPrivacyLabel => "Privacy:", "隐私：";
     AiPrivacyNote => "By default only recognised text and annotation text are sent. The screenshot image is sent only if you turn it on above. Your API key stays in the macOS Keychain.",
         "默认只发送识别出的文字和标注文字；只有在上方开启后才会发送截图图片。API 密钥只保存在 macOS 钥匙串中。";
+    AiMenuTip => "AI Writing (⌘J)", "AI 写作（⌘J）";
+    AiMenuDisabledTip => "Enable in Settings → AI Writing", "请在“设置 → AI”中启用 AI 写作";
+    AiOpenSettings => "Open AI Settings", "打开 AI 设置";
+    AiStop => "Stop", "停止";
+    AiRetry => "Retry", "重试";
+    AiInsert => "Insert as Text", "插入为文字";
+    AiReplace => "Replace Text", "替换文字";
+    AiClose => "Close", "关闭";
+    AiReadingText => "Reading the screenshot’s text…", "正在识别截图中的文字…";
+    AiWriting => "Writing…", "正在生成…";
+    AiCopied => "Copied to the clipboard", "已拷贝到剪贴板";
+    AiStopped => "Stopped.", "已停止。";
 }
 
 #[cfg(test)]

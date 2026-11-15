@@ -11,6 +11,7 @@ mod error;
 mod form;
 mod prompt;
 mod stream;
+mod write;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -26,6 +27,10 @@ pub use form::{
 };
 pub use prompt::{build_request, ping_body, AiContext, ChatRequest, StepHint, WritingTask, MAX_INPUT_CHARS};
 pub use stream::{model_ids, parse_completion, SseEvent, SseParser};
+pub use write::{
+    clean_output, error_opens_settings, language_name, plan_insert, text_of, wrap, AiTaskKind, InsertPlan,
+    INSERT_MARGIN,
+};
 
 /// Keychain generic-password service under which API keys are stored; the
 /// account is [`AiProvider::id`].

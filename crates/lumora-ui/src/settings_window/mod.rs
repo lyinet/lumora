@@ -412,6 +412,14 @@ impl SettingsWindow {
     }
 
     /// Bring the existing window forward.
+    /// Bring the AI tab to the front.
+    pub fn select_ai_tab(&self) {
+        let n = self.tabs.numberOfTabViewItems();
+        if n > 0 {
+            self.tabs.selectTabViewItemAtIndex(n - 1);
+        }
+    }
+
     pub fn focus(&self, mtm: MainThreadMarker) {
         NSApplication::sharedApplication(mtm).activate();
         self.window.makeKeyAndOrderFront(None);
