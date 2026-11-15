@@ -23,6 +23,16 @@ pub fn recognize_text(image: CFRetained<CGImage>, done: impl FnOnce(Result<Strin
         .exec_async(move || done(recognize_sync(&image)));
 }
 
+/// Like [`recognize_text`], but hands back every observation with its box
+/// (pixels of `image`, y down) for table / code reconstruction.
+pub fn recognize_text_boxes(
+    image: CFRetained<CGImage>,
+    done: impl FnOnce(Result<Vec<TextBox>, CaptureError>) + Send + 'static,
+) {
+    DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated))
+        .exec_async(move || done(recognize_boxes_sync(&image)));
+}
+
 /// Synchronous recognition (call off the main thread; it takes a while).
 pub fn recognize_sync(image: &CGImage) -> Result<String, CaptureError> {
     Ok(assemble(&recognize_boxes_sync(image)?))

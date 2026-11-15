@@ -17,6 +17,7 @@ pub mod ai;
 pub mod annotate;
 pub mod beautify;
 pub mod color;
+pub mod extract;
 pub mod filename;
 pub mod format;
 pub mod geometry;

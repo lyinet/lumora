@@ -28,7 +28,6 @@
 //! [`render::flatten`] at the capture's native scale and go to the app as
 //! [`EditorAction`]s; the editor never writes the capture file itself.
 
-mod ai_sheet;
 mod beautify_panel;
 mod render;
 mod toolbar;
@@ -61,8 +60,8 @@ use objc2_core_graphics::CGImage;
 use objc2_foundation::{NSArray, NSString};
 use objc2_quartz_core::{CAGradientLayer, CALayer, CAShapeLayer, CATransaction, CATransform3D};
 
-use self::ai_sheet::{AiSheet, Phase, SheetEvent, SheetHandler};
 use self::beautify_panel::{cg_rgba, choose_background_image, set_gradient, BeautifyPanel, PanelEvent, PanelHandler};
+use crate::ai_sheet::{AiSheet, Phase, SheetEvent, SheetHandler};
 
 use self::render::{annotation_font, build_layer, flatten, LayerContext, RedactionCache};
 pub use self::toolbar::ToolbarAction;
@@ -513,6 +512,7 @@ impl State {
     fn layout_with(&self, animate: bool) {
         let b = rect(self.canvas.bounds());
         self.ai_sheet.fit(b.width());
+        self.toolbar.fit(rect(self.toolbar.view.frame()).width());
         let shown = self.wanted_shown();
         if shown.is_empty() {
             return;
@@ -820,6 +820,11 @@ impl State {
                     State::smart_redact(this);
                     Effect::None
                 }
+                ToolbarAction::More => {
+                    drop(ed);
+                    this.toolbar.show_overflow_menu();
+                    Effect::None
+                }
             }
         };
         State::apply(this, effect);
@@ -894,7 +899,7 @@ impl State {
                     menu.addItem(&parent);
                 }
                 k => {
-                    if k == AiTaskKind::Polish {
+                    if k == AiTaskKind::Polish || k == AiTaskKind::ExtractTable {
                         menu.addItem(&NSMenuItem::separatorItem(mtm));
                     }
                     menu.addItem(&item(k, &k.title(), &mut targets));
@@ -931,6 +936,8 @@ impl State {
         *this.ai_job.borrow_mut() = Some(AiJob { kind, source: source.as_ref().map(|(id, _)| *id) });
         let status = if kind.needs_ocr(source.is_some()) { Msg::AiReadingText } else { Msg::AiWriting };
         this.ai_sheet.begin(&kind.title(), status, kind.replaces_source() && source.is_some());
+        this.ai_sheet.set_csv_visible(kind.is_table());
+        this.ai_sheet.set_monospace(kind.needs_boxes());
         let req = AiWriteRequest {
             request,
             kind,
@@ -970,6 +977,13 @@ impl State {
                 let text = this.ai_sheet.text();
                 if !text.trim().is_empty() {
                     lumora_capture::clipboard::copy_text(&text);
+                    this.ai_sheet.note(tr(Msg::AiCopied));
+                }
+            }
+            SheetEvent::CopyCsv => {
+                let text = this.ai_sheet.text();
+                if !text.trim().is_empty() {
+                    lumora_capture::clipboard::copy_text(&lumora_core::ai::table_csv(&text));
                     this.ai_sheet.note(tr(Msg::AiCopied));
                 }
             }

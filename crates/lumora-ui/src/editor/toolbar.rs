@@ -4,8 +4,13 @@
 //!
 //! The active tool sits on an accent pill that springs between buttons
 //! ([`motion::TOOL`]); contextual options cross-fade when the tool changes.
+//!
+//! When the window is too narrow for everything (the 760 pt minimum is),
+//! the trailing items of the leading strip (options, stroke widths, colours,
+//! then tools from the end) move into a "…" menu, as decided by
+//! [`lumora_core::layout::toolbar_overflow`] on every resize.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use lumora_core::annotate::editor::{Tool, ToolOptions};
@@ -14,14 +19,15 @@ use lumora_core::annotate::style::{StrokeWidth, Style, PALETTE};
 use lumora_core::color::Rgb8;
 use lumora_core::geometry::Rect;
 use lumora_core::i18n::{tr, Msg};
+use lumora_core::layout::toolbar_overflow;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSAnimatablePropertyContainer, NSAnimationContext, NSAutoresizingMaskOptions, NSButton, NSColor,
-    NSControlStateValueOff, NSControlStateValueOn, NSImage, NSImageSymbolConfiguration, NSSegmentSwitchTracking,
-    NSSegmentedControl, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
-    NSVisualEffectView,
+    NSControlStateValueOff, NSControlStateValueOn, NSImage, NSImageSymbolConfiguration, NSMenu, NSMenuItem,
+    NSSegmentSwitchTracking, NSSegmentedControl, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
+    NSVisualEffectState, NSVisualEffectView,
 };
 use objc2_foundation::{NSArray, NSString};
 use objc2_quartz_core::CALayer;
@@ -52,6 +58,32 @@ pub enum ToolbarAction {
     Ai,
     /// Find and redact sensitive info (⌘⇧R).
     SmartRedact,
+    /// The "…" overflow button: pop up the hidden items.
+    More,
+}
+
+/// One overflowable group of the leading strip.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SlotKind {
+    Tool(Tool),
+    Swatch(Rgb8),
+    Custom,
+    Widths,
+    /// The active tool's options (checkbox, redaction mode, crop buttons).
+    Options,
+}
+
+struct Slot {
+    kind: SlotKind,
+    views: Vec<Retained<NSView>>,
+    /// Width plus the space after it.
+    advance: f64,
+    x: f64,
+}
+
+fn as_view<T: objc2::Message>(v: &Retained<T>) -> Retained<NSView> {
+    // SAFETY: only called with NSView subclasses (buttons, segmented controls).
+    unsafe { Retained::cast_unchecked::<NSView>(v.clone()) }
 }
 
 pub type ToolbarHandler = Rc<dyn Fn(ToolbarAction)>;
@@ -100,10 +132,21 @@ pub struct Toolbar {
     beautify: Retained<NSButton>,
     ai: Retained<NSButton>,
     smart_redact: Retained<NSButton>,
+    more: Retained<NSButton>,
     _drag: Retained<DragTile>,
     _targets: Vec<Retained<ActionTarget>>,
     active: Cell<Option<Tool>>,
     pill_x: Cell<f64>,
+    on: ToolbarHandler,
+    slots: Vec<Slot>,
+    /// How many leading slots are visible (the rest are in the "…" menu).
+    visible: Cell<usize>,
+    /// Width of the trailing (document actions) cluster incl. margins.
+    trailing_width: f64,
+    /// Last synced state, for the overflow menu's check marks.
+    last: Cell<Option<(Tool, Style, ToolOptions)>>,
+    last_has_selection: Cell<bool>,
+    menu_targets: RefCell<Vec<Retained<ActionTarget>>>,
 }
 
 impl std::fmt::Debug for Toolbar {
@@ -192,12 +235,17 @@ impl Toolbar {
         view.addSubview(&pill_host);
 
         let mut tools = Vec::new();
+        let mut slots: Vec<Slot> = Vec::new();
+        let mut slot = |kind: SlotKind, views: Vec<Retained<NSView>>, x: f64| {
+            slots.push(Slot { kind, views, advance: 0.0, x });
+        };
         for t in Tool::ALL {
             let h = on.clone();
             let target = ActionTarget::new(mtm, move |_| h(ToolbarAction::Tool(t)));
             let b = glyph_button(mtm, tool_image(t), tr(tool_tip(t)), &target);
             b.setFrame(cg_rect(Rect::new(x, y, bh, bh)));
             view.addSubview(&b);
+            slot(SlotKind::Tool(t), vec![as_view(&b)], x);
             tools.push((t, b));
             targets.push(target);
             x += bh + size::EDITOR_TOOL_GAP;
@@ -221,6 +269,7 @@ impl Toolbar {
                 l.setBorderWidth(0.5);
             }
             view.addSubview(&b);
+            slot(SlotKind::Swatch(c), vec![as_view(&b)], x);
             swatches.push((c, b));
             targets.push(target);
             x += sw + 6.0;
@@ -230,6 +279,7 @@ impl Toolbar {
         let custom = glyph_button(mtm, symbol("paintpalette", tr(Msg::CustomColor)), tr(Msg::CustomColor), &target);
         custom.setFrame(cg_rect(Rect::new(x, y, bh, bh)));
         view.addSubview(&custom);
+        slot(SlotKind::Custom, vec![as_view(&custom)], x);
         targets.push(target);
         x += bh + 10.0;
 
@@ -276,6 +326,7 @@ impl Toolbar {
             wf.size.height,
         )));
         view.addSubview(&widths);
+        slot(SlotKind::Widths, vec![as_view(&widths)], x);
         targets.push(target);
         x += wf.size.width + 12.0;
 
@@ -362,6 +413,27 @@ impl Toolbar {
         )));
         view.addSubview(&reset_crop);
         targets.push(target);
+        let options_w = 120.0_f64.max(rf.size.width).max(af.size.width + 6.0 + rcf.size.width);
+        slot(
+            SlotKind::Options,
+            vec![as_view(&toggle), as_view(&redact), as_view(&apply_crop), as_view(&reset_crop)],
+            x,
+        );
+        drop(slot);
+        let end = x + options_w;
+        for i in 0..slots.len() {
+            let next = slots.get(i + 1).map_or(end, |n| n.x);
+            slots[i].advance = next - slots[i].x;
+        }
+
+        // The "…" overflow button (placed by `fit`).
+        let h = on.clone();
+        let target = ActionTarget::new(mtm, move |_| h(ToolbarAction::More));
+        let more = glyph_button(mtm, symbol("ellipsis.circle", tr(Msg::ToolbarMore)), tr(Msg::ToolbarMore), &target);
+        more.setFrame(cg_rect(Rect::new(x, y, bh, bh)));
+        more.setHidden(true);
+        view.addSubview(&more);
+        targets.push(target);
 
         // Document actions, anchored to the trailing edge.
         let right = Cell::new(width - 12.0);
@@ -414,8 +486,9 @@ impl Toolbar {
         right.set(right.get() - 8.0);
         let redo = trailing("arrow.uturn.forward", Msg::Redo, ToolbarAction::Redo, &mut targets);
         let undo = trailing("arrow.uturn.backward", Msg::Undo, ToolbarAction::Undo, &mut targets);
+        let trailing_width = width - right.get();
 
-        Toolbar {
+        let toolbar = Toolbar {
             view,
             tools,
             pill,
@@ -431,11 +504,212 @@ impl Toolbar {
             beautify,
             ai,
             smart_redact,
+            more,
             _drag: drag,
             _targets: targets,
             active: Cell::new(None),
             pill_x: Cell::new(size::EDITOR_TRAFFIC_LIGHTS + bh / 2.0),
+            on,
+            slots,
+            visible: Cell::new(usize::MAX),
+            trailing_width,
+            last: Cell::new(None),
+            last_has_selection: Cell::new(false),
+            menu_targets: RefCell::new(Vec::new()),
+        };
+        toolbar.fit(width);
+        toolbar
+    }
+
+    /// Re-flow for a new toolbar `width`: move what doesn't fit into "…".
+    pub fn fit(&self, width: f64) {
+        let start = size::EDITOR_TRAFFIC_LIGHTS;
+        let available = width - self.trailing_width - 8.0 - start;
+        let advances: Vec<f64> = self.slots.iter().map(|s| s.advance).collect();
+        let more_w = size::EDITOR_TOOL_BUTTON + 6.0;
+        let n = toolbar_overflow(&advances, available, more_w);
+        if self.visible.replace(n) == n {
+            return;
         }
+        for (i, s) in self.slots.iter().enumerate() {
+            if s.kind != SlotKind::Options {
+                for v in &s.views {
+                    v.setHidden(i >= n);
+                }
+            }
+        }
+        let overflow = n < self.slots.len();
+        self.more.setHidden(!overflow);
+        if overflow {
+            let x = self.slots[n].x;
+            let f = self.more.frame();
+            self.more.setFrame(cg_rect(Rect::new(x, f.origin.y, f.size.width, f.size.height)));
+        }
+        self.sync_overflowed();
+    }
+
+    fn slot_visible(&self, kind: SlotKind) -> bool {
+        self.slots.iter().position(|s| s.kind == kind).is_some_and(|i| i < self.visible.get())
+    }
+
+    /// Re-apply what depends on which slots are visible: the options and
+    /// the pill (hidden when the active tool is in the menu).
+    fn sync_overflowed(&self) {
+        if let Some((tool, _, options)) = self.last.get() {
+            self.sync_options(tool, options);
+        }
+        let pill_shown = self.active.get().map_or(true, |t| self.slot_visible(SlotKind::Tool(t)));
+        without_actions(|| self.pill.setHidden(!pill_shown));
+    }
+
+    /// Pop up the overflow menu under "…" with the hidden items.
+    pub fn show_overflow_menu(&self) {
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        let (tool, style, options) = match self.last.get() {
+            Some(l) => l,
+            None => return,
+        };
+        let n = self.visible.get();
+        if n >= self.slots.len() {
+            return;
+        }
+        let mut targets = Vec::new();
+        let on = self.on.clone();
+        let mut item = |title: &str, image: Option<Retained<NSImage>>, checked: bool, action: ToolbarAction| {
+            let h = on.clone();
+            let target = ActionTarget::new(mtm, move |_| h(action));
+            // SAFETY: the target is kept alive in `menu_targets`.
+            let it = unsafe {
+                NSMenuItem::initWithTitle_action_keyEquivalent(
+                    NSMenuItem::alloc(mtm),
+                    &NSString::from_str(title),
+                    Some(ActionTarget::action()),
+                    &NSString::new(),
+                )
+            };
+            unsafe { it.setTarget(Some(&target)) };
+            if let Some(img) = image {
+                it.setImage(Some(&img));
+            }
+            it.setState(if checked { NSControlStateValueOn } else { NSControlStateValueOff });
+            targets.push(target);
+            it
+        };
+        let submenu = |title: &str, items: Vec<Retained<NSMenuItem>>| {
+            let parent = unsafe {
+                NSMenuItem::initWithTitle_action_keyEquivalent(
+                    NSMenuItem::alloc(mtm),
+                    &NSString::from_str(title),
+                    None,
+                    &NSString::new(),
+                )
+            };
+            let sub = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(title));
+            for i in &items {
+                sub.addItem(i);
+            }
+            parent.setSubmenu(Some(&sub));
+            parent
+        };
+        let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(tr(Msg::ToolbarMore)));
+        menu.setAutoenablesItems(false);
+        let hidden: Vec<SlotKind> = self.slots[n..].iter().map(|s| s.kind).collect();
+        let crop = tool == Tool::Crop;
+        let colorful = (tool.uses_color() || self.last_has_selection.get()) && !crop;
+        let mut colors = Vec::new();
+        let mut section = false;
+        for kind in &hidden {
+            match *kind {
+                SlotKind::Tool(t) => {
+                    menu.addItem(&item(tr(tool_tip(t)), tool_image(t), t == tool, ToolbarAction::Tool(t)));
+                    section = true;
+                }
+                SlotKind::Swatch(c) => {
+                    let title = format!("#{:02X}{:02X}{:02X}", c.r, c.g, c.b);
+                    colors.push(item(
+                        &title,
+                        Some(crate::icon::swatch_image(c, 14.0)),
+                        style.color == c,
+                        ToolbarAction::Color(c),
+                    ));
+                }
+                SlotKind::Custom => {
+                    colors.push(item(
+                        tr(Msg::CustomColor),
+                        symbol("paintpalette", tr(Msg::CustomColor)),
+                        !PALETTE.contains(&style.color),
+                        ToolbarAction::CustomColor,
+                    ));
+                }
+                SlotKind::Widths => {
+                    if section {
+                        menu.addItem(&NSMenuItem::separatorItem(mtm));
+                        section = false;
+                    }
+                    if !colors.is_empty() {
+                        let c = submenu(tr(Msg::ToolbarColor), std::mem::take(&mut colors));
+                        c.setEnabled(colorful);
+                        menu.addItem(&c);
+                    }
+                    let msgs = [Msg::StrokeThin, Msg::StrokeMedium, Msg::StrokeThick];
+                    let items = StrokeWidth::ALL
+                        .iter()
+                        .zip(msgs)
+                        .map(|(w, m)| item(tr(m), None, style.width == *w, ToolbarAction::Width(*w)))
+                        .collect();
+                    let w = submenu(tr(Msg::ToolbarStroke), items);
+                    w.setEnabled(!crop && tool != Tool::Redact && tool != Tool::Spotlight);
+                    menu.addItem(&w);
+                }
+                SlotKind::Options => {
+                    if section || !colors.is_empty() {
+                        menu.addItem(&NSMenuItem::separatorItem(mtm));
+                        section = false;
+                    }
+                    if !colors.is_empty() {
+                        let c = submenu(tr(Msg::ToolbarColor), std::mem::take(&mut colors));
+                        c.setEnabled(colorful);
+                        menu.addItem(&c);
+                    }
+                    if let Some((m, on)) = toggle_option(tool, options) {
+                        menu.addItem(&item(tr(m), None, on, ToolbarAction::Toggle(!on)));
+                    }
+                    if tool == Tool::Redact {
+                        let blur = options.redact == RedactMode::Blur;
+                        menu.addItem(&item(
+                            tr(Msg::OptionPixelate),
+                            None,
+                            !blur,
+                            ToolbarAction::Redact(RedactMode::Pixelate),
+                        ));
+                        menu.addItem(&item(tr(Msg::OptionBlur), None, blur, ToolbarAction::Redact(RedactMode::Blur)));
+                    }
+                    if crop {
+                        menu.addItem(&item(tr(Msg::ApplyCrop), None, false, ToolbarAction::ApplyCrop));
+                        menu.addItem(&item(tr(Msg::ResetCrop), None, false, ToolbarAction::ResetCrop));
+                    }
+                }
+            }
+        }
+        if !colors.is_empty() {
+            menu.addItem(&NSMenuItem::separatorItem(mtm));
+            let c = submenu(tr(Msg::ToolbarColor), colors);
+            c.setEnabled(colorful);
+            menu.addItem(&c);
+        }
+        // Drop a trailing separator (options for a tool without any).
+        let count = menu.numberOfItems();
+        if count > 0 && menu.itemAtIndex(count - 1).is_some_and(|i| i.isSeparatorItem()) {
+            menu.removeItemAtIndex(count - 1);
+        }
+        *self.menu_targets.borrow_mut() = targets;
+        let b = self.more.bounds();
+        let at = if self.more.isFlipped() {
+            objc2_core_foundation::CGPoint::new(0.0, b.size.height + 4.0)
+        } else {
+            objc2_core_foundation::CGPoint::new(0.0, -4.0)
+        };
+        menu.popUpMenuPositioningItem_atLocation_inView(None, at, Some(&self.more));
     }
 
     /// Beautify button: accent glyph while beautify is on, a soft pill while
@@ -483,6 +757,8 @@ impl Toolbar {
         can_redo: bool,
         has_selection: bool,
     ) {
+        self.last.set(Some((tool, style, options)));
+        self.last_has_selection.set(has_selection);
         if self.active.replace(Some(tool)) != Some(tool) {
             if let Some((_, b)) = self.tools.iter().find(|(t, _)| *t == tool) {
                 let f = b.frame();
@@ -512,22 +788,8 @@ impl Toolbar {
         self.widths.setSelectedSegment(style.width.index() as isize);
 
         let colorful = tool.uses_color() || has_selection;
-        let toggle = match tool {
-            Tool::Arrow => Some((Msg::OptionCurved, options.curved_arrow)),
-            Tool::Rect => Some((Msg::OptionRounded, options.rounded_rect)),
-            Tool::Text => Some((Msg::OptionBackground, options.text_background)),
-            _ => None,
-        };
-        if let Some((m, on)) = toggle {
-            self.toggle.setTitle(&NSString::from_str(tr(m)));
-            self.toggle.setState(if on { NSControlStateValueOn } else { NSControlStateValueOff });
-        }
-        self.redact.setSelectedSegment(isize::from(options.redact == RedactMode::Blur));
         let crop = tool == Tool::Crop;
-        fade(&self.toggle, toggle.is_some());
-        fade(&self.redact, tool == Tool::Redact);
-        fade(&self.apply_crop, crop);
-        fade(&self.reset_crop, crop);
+        self.sync_overflowed();
         for (_, b) in &self.swatches {
             b.setEnabled(colorful && !crop);
         }
@@ -535,6 +797,34 @@ impl Toolbar {
         self.widths.setEnabled(!crop && tool != Tool::Redact && tool != Tool::Spotlight);
         self.undo.setEnabled(can_undo);
         self.redo.setEnabled(can_redo);
+    }
+}
+
+/// The contextual checkbox for `tool`: its title and state.
+fn toggle_option(tool: Tool, options: ToolOptions) -> Option<(Msg, bool)> {
+    match tool {
+        Tool::Arrow => Some((Msg::OptionCurved, options.curved_arrow)),
+        Tool::Rect => Some((Msg::OptionRounded, options.rounded_rect)),
+        Tool::Text => Some((Msg::OptionBackground, options.text_background)),
+        _ => None,
+    }
+}
+
+impl Toolbar {
+    /// Show the active tool's options (unless they are in the "…" menu).
+    fn sync_options(&self, tool: Tool, options: ToolOptions) {
+        let toggle = toggle_option(tool, options);
+        if let Some((m, on)) = toggle {
+            self.toggle.setTitle(&NSString::from_str(tr(m)));
+            self.toggle.setState(if on { NSControlStateValueOn } else { NSControlStateValueOff });
+        }
+        self.redact.setSelectedSegment(isize::from(options.redact == RedactMode::Blur));
+        let shown = self.slot_visible(SlotKind::Options);
+        let crop = tool == Tool::Crop;
+        fade(&self.toggle, shown && toggle.is_some());
+        fade(&self.redact, shown && tool == Tool::Redact);
+        fade(&self.apply_crop, shown && crop);
+        fade(&self.reset_crop, shown && crop);
     }
 }
 

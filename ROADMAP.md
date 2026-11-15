@@ -56,8 +56,10 @@
 - Recording extras: click ripples, keystroke HUD, microphone on macOS 14
   (`AVCaptureSession`), GIF export and trim on the card.
 - Scrolling capture.
-- OCR toast AI actions: run Polish / Translate / Summarize straight from
-  the Capture Text toast.
+- ✅ OCR actions: a Capture Text result panel with Copy, Summarize,
+  Translate, As Table, As Code and Checklist; on-device table / code /
+  checklist reconstruction that AI refines when enabled (chunk 2).
+- ✅ Smart Redaction (chunk 1).
 
 ## Later
 

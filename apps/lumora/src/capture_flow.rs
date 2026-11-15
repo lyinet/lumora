@@ -166,14 +166,17 @@ impl App {
         }
     }
 
-    /// OCR an image and put the text on the clipboard, with a toast.
+    /// OCR an image and put the text on the clipboard, with a toast and
+    /// the Capture Text panel (Summarize, Translate, As Table, …).
     pub fn recognize(self: &Rc<Self>, image: CFRetained<CGImage>) {
-        lumora_capture::ocr::recognize_text(image, |res| {
+        lumora_capture::ocr::recognize_text_boxes(image, |res| {
+            let res = res.map(|boxes| (lumora_core::ocr::assemble(&boxes), boxes));
             on_main(move |app| match res {
-                Ok(text) if !text.trim().is_empty() => {
+                Ok((text, boxes)) if !text.trim().is_empty() => {
                     lumora_capture::clipboard::copy_text(&text);
                     let preview = lumora_core::ocr::preview(&text, 60);
                     app.notify(Notice::Success(Msg::ToastTextCopied), Some(preview));
+                    app.show_text_result(&text, boxes);
                 }
                 Ok(_) => app.notify(Notice::Warning(Msg::ToastNoText), Some(tr(Msg::ToastNoTextDetail).to_string())),
                 Err(e) => app.fail_with(Msg::ToastTextFailed, e),

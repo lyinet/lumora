@@ -136,6 +136,39 @@ impl std::fmt::Debug for AiWriteRequest {
     }
 }
 
+/// What the Capture Text result panel tells the app.
+#[derive(Debug)]
+pub enum TextResultAction {
+    /// Run an AI task on the recognised text; stream the answer back with
+    /// `TextResultPanel::ai_delta` / `ai_finished` under `request`.
+    Run(TextAiRequest),
+    /// Stop request `id` (Stop, Close, or a newer request).
+    Cancel(u64),
+    /// "Open AI Settings" in the result sheet.
+    OpenAiSettings,
+    /// The panel closed.
+    Closed,
+}
+
+/// An AI request from the Capture Text panel. `input` is already prepared
+/// ([`lumora_core::ai::ai_input`]): the text, the positioned listing for
+/// tables, or the locally indented code.
+pub struct TextAiRequest {
+    pub request: u64,
+    pub kind: lumora_core::ai::AiTaskKind,
+    pub input: String,
+}
+
+impl std::fmt::Debug for TextAiRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never log the recognised text.
+        f.debug_struct("TextAiRequest")
+            .field("request", &self.request)
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Onboarding panel buttons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnboardingAction {
@@ -181,6 +214,8 @@ pub enum UiEvent {
     /// suspends global hotkeys meanwhile so the combo reaches the field.
     ShortcutRecording(bool),
     Onboarding(OnboardingAction),
+    /// The Capture Text result panel.
+    TextResult(TextResultAction),
     /// The AI tab needs the stored API key for `provider`; the app reads
     /// the Keychain and answers with `SettingsWindow::set_ai_key`.
     AiKeyRequested(lumora_core::ai::AiProvider),

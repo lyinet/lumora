@@ -28,8 +28,8 @@ pub use form::{
 pub use prompt::{build_request, ping_body, AiContext, ChatRequest, StepHint, WritingTask, MAX_INPUT_CHARS};
 pub use stream::{model_ids, parse_completion, SseEvent, SseParser};
 pub use write::{
-    clean_output, error_opens_settings, language_name, plan_insert, text_of, wrap, AiTaskKind, InsertPlan,
-    INSERT_MARGIN,
+    ai_input, clean_output, error_opens_settings, language_name, local_result, plan_insert, table_csv, text_of, wrap,
+    AiTaskKind, InsertPlan, INSERT_MARGIN,
 };
 
 /// Keychain generic-password service under which API keys are stored; the

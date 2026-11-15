@@ -194,6 +194,10 @@ pub struct App {
     pub session: RefCell<RecordingSession>,
     /// Running AI writing requests, by editor (capture) id.
     pub ai_jobs: RefCell<HashMap<u64, crate::ai_write_flow::AiJob>>,
+    /// The Capture Text result panel (created on first use).
+    pub text_panel: RefCell<Option<lumora_ui::text_result::TextResultPanel>>,
+    /// Its running AI request.
+    pub text_job: RefCell<Option<crate::ai_write_flow::AiJob>>,
 }
 
 impl App {
@@ -240,6 +244,8 @@ impl App {
                 next_id: Cell::new(1),
                 session: RefCell::new(RecordingSession::default()),
                 ai_jobs: RefCell::new(HashMap::new()),
+                text_panel: RefCell::new(None),
+                text_job: RefCell::new(None),
             }
         });
         APP.with(|a| *a.borrow_mut() = Rc::downgrade(&app));
@@ -362,6 +368,7 @@ impl App {
             UiEvent::BeautifyChanged { from, style } => self.on_beautify_changed(from, *style),
             UiEvent::ShortcutRecording(on) => self.hotkeys.borrow_mut().suspend(on),
             UiEvent::Onboarding(action) => self.on_onboarding(action),
+            UiEvent::TextResult(action) => self.on_text_result(action),
             UiEvent::AiKeyRequested(provider) => self.on_ai_key_requested(provider),
             UiEvent::AiKeySave { provider, key } => self.on_ai_key_save(provider, key),
             UiEvent::AiTestConnection { id, settings, key } => self.on_ai_test_connection(id, *settings, key),
@@ -480,6 +487,9 @@ impl App {
         for editor in self.editors.borrow().values() {
             editor.set_beautify(beautify.clone());
             editor.set_ai_enabled(ai_enabled);
+        }
+        if let Some(p) = self.text_panel.borrow().as_ref() {
+            p.set_ai_enabled(ai_enabled);
         }
         self.apply_hotkeys();
         if language_changed {

@@ -130,6 +130,28 @@ pub fn fly_transform(from: Rect, to: Rect) -> FlyTransform {
     FlyTransform { scale, dx: d.x, dy: d.y }
 }
 
+/// How many leading toolbar items stay visible in `available` points.
+///
+/// `advances[i]` is item `i`'s width plus the space after it, in toolbar
+/// order. When every item fits, all stay. Otherwise the trailing items move
+/// into an overflow ("…") menu, whose button needs `more_width`; the
+/// result is the longest prefix that fits next to that button (possibly 0).
+pub fn toolbar_overflow(advances: &[f64], available: f64, more_width: f64) -> usize {
+    let total: f64 = advances.iter().sum();
+    if total <= available + 0.5 {
+        return advances.len();
+    }
+    let room = available - more_width;
+    let mut used = 0.0;
+    for (i, a) in advances.iter().enumerate() {
+        used += a;
+        if used > room + 0.5 {
+            return i;
+        }
+    }
+    advances.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,5 +223,25 @@ mod tests {
         let t = fly_transform(Rect::new(0.0, 0.0, 1000.0, 500.0), Rect::new(10.0, 10.0, 200.0, 200.0));
         assert_eq!(t.scale, 0.2);
         assert_eq!((t.dx, t.dy), (110.0 - 500.0, 110.0 - 250.0));
+    }
+
+    #[test]
+    fn toolbar_overflow_keeps_longest_prefix() {
+        let items = [30.0, 30.0, 30.0, 100.0, 50.0];
+        assert_eq!(toolbar_overflow(&items, 240.0, 32.0), 5);
+        assert_eq!(toolbar_overflow(&items, 1000.0, 32.0), 5);
+        // 239 < 240 total: overflow; room = 207 → 30+30+30+100 = 190 fits.
+        assert_eq!(toolbar_overflow(&items, 239.0, 32.0), 4);
+        assert_eq!(toolbar_overflow(&items, 150.0, 32.0), 3);
+        assert_eq!(toolbar_overflow(&items, 40.0, 32.0), 0);
+        assert_eq!(toolbar_overflow(&items, -5.0, 32.0), 0);
+        assert_eq!(toolbar_overflow(&[], 10.0, 32.0), 0);
+        // Monotonic in the available width.
+        let mut last = 0;
+        for w in 0..400 {
+            let n = toolbar_overflow(&items, f64::from(w), 32.0);
+            assert!(n >= last);
+            last = n;
+        }
     }
 }

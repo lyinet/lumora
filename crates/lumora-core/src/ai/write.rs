@@ -6,8 +6,12 @@
 use super::{AiError, WritingTask};
 use crate::annotate::document::AnnotationId;
 use crate::annotate::{Document, Shape};
+use crate::extract::{
+    checklist, layout_listing, parse_markdown_table, reconstruct_code, reconstruct_table, rows_to_csv,
+};
 use crate::geometry::{Point, Rect, Size};
 use crate::i18n::{tr, Language, Msg};
+use crate::ocr::TextBox;
 
 /// A writing task as chosen from the editor's AI menu, before its input
 /// text is known.
@@ -19,19 +23,68 @@ pub enum AiTaskKind {
     Polish,
     Translate(Language),
     Summarize,
+    /// Screenshot → table (Markdown; CSV / TSV on copy).
+    ExtractTable,
+    /// Screenshot → code with its indentation.
+    ExtractCode,
+    /// Text → to-do checklist.
+    Checklist,
 }
 
 impl AiTaskKind {
     /// The menu's top-level entries, in order (Translate expands to one
     /// submenu item per [`Language`]).
-    pub const MENU: [AiTaskKind; 6] = [
+    pub const MENU: [AiTaskKind; 8] = [
         AiTaskKind::Caption,
         AiTaskKind::StepGuide,
         AiTaskKind::AltText,
         AiTaskKind::Polish,
         AiTaskKind::Translate(Language::En),
         AiTaskKind::Summarize,
+        AiTaskKind::ExtractTable,
+        AiTaskKind::ExtractCode,
     ];
+
+    /// The Capture Text panel's actions after Copy, in order (Translate
+    /// expands to one menu item per [`Language`]).
+    pub const TEXT_ACTIONS: [AiTaskKind; 5] = [
+        AiTaskKind::Summarize,
+        AiTaskKind::Translate(Language::En),
+        AiTaskKind::ExtractTable,
+        AiTaskKind::ExtractCode,
+        AiTaskKind::Checklist,
+    ];
+
+    /// Whether the task works on OCR boxes (positions), not just text.
+    pub fn needs_boxes(self) -> bool {
+        matches!(self, AiTaskKind::ExtractTable | AiTaskKind::ExtractCode)
+    }
+
+    /// Whether there is an on-device result (shown first; AI refines it
+    /// when enabled). Tasks without one need AI.
+    pub fn has_local(self) -> bool {
+        matches!(self, AiTaskKind::ExtractTable | AiTaskKind::ExtractCode | AiTaskKind::Checklist)
+    }
+
+    /// Whether the result is a table (offers "Copy as CSV").
+    pub fn is_table(self) -> bool {
+        self == AiTaskKind::ExtractTable
+    }
+
+    /// The Capture Text panel's short button title ("As Table").
+    pub fn button_title(self) -> &'static str {
+        tr(match self {
+            AiTaskKind::Summarize => Msg::AiTaskSummarize,
+            AiTaskKind::Translate(_) => Msg::AiTaskTranslate,
+            AiTaskKind::ExtractTable => Msg::TextAsTable,
+            AiTaskKind::ExtractCode => Msg::TextAsCode,
+            AiTaskKind::Checklist => Msg::AiTaskChecklist,
+            AiTaskKind::Caption => Msg::AiTaskCaption,
+            AiTaskKind::StepGuide => Msg::AiTaskStepGuide,
+            AiTaskKind::AltText => Msg::AiTaskAltText,
+            AiTaskKind::Polish => Msg::AiTaskPolish,
+        })
+    }
 
     /// Whether the task works on a piece of text: the selected text
     /// annotation if there is one, otherwise the recognised text.
@@ -63,6 +116,9 @@ impl AiTaskKind {
             AiTaskKind::Polish => WritingTask::Polish(text),
             AiTaskKind::Translate(to) => WritingTask::Translate { text, to },
             AiTaskKind::Summarize => WritingTask::Summarize(text),
+            AiTaskKind::ExtractTable => WritingTask::ExtractTable(text),
+            AiTaskKind::ExtractCode => WritingTask::ExtractCode(text),
+            AiTaskKind::Checklist => WritingTask::Checklist(text),
         }
     }
 
@@ -77,6 +133,40 @@ impl AiTaskKind {
             AiTaskKind::Translate(to) => format!("{} → {}", tr(Msg::AiTaskTranslate), language_name(to)),
             k => k.task(String::new()).label().to_string(),
         }
+    }
+}
+
+/// The on-device result of `kind` for OCR runs `boxes` (assembled text
+/// `text`): Markdown table, code, or checklist. `None` for AI-only tasks
+/// and when nothing was recognised.
+pub fn local_result(kind: AiTaskKind, boxes: &[TextBox], text: &str) -> Option<String> {
+    let out = match kind {
+        AiTaskKind::ExtractTable => reconstruct_table(boxes).to_markdown(),
+        AiTaskKind::ExtractCode => reconstruct_code(boxes),
+        AiTaskKind::Checklist => checklist(text),
+        _ => return None,
+    };
+    (!out.trim().is_empty()).then_some(out)
+}
+
+/// The text an AI request for `kind` works on: the positioned listing for
+/// tables, the locally indented code for code, the plain text otherwise.
+pub fn ai_input(kind: AiTaskKind, boxes: &[TextBox], text: &str) -> String {
+    match kind {
+        AiTaskKind::ExtractTable if !boxes.is_empty() => layout_listing(boxes),
+        AiTaskKind::ExtractCode if !boxes.is_empty() => reconstruct_code(boxes),
+        _ => text.to_string(),
+    }
+}
+
+/// CSV for a table result: parsed from the Markdown table shown (local or
+/// AI), else every line as one cell.
+pub fn table_csv(markdown: &str) -> String {
+    match parse_markdown_table(markdown) {
+        Some(rows) => rows_to_csv(&rows),
+        None => rows_to_csv(
+            &markdown.lines().filter(|l| !l.trim().is_empty()).map(|l| vec![l.trim().to_string()]).collect::<Vec<_>>(),
+        ),
     }
 }
 
@@ -289,6 +379,41 @@ mod tests {
         assert!(AiTaskKind::Polish.needs_ocr(false));
         assert!(AiTaskKind::Caption.needs_ocr(true));
         assert!(AiTaskKind::Translate(Language::En).title().contains("English"));
+    }
+
+    #[test]
+    fn extraction_kinds() {
+        assert_eq!(AiTaskKind::ExtractTable.task("rows"), WritingTask::ExtractTable("rows".into()));
+        assert_eq!(AiTaskKind::Checklist.task("a"), WritingTask::Checklist("a".into()));
+        assert!(AiTaskKind::ExtractTable.needs_boxes() && !AiTaskKind::Checklist.needs_boxes());
+        assert!(AiTaskKind::ExtractCode.has_local() && !AiTaskKind::Summarize.has_local());
+        assert!(AiTaskKind::ExtractTable.is_table() && !AiTaskKind::ExtractCode.is_table());
+        assert!(AiTaskKind::ExtractTable.needs_ocr(true));
+        assert!(!AiTaskKind::ExtractCode.uses_selection() && !AiTaskKind::ExtractCode.uses_image());
+        assert!(AiTaskKind::MENU.contains(&AiTaskKind::ExtractTable));
+        assert!(AiTaskKind::MENU.contains(&AiTaskKind::ExtractCode));
+        for k in AiTaskKind::TEXT_ACTIONS {
+            assert!(!k.button_title().is_empty());
+        }
+        assert_ne!(AiTaskKind::ExtractTable.button_title(), AiTaskKind::ExtractTable.title());
+    }
+
+    #[test]
+    fn local_results_and_inputs() {
+        let b = |t: &str, x: f64, y: f64| TextBox::new(t, Rect::new(x, y, 10.0 * t.len() as f64, 20.0));
+        let boxes = vec![b("Name", 0.0, 0.0), b("Age", 200.0, 0.0), b("Ann", 0.0, 30.0), b("30", 200.0, 30.0)];
+        let text = crate::ocr::assemble(&boxes);
+        let md = local_result(AiTaskKind::ExtractTable, &boxes, &text).unwrap();
+        assert_eq!(md, "| Name | Age |\n| --- | --- |\n| Ann | 30 |");
+        assert_eq!(table_csv(&md), "Name,Age\nAnn,30\n");
+        assert_eq!(table_csv("just\nlines"), "just\nlines\n");
+        assert_eq!(local_result(AiTaskKind::Checklist, &boxes, "a\nb").unwrap(), "- [ ] a\n- [ ] b");
+        assert!(local_result(AiTaskKind::ExtractCode, &boxes, &text).is_some());
+        assert_eq!(local_result(AiTaskKind::Summarize, &boxes, &text), None);
+        assert_eq!(local_result(AiTaskKind::ExtractTable, &[], ""), None);
+        assert!(ai_input(AiTaskKind::ExtractTable, &boxes, &text).starts_with("row 1:"));
+        assert_eq!(ai_input(AiTaskKind::Summarize, &boxes, "t"), "t");
+        assert_eq!(ai_input(AiTaskKind::ExtractTable, &[], "t"), "t");
     }
 
     #[test]

@@ -31,6 +31,8 @@ mod redact_flow;
 mod status;
 #[cfg(target_os = "macos")]
 mod system;
+#[cfg(target_os = "macos")]
+mod text_flow;
 
 #[cfg(target_os = "macos")]
 fn main() {

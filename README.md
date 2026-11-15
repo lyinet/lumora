@@ -76,6 +76,8 @@
 - **Editable `.lumora` documents** — every saved screenshot keeps a `.lumora` file beside its PNG with the original capture, annotations and beautify style; double-click it in Finder (or use Open…) and every arrow, label and crop is still editable.
 - **AI Writing (optional, off by default)** — press ✨ / <kbd>⌘</kbd><kbd>J</kbd> in the editor to write a caption, a step guide, alt text, or to polish, translate (English / 简体中文) or summarize, streamed into a sheet you can insert as a text annotation. Bring your own provider: OpenAI, DeepSeek, Qwen, Kimi (Moonshot), a local Ollama or any OpenAI-compatible endpoint. Your API key stays in the macOS Keychain; by default only the on-device recognised text and your annotation text are sent — the screenshot itself only if you opt in.
 - **Smart Redaction** — one click (or <kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd>) in the editor pixelates or blurs emails, phone numbers, Chinese ID and bank card numbers (checksum-verified), API keys and tokens, IP addresses, secrets in links and faces — detected on your Mac with Vision, added as one undoable group. Choose categories in Settings → Capture, optionally redact every new screenshot before it's copied or saved, or add an AI check that sends recognised text only, never the image.
+- **OCR actions** — after Capture Text (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>2</kbd>) copies the text, a small floating panel offers Copy, Summarize, Translate (English / 简体中文), As Table, As Code and Checklist, streamed into a result sheet with Copy, Stop and Retry. Summarize and Translate use AI Writing; the rest work without it.
+- **Screenshot → table / code** — rebuild a table from a screenshot on your Mac (rows and columns recovered from the text positions) and copy it as Markdown or CSV, or turn a screenshot of code back into code with its indentation restored. With AI Writing on, AI refines the on-device result; the editor's AI menu has Extract table and Extract code too.
 
 ## Keyboard shortcuts
 
@@ -205,7 +207,7 @@ Everything below is written, type-checked and unit-tested, but **not yet run on 
 - [ ] Capture history window (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>)
 - [ ] Recording extras: click ripples, keystroke HUD, microphone on macOS 14, GIF export + trim
 - [ ] Scrolling capture
-- [ ] AI actions on the OCR toast
+- [x] OCR actions (summarize, translate, checklist) and screenshot → table / code, local-first
 
 **Later**
 

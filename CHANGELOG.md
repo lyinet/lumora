@@ -24,6 +24,30 @@ All notable changes to Lumora are documented here. The format follows
   **redact new screenshots before copy / save** (off by default; local
   detectors only, redactions stay editable in the `.lumora` document).
 - `[redact]` settings section (older settings files load unchanged).
+- **OCR actions** — Capture Text (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>2</kbd>) still
+  copies the text and shows its toast, and now also opens a small floating
+  "Recognised Text" panel with Copy Text, Summarize, Translate (English /
+  简体中文), As Table, As Code and Checklist. Results stream into the AI
+  result sheet (factored out of the editor so it also works as a standalone
+  panel) with Copy, Copy as CSV (tables), Stop and Retry. Summarize and
+  Translate need AI Writing and are disabled with a hint when it is off.
+- **Screenshot → table / code, local-first** — `lumora_core::extract`
+  rebuilds tables from OCR boxes (rows by line grouping, columns by x-range
+  clustering; Markdown, CSV and TSV), code with indentation restored from
+  each line's x offset (character width estimated from the runs, snapped to
+  a 2–8 space unit), and checklists from plain lines. These show at once;
+  with AI on, new `WritingTask::ExtractTable` / `ExtractCode` / `Checklist`
+  prompts refine them (tables get the runs with their x positions; code and
+  tables keep their original language). A failed or stopped AI request keeps
+  the on-device result.
+- Editor AI menu: **Extract table** and **Extract code** (with Copy as CSV
+  for tables).
+
+### Fixed
+- The editor toolbar no longer overflows at the 760 pt minimum window width:
+  a pure `layout::toolbar_overflow` decides on every resize which trailing
+  items of the tool strip (options, stroke widths, colours, then tools from
+  the end) move into a "…" menu, which mirrors their state and actions.
 
 ## [0.4.0] — 2026-11-16 (not yet hardware-tested)
 
