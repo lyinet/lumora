@@ -157,3 +157,15 @@ Symbols: `doc.on.doc`, `square.and.arrow.down`, `pencil.tip.crop.circle`,
 `arrow.up.right`, `rectangle`, `circle`, `line.diagonal`, `scribble`,
 `highlighter`, `textformat`, `1.circle`, `square.grid.3x3.middle.filled`,
 `light.max`, `crop`.
+
+## AI Writing
+
+The ✨ **AI Writing** toolbar button (⌘J) opens a menu of writing tasks.
+Results appear in a 540 × 248 pt dark glass sheet docked 18 pt above the
+bottom of the editor canvas (14 pt padding, 28 pt buttons, card radius),
+fading in with a 14 pt rise on the `TOAST` spring and hiding instantly so
+it never takes clicks while fading out. A spinner shows while text is
+recognised and the model connects; streamed text is selectable, errors are
+`ERROR` red with an "Open AI Settings" button when the fix is there. The
+Settings **AI** tab follows the other tabs' form grid (same row height and
+control column); "Test Connection" shows an inline spinner and result.

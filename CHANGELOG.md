@@ -6,6 +6,8 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-16 (not yet hardware-tested)
+
 ### Added
 - **AI writing** — optional, off by default. Turn it on in Settings → AI
   and pick a provider: OpenAI, DeepSeek, Qwen (Alibaba Cloud DashScope),
