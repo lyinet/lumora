@@ -72,6 +72,8 @@
 - **Keyboard precision** — move, aspect-lock and nudge a selection to the point without touching the mouse (see below).
 - **Motion with physics** — every appear, snap, nudge and reflow is a damped spring that keeps its velocity when interrupted. Direct manipulation is never animated, so the selection never lags your pointer.
 - **Shutter, then fly** — a flash over the region, then the capture shrinks onto its card while the card slides in.
+- **Beautify** — frame a capture on a gradient, colour or image background with padding, rounded corners, a soft shadow, an optional macOS window frame and fixed aspect ratios (16:9, 1:1, …), edited live from the ✨ panel in the annotation editor.
+- **Editable `.lumora` documents** — every saved screenshot keeps a `.lumora` file beside its PNG with the original capture, annotations and beautify style; double-click it in Finder (or use Open…) and every arrow, label and crop is still editable.
 
 ## Keyboard shortcuts
 
@@ -178,9 +180,9 @@ A Cargo workspace of four crates with a strict dependency direction. Logic that 
 | Crate | What it owns |
 |---|---|
 | [`apps/lumora`](apps/lumora) | The binary: `NSApplication`, status item, Carbon hotkeys, app state and capture/record flows |
-| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation: overlay, Quick Access, pins, shutter, countdown, recording HUD, settings, onboarding |
-| [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit, ImageIO, AVFoundation, pasteboard |
-| [`lumora-core`](crates/lumora-core) | Pure Rust: geometry, springs, selection state machine, snapping, settings, file names, hotkey parsing, layout, recording state machine |
+| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation: overlay, Quick Access, pins, shutter, countdown, recording HUD, settings, onboarding, annotation editor + beautify panel |
+| [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit, ImageIO, AVFoundation, pasteboard, beautify renderer |
+| [`lumora-core`](crates/lumora-core) | Pure Rust: geometry, springs, selection state machine, snapping, settings, file names, hotkey parsing, layout, recording state machine, beautify model, `.lumora` document format |
 
 Deep dives: [ARCHITECTURE.md](ARCHITECTURE.md) (threading, data flow, coordinate spaces) · [DESIGN.md](DESIGN.md) (colour, shape, type and motion tokens).
 
@@ -215,7 +217,7 @@ Deep dives: [ARCHITECTURE.md](ARCHITECTURE.md) (threading, data flow, coordinate
 **v0.2 — annotate**
 
 - [ ] Annotation editor: arrows, shapes, text, highlighter, blur/pixelate, numbered steps, crop
-- [ ] Background and padding presets ("beautify") with rounded corners and shadow
+- [x] Background and padding presets ("beautify") with rounded corners and shadow — shipped in v0.3, with editable `.lumora` documents
 - [ ] Scrolling capture, self-timer, capture previous area
 - [ ] OCR — copy text from any region
 

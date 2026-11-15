@@ -139,6 +139,16 @@ central glow and top sheen, the mark's four white viewfinder brackets, and
 a pale lens with six indigo→violet aperture blades and a specular dot.
 Edit the script, not the SVG.
 
+## Beautify
+
+The ✨ panel is a 248 pt glass column on the right of the editor canvas
+(`NSVisualEffectView`, same tokens as the toolbar); the canvas previews
+the framed result live. Eight background presets
+(`lumora_core::beautify::Preset`, default Ocean) are two-stop linear
+gradients at a CSS-style angle; the optional window frame mimics
+macOS light / dark title bars. Preset colours live in `beautify.rs`, not
+`tokens.rs`, because they are output, not chrome.
+
 The mark — four viewfinder brackets around a lens dot — is drawn in code
 (`lumora_ui::icon`) at any size: a template image in the menu bar, a red dot
 while recording, and a colour version on onboarding. Card actions use SF

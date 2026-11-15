@@ -6,6 +6,8 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-11-16 (not yet hardware-tested)
+
 ### Added
 - **Beautify** — frame captures on a background before sharing: 8 gradient
   presets, a custom solid colour or your own image (PNG / JPEG / HEIC),

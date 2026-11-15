@@ -10,24 +10,25 @@ apps/lumora        binary: NSApplication, status item, hotkeys, App state, flows
    │
    ├── crates/lumora-ui        AppKit + Core Animation: overlay, Quick Access, pins,
    │      │                    shutter, countdown, recording HUD, settings, onboarding,
-   │      │                    annotation editor, toast HUD
+   │      │                    annotation editor + beautify panel, toast HUD
    │      │
    ├──────┴── crates/lumora-capture   ScreenCaptureKit, ImageIO, AVFoundation, pasteboard,
-   │                 │                Vision OCR, multi-display stitching
+   │                 │                Vision OCR, multi-display stitching, beautify renderer
    │                 │
    └─────────────────┴── crates/lumora-core   pure Rust: geometry, springs, selection
                                               state machine, snapping, settings, file
                                               names, hotkey parsing, layout, recording FSM,
                                               annotation document + editor FSM, i18n,
-                                              OCR text assembly, stitch planning
+                                              OCR text assembly, stitch planning,
+                                              beautify model, .lumora document format
 ```
 
 | Crate | macOS-only? | Tests | What it owns |
 |---|---|---|---|
-| `lumora-core` | no | 171 unit tests | `annotate` (paths, shapes, display list, command-pattern document, editor FSM), `i18n` (en + zh-Hans table, language resolution), `ocr` (reading-order assembly), `stitch` (multi-display plans), `geometry` (Rect/Point/Size, handles, pixel alignment, Quartz⇄AppKit flip), `spring` (closed-form damped oscillator + retargetable animator), `selection` (overlay interaction FSM), `snap` (window hit-testing, edge snapping), `settings` (serde/TOML model with validation), `filename` (templates, unique paths), `hotkey` (parse/format/Carbon codes/conflicts), `layout` (card stack, pill, loupe, fly transform), `recording` (lifecycle FSM), `color`, `format`, `action` |
-| `lumora-capture` | yes (error type is portable) | 1 (mac) | `content` (SCShareableContent → displays + z-ordered windows), `screenshot` (SCScreenshotManager), `image` (crop, stitch, pixel reads, PNG+DPI via ImageIO), `ocr` (VNRecognizeTextRequest), `clipboard`, `recorder` (SCStream → AVAssetWriter), `permission` |
-| `lumora-ui` | yes (`tokens` is portable) | 3 (tokens) | All windows, views, layers and motion (incl. `editor`, `toast`); emits `UiEvent`s |
-| `lumora` (app) | yes | 1 | `App` state, `Command` dispatch, flows (capture, record, OCR, editor), Carbon hotkeys, status item, OS glue |
+| `lumora-core` | no | 221 unit tests | `beautify` (style model, presets, layout, auto-balance), `lumora_doc` (`.lumora` container, DTO layer, schema migrations), `annotate` (paths, shapes, display list, command-pattern document, editor FSM), `i18n` (en + zh-Hans table, language resolution), `ocr` (reading-order assembly), `stitch` (multi-display plans), `geometry` (Rect/Point/Size, handles, pixel alignment, Quartz⇄AppKit flip), `spring` (closed-form damped oscillator + retargetable animator), `selection` (overlay interaction FSM), `snap` (window hit-testing, edge snapping), `settings` (serde/TOML model with validation), `filename` (templates, unique paths), `hotkey` (parse/format/Carbon codes/conflicts), `layout` (card stack, pill, loupe, fly transform), `recording` (lifecycle FSM), `color`, `format`, `action` |
+| `lumora-capture` | yes (error type is portable) | 1 (mac) | `content` (SCShareableContent → displays + z-ordered windows), `screenshot` (SCScreenshotManager), `image` (crop, stitch, pixel reads, PNG+DPI via ImageIO), `ocr` (VNRecognizeTextRequest), `beautify_render` (CoreGraphics background/shadow/frame compositing), `clipboard`, `recorder` (SCStream → AVAssetWriter), `permission` |
+| `lumora-ui` | yes (`tokens` is portable) | 3 (tokens) | All windows, views, layers and motion (incl. `editor`, `editor::beautify_panel`, `toast`); emits `UiEvent`s |
+| `lumora` (app) | yes | 1 | `App` state, `Command` dispatch, flows (capture, record, OCR, editor, `doc_flow` for `.lumora` save/open), Carbon hotkeys, status item, OS glue |
 
 ## Coordinate spaces
 
@@ -130,6 +131,27 @@ Quick Access “Annotate” / double-click / “open editor after capture”
 * Redaction is Core Image (`CIPixellate` anchored at the region corner,
   `CIGaussianBlur` on a clamped image) over the *base* image, cached per
   rect.
+
+### Beautify
+
+`lumora_core::beautify::BeautifyStyle` (background preset / solid / image,
+padding, radius, shadow, window frame, aspect, auto-balance) →
+`beautify::layout` computes the canvas and image rect in points →
+`lumora_capture::beautify_render` composites it with CoreGraphics for
+save / copy / drag-out; `lumora_ui::editor::beautify_panel` (the ✨ panel)
+edits the style with a live Core Animation preview. The last style is
+persisted in Settings and applied only when enabled.
+
+### Editable documents (`.lumora`)
+
+`lumora_core::lumora_doc` defines the file: magic + length-prefixed JSON
+header (schema version, annotations as DTOs, beautify style) + the
+original PNG. The live `annotate` model has no serde; DTOs convert both
+ways, and `migrate` upgrades old schemas while newer ones are rejected.
+`apps/lumora::doc_flow` writes the document atomically on a background
+queue next to every saved PNG and reopens it (Open…, Finder via
+`application:openURLs:`, Quick Access Annotate) into the editor with every
+annotation still editable.
 
 ## Localisation
 
