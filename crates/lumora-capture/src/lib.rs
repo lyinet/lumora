@@ -12,6 +12,7 @@
 //!   (background, shadow, rounded frame, window chrome).
 //! * [`clipboard`] — put a capture on the pasteboard.
 //! * [`recorder`] — `SCStream` → `AVAssetWriter` MP4 recording.
+//! * [`mic`] — microphone devices, permission, and the macOS 14 capture path.
 //! * [`ocr`] — on-device text recognition (Vision).
 //! * [`faces`] — on-device face detection (Vision), for smart redaction.
 //! * [`permission`] — Screen Recording (TCC) preflight / request.
@@ -38,6 +39,8 @@ pub mod content;
 pub mod faces;
 #[cfg(target_os = "macos")]
 pub mod image;
+#[cfg(target_os = "macos")]
+pub mod mic;
 #[cfg(target_os = "macos")]
 pub mod ocr;
 #[cfg(target_os = "macos")]

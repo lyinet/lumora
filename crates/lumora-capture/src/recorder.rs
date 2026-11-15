@@ -14,7 +14,12 @@
 //!
 //! Our own windows (recording border, stop control, HUDs) are excluded with
 //! `SCContentFilter(display:excludingWindows:)`, so they are visible to the
-//! user but never appear in the video.
+//! user but never appear in the video — except the window numbers listed in
+//! [`RecordOptions::allow_windows`] (the click-ripple overlays), which must.
+//!
+//! Microphone: on macOS 15+ ScreenCaptureKit delivers it; on macOS 14 an
+//! `AVCaptureSession` ([`crate::mic`]) delivers it on the same serial queue,
+//! retimed from its synchronisation clock to the host clock SC uses.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -58,13 +63,20 @@ pub struct RecordOptions {
     pub settings: Recording,
     /// Destination `.mp4`; must not exist yet.
     pub output: PathBuf,
+    /// Lumora window numbers that must appear in the video (click ripples).
+    pub allow_windows: Vec<u32>,
 }
 
 /// Asynchronous notifications from a running recorder (arbitrary queue).
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecorderEvent {
-    /// The first frame was written; the clock is running.
-    Started,
+    /// The first frame was written; the clock is running. `host_time` is
+    /// that frame's presentation time on the host clock (seconds), the
+    /// zero point of the movie's timeline.
+    Started { host_time: f64 },
+    /// The microphone could not be started (permission denied, device
+    /// gone…); recording continues without it.
+    MicUnavailable(CaptureError),
     /// The stream stopped unexpectedly (display unplugged, permission
     /// revoked…). The partial file is finalised if possible.
     Failed(CaptureError),
@@ -78,6 +90,8 @@ struct WriterState {
     audio: Option<SendBox<Retained<AVAssetWriterInput>>>,
     mic: Option<SendBox<Retained<AVAssetWriterInput>>>,
     session_started: bool,
+    /// Host-clock seconds of the first video frame.
+    session_start: Option<f64>,
     /// Set once stop begins; no further appends are allowed.
     closed: bool,
 }
@@ -163,9 +177,11 @@ impl Shared {
                     return;
                 }
                 if !st.session_started {
-                    st.writer.startSessionAtSourceTime(sample.presentation_time_stamp());
+                    let pts = sample.presentation_time_stamp();
+                    st.writer.startSessionAtSourceTime(pts);
                     st.session_started = true;
-                    (self.on_event)(RecorderEvent::Started);
+                    st.session_start = Some(pts.seconds());
+                    (self.on_event)(RecorderEvent::Started { host_time: pts.seconds() });
                 }
                 if st.video.isReadyForMoreMediaData() && !st.video.appendSampleBuffer(sample) {
                     log::warn!("video append failed: {:?}", st.writer.error().map(|e| e.localizedDescription()));
@@ -182,6 +198,30 @@ impl Shared {
     }
 }
 
+impl Shared {
+    /// macOS 14 microphone path: retime onto the host clock and append.
+    fn handle_mic(&self, sample: &CMSampleBuffer, clock: &crate::mic::HostClock) {
+        let Ok(st) = self.state.lock() else { return };
+        if st.closed || !st.session_started {
+            return;
+        }
+        let Some(input) = st.mic.as_ref() else { return };
+        // SAFETY: on the serial sample queue while holding the lock.
+        unsafe {
+            if !sample.is_valid() {
+                return;
+            }
+            let Some((pts, dur, buffer)) = clock.to_host(sample) else { return };
+            if !lumora_core::click_log::time::audio_overlaps_session(pts, dur, st.session_start) {
+                return;
+            }
+            if input.isReadyForMoreMediaData() {
+                input.appendSampleBuffer(&buffer);
+            }
+        }
+    }
+}
+
 /// A running recording. Dropping it without calling [`Recorder::stop`]
 /// stops the stream and discards the file.
 pub struct Recorder {
@@ -192,6 +232,10 @@ pub struct Recorder {
     shared: Arc<Shared>,
     path: PathBuf,
     stopped: bool,
+    /// macOS 14 microphone capture (stopped before the stream).
+    mic: Option<crate::mic::MicSession>,
+    capture_frame: Rect,
+    video_size: (u32, u32),
 }
 
 impl std::fmt::Debug for Recorder {
@@ -303,6 +347,7 @@ fn build_writer(path: &Path, width: u32, height: u32, s: &Recording) -> Result<W
             audio: audio.map(|a| SendBox::new(a)),
             mic: mic.map(|m| SendBox::new(m)),
             session_started: false,
+            session_start: None,
             closed: false,
         })
     }
@@ -345,7 +390,7 @@ impl Recorder {
             let filter = SCContentFilter::initWithDisplay_excludingWindows(
                 SCContentFilter::alloc(),
                 &display,
-                &content.own_windows(),
+                &content.own_windows_except(&opts.allow_windows),
             );
             let config = SCStreamConfiguration::new();
             config.setWidth(width as usize);
@@ -364,11 +409,16 @@ impl Recorder {
                 config.setChannelCount(2);
                 config.setExcludesCurrentProcessAudio(true);
             }
-            // Microphone capture through ScreenCaptureKit is macOS 15+.
-            // TODO(mic-macos14): fall back to an AVCaptureSession on 14.x.
+            // Microphone capture through ScreenCaptureKit is macOS 15+; on
+            // 14 an AVCaptureSession takes over (started below).
             let mic_supported = config.respondsToSelector(sel!(setCaptureMicrophone:));
             if s.microphone && mic_supported {
                 config.setCaptureMicrophone(true);
+                if let Some(id) = &s.microphone_device {
+                    if config.respondsToSelector(sel!(setMicrophoneCaptureDeviceID:)) {
+                        config.setMicrophoneCaptureDeviceID(Some(&NSString::from_str(id)));
+                    }
+                }
             }
 
             let delegate = ProtocolObject::from_ref(&*output);
@@ -391,6 +441,23 @@ impl Recorder {
             stream
         };
 
+        // macOS 14: microphone through AVCaptureSession on the same queue.
+        let mic = if s.microphone && !crate::mic::sc_microphone_supported() {
+            let shared_mic = shared.clone();
+            match crate::mic::MicSession::start(s.microphone_device.as_deref(), &queue, move |sample, clock| {
+                shared_mic.handle_mic(sample, clock)
+            }) {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    log::warn!("microphone unavailable: {e}");
+                    (shared.on_event)(RecorderEvent::MicUnavailable(e));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let shared_for_start = shared.clone();
         let started = RcBlock::new(move |error: *mut NSError| {
             if !error.is_null() && !shared_for_start.failed.swap(true, Ordering::SeqCst) {
@@ -409,6 +476,9 @@ impl Recorder {
             shared,
             path: opts.output,
             stopped: false,
+            mic,
+            capture_frame: frame,
+            video_size: (width, height),
         })
     }
 
@@ -416,10 +486,23 @@ impl Recorder {
         &self.path
     }
 
+    /// Recorded area in global Quartz points (after clipping/integral).
+    pub fn capture_frame(&self) -> Rect {
+        self.capture_frame
+    }
+
+    /// Encoded video size in pixels.
+    pub fn video_size(&self) -> (u32, u32) {
+        self.video_size
+    }
+
     /// Stop and finalise the file. `completion` runs on an arbitrary queue
     /// with the finished file path.
     pub fn stop(mut self, completion: impl FnOnce(Result<PathBuf, CaptureError>) + Send + 'static) {
         self.stopped = true;
+        if let Some(mic) = self.mic.take() {
+            mic.stop();
+        }
         let shared = self.shared.clone();
         let path = self.path.clone();
         let queue = self.queue.clone();

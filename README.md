@@ -61,7 +61,7 @@
     <td width="50%" valign="top">
       <img src="assets/readme/feature-recording.svg" width="100%" alt="Screen recording: a red marching-ants border, a 3-2-1 countdown ring and a red timer in the menu bar">
       <h3>Screen recording</h3>
-      <p>Record an area or the full screen to H.264 or HEVC MP4 at 30 or 60 fps, with cursor on or off, system audio and microphone (macOS 15+). A 3-2-1 countdown ring, a red timer in the menu bar, a floating stop button, and a marching-ants border that never appears in the video.</p>
+      <p>Record an area or the full screen to H.264 or HEVC MP4 at 30 or 60 fps, with cursor on or off, system audio and microphone (macOS 14+), and optional click ripples. A 3-2-1 countdown ring, a red timer in the menu bar, a floating stop button, and a marching-ants border that never appears in the video.</p>
     </td>
   </tr>
 </table>
@@ -78,6 +78,8 @@
 - **Smart Redaction** — one click (or <kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd>) in the editor pixelates or blurs emails, phone numbers, Chinese ID and bank card numbers (checksum-verified), API keys and tokens, IP addresses, secrets in links and faces — detected on your Mac with Vision, added as one undoable group. Choose categories in Settings → Capture, optionally redact every new screenshot before it's copied or saved, or add an AI check that sends recognised text only, never the image.
 - **OCR actions** — after Capture Text (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>2</kbd>) copies the text, a small floating panel offers Copy, Summarize, Translate (English / 简体中文), As Table, As Code and Checklist, streamed into a result sheet with Copy, Stop and Retry. Summarize and Translate use AI Writing; the rest work without it.
 - **Screenshot → table / code** — rebuild a table from a screenshot on your Mac (rows and columns recovered from the text positions) and copy it as Markdown or CSV, or turn a screenshot of code back into code with its indentation restored. With AI Writing on, AI refines the on-device result; the editor's AI menu has Extract table and Extract code too.
+- **Click ripples** — while recording, every click draws a springy ring (blue for left, orange for right) that appears in the video, while the border, stop button and toasts stay out of it. Toggle it in Settings → Recording. Each click is also logged with its time, position and app to a `<movie>.events.json` file next to the video, ready for step-by-step tutorials.
+- **Microphone recording on macOS 14+** — record your voice with the screen on macOS 14 as well as 15, from the system default or a microphone you pick in Settings → Recording. Lumora asks for microphone access the first time.
 
 ## Keyboard shortcuts
 
@@ -205,7 +207,8 @@ Everything below is written, type-checked and unit-tested, but **not yet run on 
 - [x] Smart Redaction: on-device detection of personal and secret data, one-click pixelate / blur, optional AI check
 - [ ] Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
 - [ ] Capture history window (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>)
-- [ ] Recording extras: click ripples, keystroke HUD, microphone on macOS 14, GIF export + trim
+- [x] Click ripples, click-event log (`.events.json`) and microphone on macOS 14
+- [ ] Recording extras: keystroke HUD, GIF export + trim
 - [ ] Scrolling capture
 - [x] OCR actions (summarize, translate, checklist) and screenshot → table / code, local-first
 

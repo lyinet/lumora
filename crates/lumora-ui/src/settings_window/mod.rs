@@ -936,5 +936,53 @@ fn build_recording(
         |s| s.recording.microphone,
         |s, v| s.recording.microphone = v,
     );
+    mic_device_popup(form, targets, state);
     form.note(tr(Msg::MicrophoneNote));
+    checkbox(
+        form,
+        targets,
+        state,
+        tr(Msg::Visualize),
+        tr(Msg::ShowClicks),
+        |s| s.recording.show_clicks,
+        |s, v| s.recording.show_clicks = v,
+    );
+}
+
+/// Microphone device picker: "System default" + connected devices. A saved
+/// device that is currently unplugged stays selected (shown by its id).
+fn mic_device_popup(form: &mut Form<'_>, targets: &mut Vec<Retained<ActionTarget>>, state: &Rc<State>) {
+    let mut devices: Vec<(Option<String>, String)> = vec![(None, tr(Msg::MicrophoneDefault).to_string())];
+    devices.extend(lumora_capture::mic::devices().into_iter().map(|d| (Some(d.id), d.name)));
+    let current = state.settings.borrow().recording.microphone_device.clone();
+    if let Some(id) = &current {
+        if !devices.iter().any(|(d, _)| d.as_ref() == Some(id)) {
+            devices.push((Some(id.clone()), id.clone()));
+        }
+    }
+    let p = NSPopUpButton::initWithFrame_pullsDown(
+        NSPopUpButton::alloc(form.mtm),
+        cg_rect(Rect::new(0.0, 0.0, 240.0, 26.0)),
+        false,
+    );
+    for (_, name) in &devices {
+        p.addItemWithTitle(&NSString::from_str(name));
+    }
+    let selected = devices.iter().position(|(d, _)| *d == current).unwrap_or(0);
+    p.selectItemAtIndex(selected as isize);
+    let st = state.clone();
+    let t = ActionTarget::new(form.mtm, move |sender: &AnyObject| {
+        if let Some(p) = sender.downcast_ref::<NSPopUpButton>() {
+            let i = p.indexOfSelectedItem().max(0) as usize;
+            let id = devices.get(i).and_then(|(d, _)| d.clone());
+            st.update(|s| s.recording.microphone_device = id);
+        }
+    });
+    // SAFETY: target kept alive by the window controller.
+    unsafe {
+        p.setTarget(Some(&t));
+        p.setAction(Some(ActionTarget::action()));
+    }
+    form.add(tr(Msg::MicrophoneDevice), &p, ROW_H);
+    targets.push(t);
 }

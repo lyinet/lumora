@@ -6,6 +6,10 @@ pub enum CaptureError {
     /// The user has not granted Screen Recording permission.
     #[error("Lumora needs Screen Recording permission")]
     PermissionDenied,
+    /// The user has not granted Microphone permission (recording continues
+    /// without the mic).
+    #[error("Lumora needs Microphone permission")]
+    MicrophoneDenied,
     /// The requested display or window no longer exists.
     #[error("the {0} to capture is no longer available")]
     TargetGone(&'static str),

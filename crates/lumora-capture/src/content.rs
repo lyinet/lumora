@@ -168,10 +168,17 @@ impl ShareableContent {
     /// Our own windows (overlay, HUDs, recording border) so recordings can
     /// exclude them via `SCContentFilter`.
     pub(crate) fn own_windows(&self) -> Retained<NSArray<SCWindow>> {
+        self.own_windows_except(&[])
+    }
+
+    /// Lumora's windows minus `allow` (window numbers that must stay in the
+    /// recording, e.g. the click-ripple overlays).
+    pub(crate) fn own_windows_except(&self, allow: &[u32]) -> Retained<NSArray<SCWindow>> {
         let pid = std::process::id() as i32;
         let mine: Vec<Retained<SCWindow>> = unsafe { self.inner.windows() }
             .iter()
             .filter(|w| unsafe { w.owningApplication() }.is_some_and(|a| unsafe { a.processID() } == pid))
+            .filter(|w| !allow.contains(&unsafe { w.windowID() }))
             .collect();
         NSArray::from_retained_slice(&mine)
     }
@@ -192,4 +199,56 @@ impl ShareableContent {
             })
             .copied()
     }
+}
+
+/// The window under a point, as the window server reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowHit {
+    pub pid: i32,
+    pub owner_name: Option<String>,
+    /// `kCGWindowName` (needs Screen Recording permission, which recording
+    /// already requires). No Accessibility API involved.
+    pub title: Option<String>,
+}
+
+/// The front-most visible window of another process containing `p`
+/// (global Quartz points). Lumora's own windows are skipped.
+pub fn window_at(p: lumora_core::geometry::Point) -> Option<WindowHit> {
+    use objc2::runtime::AnyObject;
+    use objc2_core_graphics::CGWindowListCopyWindowInfo;
+    use objc2_foundation::{NSDictionary, NSNumber, NSString};
+    let list = CGWindowListCopyWindowInfo(
+        CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements,
+        0,
+    )?;
+    // SAFETY: CFArray of CFDictionary is toll-free bridged to NSArray of
+    // NSDictionary; the list is ordered front to back.
+    let array: &NSArray<NSDictionary<NSString, AnyObject>> = unsafe { &*(&*list as *const CFArray).cast() };
+    let own = std::process::id() as isize;
+    let num = |d: &NSDictionary<NSString, AnyObject>, k: &str| {
+        d.objectForKey(&NSString::from_str(k)).and_then(|v| v.downcast::<NSNumber>().ok())
+    };
+    let string = |d: &NSDictionary<NSString, AnyObject>, k: &str| {
+        d.objectForKey(&NSString::from_str(k))
+            .and_then(|v| v.downcast::<NSString>().ok())
+            .map(|s| s.to_string())
+            .filter(|s| !s.is_empty())
+    };
+    array.iter().find_map(|d| {
+        let pid = num(&d, "kCGWindowOwnerPID")?.integerValue();
+        if pid == own || num(&d, "kCGWindowAlpha").is_some_and(|a| a.doubleValue() <= 0.0) {
+            return None;
+        }
+        let bounds = d.objectForKey(&NSString::from_str("kCGWindowBounds"))?;
+        let bounds = bounds.downcast::<NSDictionary>().ok()?;
+        // SAFETY: kCGWindowBounds is a dictionary of NSString → NSNumber.
+        let bounds: &NSDictionary<NSString, AnyObject> = unsafe { &*(&*bounds as *const NSDictionary).cast() };
+        let f = |k: &str| num(bounds, k).map(|n| n.doubleValue());
+        let r = Rect::new(f("X")?, f("Y")?, f("Width")?, f("Height")?);
+        r.contains(p).then(|| WindowHit {
+            pid: pid as i32,
+            owner_name: string(&d, "kCGWindowOwnerName"),
+            title: string(&d, "kCGWindowName"),
+        })
+    })
 }

@@ -253,7 +253,13 @@ messages! {
     MousePointer => "Mouse pointer", "鼠标指针";
     SystemAudio => "System audio", "系统声音";
     Microphone => "Microphone", "麦克风";
-    MicrophoneNote => "Microphone capture requires macOS 15 or later.", "麦克风录制需要 macOS 15 或更高版本。";
+    MicrophoneNote => "Lumora asks for microphone access on first use.", "首次使用麦克风录制时，Lumora 会请求麦克风权限。";
+    MicrophoneDevice => "Microphone device:", "麦克风设备：";
+    MicrophoneDefault => "System default", "系统默认设备";
+    ShowClicks => "Click ripples", "点击涟漪效果";
+    Visualize => "Show:", "显示：";
+    ToastMicUnavailable => "Recording without microphone", "本次录制不含麦克风声音";
+    ErrMicPermission => "Allow Lumora in System Settings › Privacy & Security › Microphone.", "请在“系统设置 › 隐私与安全性 › 麦克风”中允许 Lumora。";
 
     // -- annotation editor --------------------------------------------------------
     EditorTitle => "Annotate — {0}", "标注 — {0}";

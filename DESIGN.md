@@ -41,6 +41,7 @@ Editor and HUD additions:
 | `TOOL_ACTIVE` | accent @ 90 % | Active-tool pill |
 | `CROP_DIM` | black @ 50 % | Outside a pending crop |
 | `SUCCESS` / `WARNING` / `ERROR` | `#30D158` / `#FFD60A` / `#FF453A` | Toast glyphs, invalid shortcut outline |
+| `CLICK_LEFT` / `CLICK_RIGHT` / `CLICK_OTHER` | `#0A84FF` / `#FF9F0A` / `#BF5AF2` | Click ripples while recording (ring at 95 %, fill at 22 %) |
 
 Annotation palette (`annotate::style::PALETTE`): red `#FF3B30`, yellow
 `#FFCC00`, green `#34C759`, blue `#0A84FF`, ink `#1C1C1E`, white — plus a
@@ -105,6 +106,7 @@ the solver in `lumora-core`; unit tests enforce the bounds.)
 | `POP` (`BOUNCY`) | 260 | 14 | 0.43 | 1.0 s | 22 % | Countdown digits, handles appearing, pin drop |
 | `INSERT` | 380 | 24 | 0.62 | ≈0.6 s | 8.6 % | New annotation settling in (scale 0.85 → 1) |
 | `TOOL` (`SNAPPY`) | 420 | 30 | 0.73 | 0.48 s | 3.4 % | Active-tool pill sliding |
+| `RIPPLE` | 300 | 18 | 0.52 | ≈0.8 s | 15 % | Click ripple ring scale 0.35 → 1 (opacity fades over 0.55 s) |
 | `TOAST` | 320 | 24 | 0.67 | ≈0.55 s | 5.8 % | Toast drop-in (12 pt) |
 
 (Settling times for INSERT/TOAST are approximate; unit tests bound them

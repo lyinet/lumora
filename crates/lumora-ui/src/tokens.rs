@@ -78,6 +78,10 @@ pub mod color {
     pub const SUCCESS: Rgba = Rgba::hex(0x30D158, 1.0);
     pub const WARNING: Rgba = Rgba::hex(0xFFD60A, 1.0);
     pub const ERROR: Rgba = Rgba::hex(0xFF453A, 1.0);
+    /// Click ripples while recording (left / right / other button).
+    pub const CLICK_LEFT: Rgba = Rgba::hex(0x0A84FF, 1.0);
+    pub const CLICK_RIGHT: Rgba = Rgba::hex(0xFF9F0A, 1.0);
+    pub const CLICK_OTHER: Rgba = Rgba::hex(0xBF5AF2, 1.0);
 }
 
 /// Corner radii (points).
@@ -193,6 +197,9 @@ pub mod motion {
     pub const TOAST_LONG: f64 = 4.0;
     /// Toast fade-out.
     pub const TOAST_OUT: f64 = 0.22;
+    /// Click ripple: ring springs out (slight overshoot) while fading.
+    pub const RIPPLE: Spring = Spring::new(1.0, 300.0, 18.0);
+    pub const RIPPLE_FADE: f64 = 0.55;
     /// Settling threshold used to derive CA durations from springs.
     pub const SETTLE_EPSILON: f64 = 1e-3;
 }

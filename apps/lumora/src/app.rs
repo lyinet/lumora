@@ -99,6 +99,8 @@ pub enum Mode {
         _border: Option<RecordingBorder>,
         stop: StopControl,
         timer: Retained<NSTimer>,
+        /// Click ripples + click-event log for this recording.
+        clicks: Box<crate::record_flow::ClickSession>,
     },
     /// The writer is finalising the file.
     Finishing,
@@ -192,6 +194,8 @@ pub struct App {
     permission_poll: RefCell<Option<Retained<NSTimer>>>,
     next_id: Cell<u64>,
     pub session: RefCell<RecordingSession>,
+    /// Click log of the recording being finalised (written next to the movie).
+    pub pending_click_log: RefCell<Option<crate::record_flow::ClickLogData>>,
     /// Running AI writing requests, by editor (capture) id.
     pub ai_jobs: RefCell<HashMap<u64, crate::ai_write_flow::AiJob>>,
     /// The Capture Text result panel (created on first use).
@@ -243,6 +247,7 @@ impl App {
                 permission_poll: RefCell::new(None),
                 next_id: Cell::new(1),
                 session: RefCell::new(RecordingSession::default()),
+                pending_click_log: RefCell::new(None),
                 ai_jobs: RefCell::new(HashMap::new()),
                 text_panel: RefCell::new(None),
                 text_job: RefCell::new(None),

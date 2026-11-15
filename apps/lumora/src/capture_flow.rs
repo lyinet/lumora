@@ -351,6 +351,7 @@ impl App {
 pub fn error_text(e: &CaptureError) -> String {
     match e {
         CaptureError::PermissionDenied => tr(Msg::ErrPermission).to_string(),
+        CaptureError::MicrophoneDenied => tr(Msg::ErrMicPermission).to_string(),
         CaptureError::TargetGone(what) => {
             let what = if *what == "window" { tr(Msg::TargetWindow) } else { tr(Msg::TargetDisplay) };
             trf(Msg::ErrTargetGone, &[&what])

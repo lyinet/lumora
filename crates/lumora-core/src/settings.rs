@@ -108,6 +108,10 @@ pub struct Recording {
     pub show_cursor: bool,
     pub system_audio: bool,
     pub microphone: bool,
+    /// `AVCaptureDevice.uniqueID` of the microphone; `None` = system default.
+    pub microphone_device: Option<String>,
+    /// Draw a ripple at every click while recording (visible in the video).
+    pub show_clicks: bool,
     /// Countdown before recording starts; 0 disables it.
     pub countdown: u32,
     /// Target video bitrate in Mbit/s at 1080p; scaled by pixel count.
@@ -190,6 +194,8 @@ impl Default for Recording {
             show_cursor: true,
             system_audio: false,
             microphone: false,
+            microphone_device: None,
+            show_clicks: true,
             countdown: 3,
             quality_mbps: 12.0,
         }

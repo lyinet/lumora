@@ -7,6 +7,32 @@ All notable changes to Lumora are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Click ripples** — while recording, a global + local mouse-down monitor
+  draws a spring-and-fade ring at each click (left blue, right / ⌃-click
+  orange, other buttons purple) on a transparent, click-through, all-Spaces
+  overlay per display. The overlay windows are deliberately left out of the
+  `SCContentFilter`'s excluded windows so the rings are in the video, while
+  the border, stop control and toasts stay excluded. Settings → Recording →
+  Show: Click ripples (on by default).
+- **Click-event log** — every click is written to `<movie stem>.events.json`
+  next to the movie (`schema_version` 1): time since the first video frame
+  (host clock, same as the writer's session start), button, click count,
+  modifiers, display id, point in display points / pixels, pixel in the video
+  (`null` + `inside_recording: false` when outside the recorded area), and
+  the app (bundle id, name) and window title under the click from the window
+  server list (no Accessibility permission). Pure types and mapping in
+  `lumora_core::click_log`.
+- **Microphone on macOS 14** — ScreenCaptureKit's microphone capture is
+  macOS 15+; on 14 the recorder now runs an `AVCaptureSession` audio input
+  (default or selected device, 48 kHz stereo LPCM) on the recorder's sample
+  queue, retimes buffers from the session's synchronisation clock to the
+  host clock with `CMSyncConvertTime`, and drops audio from before the first
+  video frame. macOS 15 keeps the SC path (and honours the chosen device).
+  Settings → Recording gains a microphone device popup; mic permission is
+  requested before the first mic recording, and a denied permission shows a
+  toast and records without the mic.
+- `recording.show_clicks` and `recording.microphone_device` settings (older
+  settings files load unchanged).
 - **Smart Redaction (智能打码)** — the editor's new Smart Redact button
   (<kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd>) finds personal and secret data and
   covers every hit with a pixelate (or blur) redaction, all as one undo step,

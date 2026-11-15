@@ -20,6 +20,8 @@ mod ai_sheet;
 #[cfg(target_os = "macos")]
 pub mod anim;
 #[cfg(target_os = "macos")]
+pub mod click_overlay;
+#[cfg(target_os = "macos")]
 pub mod countdown;
 #[cfg(target_os = "macos")]
 pub mod editor;
