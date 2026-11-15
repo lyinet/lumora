@@ -311,6 +311,7 @@ impl App {
             UiEvent::CountdownCancelled => self.cancel_recording_setup(),
             UiEvent::StopRecording => self.stop_recording(),
             UiEvent::SettingsChanged(s) => self.apply_settings(*s),
+            UiEvent::BeautifyChanged { from, style } => self.on_beautify_changed(from, *style),
             UiEvent::ShortcutRecording(on) => self.hotkeys.borrow_mut().suspend(on),
             UiEvent::Onboarding(action) => self.on_onboarding(action),
         }
@@ -418,10 +419,41 @@ impl App {
                 log::warn!("launch at login: {e}");
             }
         }
+        let beautify = s.beautify.clone();
         drop(s);
+        for editor in self.editors.borrow().values() {
+            editor.set_beautify(beautify.clone());
+        }
         self.apply_hotkeys();
         if language_changed {
             self.apply_language();
+        }
+    }
+
+    /// An editor's beautify panel changed the style: remember it (Settings,
+    /// saved to disk) and push it to the other editors and the Settings
+    /// window's snapshot.
+    fn on_beautify_changed(self: &Rc<Self>, from: u64, style: lumora_core::beautify::BeautifyStyle) {
+        let style = style.validated();
+        {
+            let mut s = self.settings.borrow_mut();
+            if s.beautify == style {
+                return;
+            }
+            s.beautify = style.clone();
+        }
+        if let Some(path) = &self.settings_path {
+            if let Err(e) = self.settings.borrow().save(path) {
+                log::error!("saving settings failed: {e}");
+            }
+        }
+        for (id, editor) in self.editors.borrow().iter() {
+            if *id != from {
+                editor.set_beautify(style.clone());
+            }
+        }
+        if let Some(w) = self.settings_window.borrow().as_ref() {
+            w.set_beautify(style);
         }
     }
 

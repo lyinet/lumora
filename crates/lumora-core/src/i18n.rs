@@ -302,6 +302,8 @@ messages! {
     BeautifyPadding => "Padding", "内边距";
     BeautifyCornerRadius => "Corner radius", "圆角";
     BeautifyShadow => "Shadow", "阴影";
+    BeautifyShadowBlur => "Shadow blur", "阴影模糊";
+    BeautifyShadowOpacity => "Shadow opacity", "阴影浓度";
     BeautifyAutoBalance => "Auto-balance", "自动平衡";
     BeautifyAspectRatio => "Aspect ratio", "宽高比";
     BeautifyAspectAuto => "Auto", "自动";

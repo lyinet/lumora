@@ -163,7 +163,7 @@ fn draw_gradient(ctx: &CGContext, space: &CGColorSpace, from: Rgba, to: Rgba, an
 }
 
 /// Decode the first image of the file at `path` with ImageIO.
-fn load_image(path: &Path) -> Option<CFRetained<CGImage>> {
+pub fn load_image(path: &Path) -> Option<CFRetained<CGImage>> {
     if !path.is_file() {
         return None;
     }

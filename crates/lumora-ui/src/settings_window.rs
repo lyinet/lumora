@@ -354,6 +354,12 @@ impl SettingsWindow {
         SettingsWindow { window, state, _targets: targets, _fields: fields }
     }
 
+    /// Keep the window's settings snapshot in step with a beautify style
+    /// changed in an editor, so the next edit here doesn't revert it.
+    pub fn set_beautify(&self, style: lumora_core::beautify::BeautifyStyle) {
+        self.state.settings.borrow_mut().beautify = style;
+    }
+
     /// Mark shortcuts another app already holds: red field outline plus an
     /// explanation under the list.
     pub fn set_unavailable(&self, taken: &[Action]) {

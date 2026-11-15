@@ -4,6 +4,18 @@ All notable changes to Lumora are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **Beautify** — frame captures on a background before sharing: 8 gradient
+  presets, a custom solid colour or your own image (PNG / JPEG / HEIC),
+  padding, corner radius, drop shadow (blur, opacity, on/off), an optional
+  macOS-style window frame (light / dark), fixed aspect ratios (16:9, 9:16,
+  4:3, 3:2, 1:1) and auto-balance. Edit it from the ✨ panel in the
+  annotation editor with a live Core Animation preview; the last style is
+  remembered (Settings) and applied to saved, copied and dragged-out images
+  when enabled.
+
 ## [0.2.0] — 2026-11-15 (unreleased, not yet hardware-tested)
 
 ### Added

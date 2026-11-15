@@ -46,6 +46,8 @@ pub enum ToolbarAction {
     Redo,
     Copy,
     Save,
+    /// Show / hide the beautify panel.
+    Beautify,
 }
 
 pub type ToolbarHandler = Rc<dyn Fn(ToolbarAction)>;
@@ -91,6 +93,7 @@ pub struct Toolbar {
     reset_crop: Retained<NSButton>,
     undo: Retained<NSButton>,
     redo: Retained<NSButton>,
+    beautify: Retained<NSButton>,
     _drag: Retained<DragTile>,
     _targets: Vec<Retained<ActionTarget>>,
     active: Cell<Option<Tool>>,
@@ -375,6 +378,18 @@ impl Toolbar {
         let _save = trailing("square.and.arrow.down", Msg::SaveImage, ToolbarAction::Save, &mut targets);
         let _copy = trailing("doc.on.doc", Msg::CopyImage, ToolbarAction::Copy, &mut targets);
         right.set(right.get() - 8.0);
+        let beautify = trailing("wand.and.stars", Msg::Beautify, ToolbarAction::Beautify, &mut targets);
+        if beautify.image().is_none() {
+            if let Some(img) = symbol("sparkles", tr(Msg::Beautify)) {
+                beautify.setImage(Some(&img));
+                beautify.setTitle(&NSString::new());
+            }
+        }
+        beautify.setWantsLayer(true);
+        if let Some(l) = beautify.layer() {
+            l.setCornerRadius(radius::TOOL);
+        }
+        right.set(right.get() - 8.0);
         let redo = trailing("arrow.uturn.forward", Msg::Redo, ToolbarAction::Redo, &mut targets);
         let undo = trailing("arrow.uturn.backward", Msg::Undo, ToolbarAction::Undo, &mut targets);
 
@@ -391,11 +406,25 @@ impl Toolbar {
             reset_crop,
             undo,
             redo,
+            beautify,
             _drag: drag,
             _targets: targets,
             active: Cell::new(None),
             pill_x: Cell::new(size::EDITOR_TRAFFIC_LIGHTS + bh / 2.0),
         }
+    }
+
+    /// Beautify button: accent glyph while beautify is on, a soft pill while
+    /// its panel is open.
+    pub fn set_beautify_state(&self, open: bool, enabled: bool) {
+        let tint = if enabled { crate::util::ns_color(color::ACCENT) } else { NSColor::labelColor() };
+        self.beautify.setContentTintColor(Some(&tint));
+        without_actions(|| {
+            if let Some(l) = self.beautify.layer() {
+                let bg = if open { Some(cg_color(color::TOOL_ACTIVE.with_alpha(0.22))) } else { None };
+                l.setBackgroundColor(bg.as_deref());
+            }
+        });
     }
 
     /// Reflect the editor's state. Animates the tool pill when the tool

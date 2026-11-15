@@ -601,6 +601,163 @@ impl Shadow {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Editor controls and live preview (pure maths for the editor panel)
+// ---------------------------------------------------------------------------
+
+/// One edit from the editor's beautify panel. [`BeautifyStyle::apply`]
+/// folds it into a style and re-validates, so slider values out of range
+/// (or non-finite) can never reach the renderer.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Adjust {
+    Enabled(bool),
+    Background(Background),
+    Padding(f64),
+    CornerRadius(f64),
+    ShadowEnabled(bool),
+    ShadowRadius(f64),
+    ShadowOpacity(f64),
+    Chrome(WindowChrome),
+    Aspect(AspectRatio),
+    AutoBalance(bool),
+}
+
+/// Slider ranges `(min, max)` for the editor panel.
+pub const PADDING_RANGE: (f64, f64) = (0.0, MAX_PADDING);
+pub const CORNER_RADIUS_RANGE: (f64, f64) = (0.0, MAX_CORNER_RADIUS);
+pub const SHADOW_RADIUS_RANGE: (f64, f64) = (0.0, MAX_SHADOW_RADIUS);
+pub const SHADOW_OPACITY_RANGE: (f64, f64) = (0.0, 1.0);
+
+/// Snap a slider value to a whole point (opacity to 1 %), clamped to
+/// `range`. Non-finite input snaps to `range.0`.
+pub fn snap_slider(value: f64, range: (f64, f64), step: f64) -> f64 {
+    if !value.is_finite() {
+        return range.0;
+    }
+    let step = if step.is_finite() && step > 0.0 { step } else { 1.0 };
+    ((value / step).round() * step).clamp(range.0, range.1)
+}
+
+impl BeautifyStyle {
+    /// Apply one panel edit. Returns whether the style changed (so callers
+    /// can skip a redraw and a settings write when a slider didn't move).
+    pub fn apply(&mut self, adjust: Adjust) -> bool {
+        let before = self.clone();
+        match adjust {
+            Adjust::Enabled(on) => self.enabled = on,
+            Adjust::Background(bg) => self.background = bg,
+            Adjust::Padding(v) => self.padding = snap_slider(v, PADDING_RANGE, 1.0),
+            Adjust::CornerRadius(v) => self.corner_radius = snap_slider(v, CORNER_RADIUS_RANGE, 1.0),
+            Adjust::ShadowEnabled(on) => self.shadow.enabled = on,
+            Adjust::ShadowRadius(v) => self.shadow.radius = snap_slider(v, SHADOW_RADIUS_RANGE, 1.0),
+            Adjust::ShadowOpacity(v) => self.shadow.opacity = snap_slider(v, SHADOW_OPACITY_RANGE, 0.01),
+            Adjust::Chrome(c) => self.chrome = c,
+            Adjust::Aspect(a) => self.aspect = a,
+            Adjust::AutoBalance(on) => self.auto_balance = on,
+        }
+        self.validate();
+        *self != before
+    }
+}
+
+/// The largest zoom (≤ `max_zoom`) at which `content` fits in `avail`, and
+/// the content's rect at that zoom, centred in `avail`. Degenerate input
+/// gives zoom 1 and an empty rect at the centre. The zoom never drops below
+/// 0.05.
+pub fn fit_centered(content: Size, avail: Rect, max_zoom: f64) -> (f64, Rect) {
+    let ok = |v: f64| v.is_finite() && v > 0.0;
+    if !ok(content.width) || !ok(content.height) || !ok(avail.width()) || !ok(avail.height()) {
+        let c = avail.mid();
+        return (1.0, Rect::new(c.x, c.y, 0.0, 0.0));
+    }
+    let max = if ok(max_zoom) { max_zoom } else { 1.0 };
+    let zoom = (avail.width() / content.width).min(avail.height() / content.height).clamp(0.05, max.max(0.05));
+    let (w, h) = (content.width * zoom, content.height * zoom);
+    let c = avail.mid();
+    (zoom, Rect::new(c.x - w / 2.0, c.y - h / 2.0, w, h))
+}
+
+/// Where the editor draws its live preview, in view points (y-down).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PreviewGeometry {
+    /// View points per document point.
+    pub zoom: f64,
+    /// The whole beautify canvas (background); equals `frame` when off.
+    pub canvas: Rect,
+    /// Framed window (clips, rounds, casts the shadow).
+    pub frame: Rect,
+    /// Chrome bar, if any.
+    pub chrome_bar: Option<Rect>,
+    /// The capture itself.
+    pub content: Rect,
+    /// Corner radius of `frame` in view points.
+    pub corner_radius: f64,
+}
+
+impl PreviewGeometry {
+    /// Traffic-light centres and diameter in view points.
+    pub fn traffic_lights(&self) -> Option<([Point; 3], f64)> {
+        let bar = self.chrome_bar?;
+        let k = self.zoom;
+        let d = WindowChrome::LIGHT_DIAMETER * k;
+        let y = bar.mid().y;
+        let x0 = bar.min_x() + WindowChrome::LIGHT_INSET * k + d / 2.0;
+        let step = d + WindowChrome::LIGHT_GAP * k;
+        Some(([Point::new(x0, y), Point::new(x0 + step, y), Point::new(x0 + 2.0 * step, y)], d))
+    }
+}
+
+/// Fit the preview of a `shown`-sized capture (document points) into
+/// `avail` (view points), never upscaling. With `style.enabled` the whole
+/// beautify canvas is fitted; otherwise just the capture, with
+/// `plain_radius` corners — exactly the editor's look without beautify.
+pub fn preview_geometry(shown: Size, style: &BeautifyStyle, avail: Rect, plain_radius: f64) -> PreviewGeometry {
+    if !style.enabled {
+        let (zoom, r) = fit_centered(shown, avail, 1.0);
+        return PreviewGeometry {
+            zoom,
+            canvas: r,
+            frame: r,
+            chrome_bar: None,
+            content: r,
+            corner_radius: plain_radius.max(0.0).min(r.width().min(r.height()) / 2.0),
+        };
+    }
+    let l = layout(shown, &style.validated());
+    let (zoom, canvas) = fit_centered(l.canvas, avail, 1.0);
+    let map = |r: Rect| {
+        Rect::new(
+            canvas.min_x() + r.min_x() * zoom,
+            canvas.min_y() + r.min_y() * zoom,
+            r.width() * zoom,
+            r.height() * zoom,
+        )
+    };
+    // `layout` rounds the content to whole points; keep the exact capture
+    // size on screen so document↔view mapping stays exact.
+    let content = map(l.content);
+    let content =
+        Rect::new(content.min_x(), content.min_y(), shown.width.max(0.0) * zoom, shown.height.max(0.0) * zoom);
+    PreviewGeometry {
+        zoom,
+        canvas,
+        frame: map(l.frame),
+        chrome_bar: l.chrome_bar.map(map),
+        content,
+        corner_radius: l.corner_radius * zoom,
+    }
+}
+
+/// CSS-angle gradient endpoints in unit coordinates of a `size` rect
+/// (y-down, `0..=1` inside the rect, may overshoot slightly for corners),
+/// for `CAGradientLayer.startPoint` / `endPoint`.
+pub fn gradient_unit_points(size: Size, angle_deg: f32) -> (Point, Point) {
+    let ok = |v: f64| v.is_finite() && v > 0.0;
+    let (w, h) = if ok(size.width) && ok(size.height) { (size.width, size.height) } else { (1.0, 1.0) };
+    let (s, e) = gradient_endpoints(Rect::new(0.0, 0.0, w, h), angle_deg);
+    (Point::new(s.x / w, s.y / h), Point::new(e.x / w, e.y / h))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -918,5 +1075,99 @@ mod tests {
         assert_eq!(p.blur, MAX_SHADOW_RADIUS);
         assert_eq!(p.dy, -Shadow::default().offset_y);
         assert_eq!(p.alpha, 1.0);
+    }
+    #[test]
+    fn apply_snaps_clamps_and_reports_change() {
+        let mut s = BeautifyStyle::default();
+        assert!(s.apply(Adjust::Padding(40.4)));
+        assert_eq!(s.padding, 40.0);
+        assert!(!s.apply(Adjust::Padding(40.2)));
+        assert!(s.apply(Adjust::Padding(9999.0)));
+        assert_eq!(s.padding, MAX_PADDING);
+        assert!(s.apply(Adjust::CornerRadius(f64::NAN)));
+        assert_eq!(s.corner_radius, 0.0);
+        assert!(s.apply(Adjust::ShadowOpacity(0.456)));
+        assert!((s.shadow.opacity - 0.46).abs() < 1e-9);
+        assert!(s.apply(Adjust::ShadowRadius(-5.0)));
+        assert_eq!(s.shadow.radius, 0.0);
+        assert!(s.apply(Adjust::ShadowEnabled(false)));
+        assert!(!s.shadow.enabled);
+        assert!(s.apply(Adjust::Enabled(true)));
+        assert!(!s.apply(Adjust::Enabled(true)));
+        assert!(s.apply(Adjust::Chrome(WindowChrome::MacDark)));
+        assert!(s.apply(Adjust::Aspect(AspectRatio::R1x1)));
+        assert!(s.apply(Adjust::AutoBalance(false)));
+        assert!(s.apply(Adjust::Background(Preset::Sunset.background())));
+        assert_eq!(s.background.preset(), Some(Preset::Sunset));
+        assert!(!s.apply(Adjust::Background(Preset::Sunset.background())));
+    }
+
+    #[test]
+    fn snap_slider_edges() {
+        assert_eq!(snap_slider(f64::INFINITY, (2.0, 5.0), 1.0), 2.0);
+        assert_eq!(snap_slider(3.6, (0.0, 10.0), 0.0), 4.0);
+        assert_eq!(snap_slider(-1.0, (0.0, 10.0), 1.0), 0.0);
+    }
+
+    #[test]
+    fn fit_centered_never_upscales_and_centres() {
+        let (z, r) = fit_centered(Size::new(100.0, 50.0), Rect::new(0.0, 0.0, 400.0, 400.0), 1.0);
+        assert_eq!(z, 1.0);
+        assert_eq!(r, Rect::new(150.0, 175.0, 100.0, 50.0));
+        let (z, r) = fit_centered(Size::new(1000.0, 500.0), Rect::new(10.0, 10.0, 500.0, 500.0), 1.0);
+        assert_eq!(z, 0.5);
+        assert_eq!(r, Rect::new(10.0, 135.0, 500.0, 250.0));
+        let (z, r) = fit_centered(Size::new(0.0, 5.0), Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);
+        assert_eq!((z, r.width()), (1.0, 0.0));
+        let (z, _) = fit_centered(Size::new(1e9, 1e9), Rect::new(0.0, 0.0, 10.0, 10.0), 1.0);
+        assert_eq!(z, 0.05);
+    }
+
+    #[test]
+    fn preview_disabled_is_plain_fit() {
+        let s = BeautifyStyle::default();
+        let g = preview_geometry(Size::new(200.0, 100.0), &s, Rect::new(0.0, 0.0, 400.0, 300.0), 6.0);
+        assert_eq!(g.zoom, 1.0);
+        assert_eq!(g.content, Rect::new(100.0, 100.0, 200.0, 100.0));
+        assert_eq!(g.canvas, g.content);
+        assert_eq!(g.frame, g.content);
+        assert_eq!(g.corner_radius, 6.0);
+        assert!(g.chrome_bar.is_none() && g.traffic_lights().is_none());
+    }
+
+    #[test]
+    fn preview_enabled_fits_whole_canvas() {
+        let s = BeautifyStyle {
+            enabled: true,
+            padding: 50.0,
+            auto_balance: false,
+            chrome: WindowChrome::MacLight,
+            ..BeautifyStyle::default()
+        };
+        let shown = Size::new(400.0, 200.0);
+        let avail = Rect::new(0.0, 0.0, 250.0, 1000.0);
+        let g = preview_geometry(shown, &s, avail, 6.0);
+        // canvas = 500 × (200 + 28 + 100) = 500 × 328 → zoom 0.5
+        assert_eq!(g.zoom, 0.5);
+        assert_eq!(g.canvas.width(), 250.0);
+        assert!(avail.contains_rect(&g.canvas));
+        assert!(g.canvas.contains_rect(&g.frame));
+        assert_eq!(g.content.size, Size::new(200.0, 100.0));
+        let bar = g.chrome_bar.unwrap();
+        assert_eq!(bar.height(), WindowChrome::BAR_HEIGHT * 0.5);
+        assert_eq!(g.content.min_y(), bar.max_y());
+        assert_eq!(g.corner_radius, s.corner_radius * 0.5);
+        let (lights, d) = g.traffic_lights().unwrap();
+        assert_eq!(d, WindowChrome::LIGHT_DIAMETER * 0.5);
+        assert!(lights.iter().all(|p| bar.contains(*p)));
+    }
+
+    #[test]
+    fn gradient_unit_points_are_normalised() {
+        let (s, e) = gradient_unit_points(Size::new(200.0, 100.0), 90.0);
+        assert!((s.x - 0.0).abs() < 1e-9 && (e.x - 1.0).abs() < 1e-9);
+        assert!((s.y - 0.5).abs() < 1e-9 && (e.y - 0.5).abs() < 1e-9);
+        let (s, e) = gradient_unit_points(Size::new(0.0, 0.0), 180.0);
+        assert!((s.y - 0.0).abs() < 1e-9 && (e.y - 1.0).abs() < 1e-9);
     }
 }
