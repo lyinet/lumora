@@ -14,6 +14,7 @@ authors = ["Lumora contributors"]
 lumora-core = { path = "crates/lumora-core" }
 lumora-capture = { path = "crates/lumora-capture" }
 lumora-ui = { path = "crates/lumora-ui" }
+lumora-ai = { path = "crates/lumora-ai" }
 
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"

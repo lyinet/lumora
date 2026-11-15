@@ -1,7 +1,9 @@
 //! The Settings window: a native `NSWindow` with General, Shortcuts,
-//! Capture and Recording tabs. Every change is applied immediately (no Save
+//! Capture, Recording and AI tabs. Every change is applied immediately (no Save
 //! button, per macOS convention) and emitted as
 //! [`UiEvent::SettingsChanged`]; the app persists and re-applies it.
+
+mod ai;
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -13,15 +15,15 @@ use lumora_core::hotkey::{find_conflicts, Conflict, Hotkey, Key, Modifiers};
 use lumora_core::i18n::{tr, trf, LanguagePref, Msg};
 use lumora_core::settings::{Codec, Settings};
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, NSObjectProtocol};
+use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
 use objc2::{define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
     NSApplication, NSBackingStoreType, NSButton, NSControlStateValueOff, NSControlStateValueOn, NSEvent,
-    NSEventModifierFlags, NSFont, NSOpenPanel, NSPopUpButton, NSResponder, NSTabView, NSTabViewItem, NSTextAlignment,
-    NSTextField, NSView, NSWindow, NSWindowStyleMask,
+    NSEventModifierFlags, NSFont, NSOpenPanel, NSPopUpButton, NSResponder, NSTabView, NSTabViewDelegate, NSTabViewItem,
+    NSTextAlignment, NSTextField, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::{NSObject, NSString};
+use objc2_foundation::{NSNotification, NSObject, NSString};
 use objc2_quartz_core::{CALayer, CATextLayer};
 
 use crate::events::{EventSink, UiEvent};
@@ -29,8 +31,8 @@ use crate::tokens::{color, radius, typography};
 use crate::util::{cg_color, cg_rect, mono_digits, set_text, text_layer, weight, ActionTarget};
 
 const W: f64 = 540.0;
-const H: f64 = 470.0;
-const TAB_H: f64 = 390.0;
+const H: f64 = 580.0;
+const TAB_H: f64 = 500.0;
 const LABEL_X: f64 = 24.0;
 const LABEL_W: f64 = 170.0;
 const CONTROL_X: f64 = 206.0;
@@ -226,6 +228,8 @@ struct State {
     taken: RefCell<Vec<Action>>,
     /// Re-evaluates the Shortcuts tab's warning line.
     refresh_warning: RefCell<Option<Refresh>>,
+    /// The AI tab's controls, for the app's Keychain/test replies.
+    ai: RefCell<Option<Rc<ai::AiControls>>>,
 }
 
 impl State {
@@ -294,6 +298,9 @@ impl Form<'_> {
 /// The Settings window controller. Keep it alive while the window is open.
 pub struct SettingsWindow {
     window: Retained<NSWindow>,
+    tabs: Retained<NSTabView>,
+    /// Weakly referenced by the window and tab view; owned here.
+    _delegate: Retained<SettingsDelegate>,
     state: Rc<State>,
     _targets: Vec<Retained<ActionTarget>>,
     _fields: Vec<Retained<ShortcutField>>,
@@ -327,6 +334,7 @@ impl SettingsWindow {
             home,
             taken: RefCell::new(Vec::new()),
             refresh_warning: RefCell::new(None),
+            ai: RefCell::new(None),
         });
         let mut targets = Vec::new();
         let mut fields = Vec::new();
@@ -338,6 +346,7 @@ impl SettingsWindow {
             (tr(Msg::TabShortcuts), build_shortcuts as TabBuilder),
             (tr(Msg::TabCapture), build_capture as TabBuilder),
             (tr(Msg::TabRecording), build_recording as TabBuilder),
+            (tr(Msg::TabAi), build_ai as TabBuilder),
         ] {
             let view = NSView::initWithFrame(NSView::alloc(mtm), tab_frame);
             let mut form = Form { mtm, view: &view, y: TAB_H - 16.0 };
@@ -347,11 +356,14 @@ impl SettingsWindow {
             item.setView(Some(&view));
             tabs.addTabViewItem(&item);
         }
+        let delegate = SettingsDelegate::new(mtm, Rc::downgrade(&state));
+        tabs.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+        window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         window.setContentView(Some(&tabs));
         window.center();
         NSApplication::sharedApplication(mtm).activate();
         window.makeKeyAndOrderFront(None);
-        SettingsWindow { window, state, _targets: targets, _fields: fields }
+        SettingsWindow { window, tabs, _delegate: delegate, state, _targets: targets, _fields: fields }
     }
 
     /// Keep the window's settings snapshot in step with a beautify style
@@ -370,6 +382,32 @@ impl SettingsWindow {
         let refresh = self.state.refresh_warning.borrow().clone();
         if let Some(r) = refresh {
             r(&self.state.settings.borrow());
+        }
+    }
+
+    /// The app's answer to [`UiEvent::AiKeyRequested`]. Never log `key`.
+    pub fn set_ai_key(
+        &self,
+        provider: lumora_core::ai::AiProvider,
+        key: Result<Option<String>, lumora_core::ai::AiError>,
+    ) {
+        if let Some(c) = self.state.ai.borrow().as_ref() {
+            c.set_key(provider, key);
+        }
+    }
+
+    /// Saving the key ([`UiEvent::AiKeySave`]) failed.
+    pub fn set_ai_key_error(&self, provider: lumora_core::ai::AiProvider, error: &lumora_core::ai::AiError) {
+        if let Some(c) = self.state.ai.borrow().as_ref() {
+            c.set_key_error(provider, error);
+        }
+    }
+
+    /// Result of [`UiEvent::AiTestConnection`] number `id`: the
+    /// `ConnectionInfo::model_listed` value, or the error.
+    pub fn set_ai_test_result(&self, id: u64, result: Result<Option<bool>, lumora_core::ai::AiError>) {
+        if let Some(c) = self.state.ai.borrow().as_ref() {
+            c.set_test_result(id, result);
         }
     }
 
@@ -397,6 +435,62 @@ impl SettingsWindow {
 impl Drop for SettingsWindow {
     fn drop(&mut self) {
         self.window.close();
+        self.window.setDelegate(None);
+        self.tabs.setDelegate(None);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Window / tab delegate
+// ---------------------------------------------------------------------------
+
+pub struct SettingsDelegateIvars {
+    state: std::rc::Weak<State>,
+}
+
+define_class!(
+    /// Loads the API key when the AI tab is first shown and commits a
+    /// pending key edit when the window closes.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "LumoraSettingsDelegate"]
+    #[ivars = SettingsDelegateIvars]
+    pub struct SettingsDelegate;
+
+    unsafe impl NSObjectProtocol for SettingsDelegate {}
+
+    unsafe impl NSTabViewDelegate for SettingsDelegate {
+        #[unsafe(method(tabView:didSelectTabViewItem:))]
+        fn did_select(&self, tab_view: &NSTabView, item: Option<&NSTabViewItem>) {
+            let Some(item) = item else { return };
+            if tab_view.indexOfTabViewItem(item) != ai::AI_TAB_INDEX {
+                return;
+            }
+            if let Some(st) = self.ivars().state.upgrade() {
+                if let Some(c) = st.ai.borrow().as_ref() {
+                    c.request_key(&st);
+                }
+            }
+        }
+    }
+
+    unsafe impl NSWindowDelegate for SettingsDelegate {
+        #[unsafe(method(windowWillClose:))]
+        fn window_will_close(&self, _notification: &NSNotification) {
+            if let Some(st) = self.ivars().state.upgrade() {
+                if let Some(c) = st.ai.borrow().as_ref() {
+                    c.commit_key(&st);
+                }
+            }
+        }
+    }
+);
+
+impl SettingsDelegate {
+    fn new(mtm: MainThreadMarker, state: std::rc::Weak<State>) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(SettingsDelegateIvars { state });
+        // SAFETY: NSObject's designated initialiser.
+        unsafe { msg_send![super(this), init] }
     }
 }
 
@@ -755,6 +849,15 @@ fn build_capture(
     form.y -= 8.0;
     form.label_only(tr(Msg::TextRecognitionLabel));
     form.note_inline(tr(Msg::TextRecognitionNote));
+}
+
+fn build_ai(
+    form: &mut Form<'_>,
+    state: &Rc<State>,
+    targets: &mut Vec<Retained<ActionTarget>>,
+    _f: &mut Vec<Retained<ShortcutField>>,
+) {
+    ai::build_ai(form, state, targets);
 }
 
 fn build_recording(

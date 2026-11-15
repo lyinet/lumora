@@ -186,7 +186,7 @@ pub struct App {
     toasts: ToastCenter,
     /// Actions whose shortcut another app already holds.
     hotkey_failures: RefCell<Vec<lumora_core::Action>>,
-    settings_window: RefCell<Option<SettingsWindow>>,
+    pub settings_window: RefCell<Option<SettingsWindow>>,
     onboarding: RefCell<Option<Onboarding>>,
     onboarding_target: RefCell<Option<Retained<ActionTarget>>>,
     permission_poll: RefCell<Option<Retained<NSTimer>>>,
@@ -353,6 +353,9 @@ impl App {
             UiEvent::BeautifyChanged { from, style } => self.on_beautify_changed(from, *style),
             UiEvent::ShortcutRecording(on) => self.hotkeys.borrow_mut().suspend(on),
             UiEvent::Onboarding(action) => self.on_onboarding(action),
+            UiEvent::AiKeyRequested(provider) => self.on_ai_key_requested(provider),
+            UiEvent::AiKeySave { provider, key } => self.on_ai_key_save(provider, key),
+            UiEvent::AiTestConnection { id, settings, key } => self.on_ai_test_connection(id, *settings, key),
         }
     }
 

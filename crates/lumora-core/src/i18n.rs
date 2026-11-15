@@ -195,6 +195,7 @@ messages! {
     TabShortcuts => "Shortcuts", "快捷键";
     TabCapture => "Capture", "截图";
     TabRecording => "Recording", "录制";
+    TabAi => "AI Writing", "AI 写作";
     SaveCapturesTo => "Save captures to:", "截图保存到：";
     Choose => "Choose…", "选择…";
     ChoosePrompt => "Choose", "选择";
@@ -362,6 +363,29 @@ messages! {
     AiErrBadResponse => "Unexpected response from the AI service: {0}", "AI 服务返回了无法识别的内容：{0}";
     AiErrCancelled => "Cancelled", "已取消";
     AiErrKeychain => "Couldn’t access the Keychain: {0}", "无法访问钥匙串：{0}";
+    AiEnableLabel => "AI writing:", "AI 写作：";
+    AiEnable => "Enable AI writing in the editor", "在编辑器中启用 AI 写作";
+    AiProviderLabel => "Provider:", "服务商：";
+    AiBaseUrl => "Base URL:", "接口地址：";
+    AiModel => "Model:", "模型：";
+    AiApiKey => "API key:", "API 密钥：";
+    AiKeyPlaceholder => "Stored in the macOS Keychain", "保存在 macOS 钥匙串中";
+    AiNoKeyNeeded => "No key needed — leave it blank.", "无需密钥，留空即可。";
+    AiKeyOptional => "Optional — only if your endpoint requires one.", "可选，仅在接口需要时填写。";
+    AiTemperature => "Temperature:", "温度：";
+    AiOutputLanguage => "Output language:", "输出语言：";
+    AiImageLabel => "Screenshot:", "截图：";
+    AiSendImage => "Send screenshot image", "发送截图图片";
+    AiVisionHint => "This model may not accept images.", "此模型可能不支持图片。";
+    AiTimeout => "Timeout:", "超时：";
+    AiSecondsUnit => "seconds (5–600)", "秒（5–600）";
+    AiTestConnection => "Test Connection", "测试连接";
+    AiTesting => "Testing…", "正在测试…";
+    AiTestOk => "Connected.", "连接成功。";
+    AiTestModelMissing => "Connected, but the model wasn’t found in the list.", "已连接，但列表中未找到该模型。";
+    AiPrivacyLabel => "Privacy:", "隐私：";
+    AiPrivacyNote => "By default only recognised text and annotation text are sent. The screenshot image is sent only if you turn it on above. Your API key stays in the macOS Keychain.",
+        "默认只发送识别出的文字和标注文字；只有在上方开启后才会发送截图图片。API 密钥只保存在 macOS 钥匙串中。";
 }
 
 #[cfg(test)]

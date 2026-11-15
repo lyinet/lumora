@@ -8,6 +8,7 @@
 
 mod base64;
 mod error;
+mod form;
 mod prompt;
 mod stream;
 
@@ -20,6 +21,9 @@ use crate::i18n::{tr, Language, Msg};
 
 pub use base64::{encode as base64_encode, png_data_url};
 pub use error::AiError;
+pub use form::{
+    connection_message, format_temperature, key_note, model_likely_has_vision, parse_timeout, snap_temperature, Secret,
+};
 pub use prompt::{build_request, ping_body, AiContext, ChatRequest, StepHint, WritingTask, MAX_INPUT_CHARS};
 pub use stream::{model_ids, parse_completion, SseEvent, SseParser};
 

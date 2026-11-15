@@ -128,6 +128,23 @@ pub enum UiEvent {
     /// suspends global hotkeys meanwhile so the combo reaches the field.
     ShortcutRecording(bool),
     Onboarding(OnboardingAction),
+    /// The AI tab needs the stored API key for `provider`; the app reads
+    /// the Keychain and answers with `SettingsWindow::set_ai_key`.
+    AiKeyRequested(lumora_core::ai::AiProvider),
+    /// Store `key` for `provider` in the Keychain; an empty key deletes it.
+    /// Errors go back via `SettingsWindow::set_ai_key_error`.
+    AiKeySave {
+        provider: lumora_core::ai::AiProvider,
+        key: lumora_core::ai::Secret,
+    },
+    /// "Test connection": run `test_connection` off the main thread and
+    /// answer with `SettingsWindow::set_ai_test_result(id, …)`. `key` is
+    /// the field's current value (it may not be saved yet).
+    AiTestConnection {
+        id: u64,
+        settings: Box<lumora_core::ai::AiSettings>,
+        key: lumora_core::ai::Secret,
+    },
 }
 
 /// Where components send events. The app's implementation queues them and

@@ -6,6 +6,8 @@
 //! dispatches [`command::Command`]s.
 
 #[cfg(target_os = "macos")]
+mod ai_flow;
+#[cfg(target_os = "macos")]
 mod app;
 #[cfg(target_os = "macos")]
 mod capture_flow;

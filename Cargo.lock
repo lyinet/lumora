@@ -261,6 +261,7 @@ dependencies = [
  "block2",
  "dispatch2",
  "log",
+ "lumora-ai",
  "lumora-capture",
  "lumora-core",
  "lumora-ui",
