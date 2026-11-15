@@ -6,6 +6,16 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **AI writing (in progress, v0.4 chunk A — no UI yet)** — `[ai]` settings
+  section (off by default; provider presets OpenAI, DeepSeek, Qwen/DashScope,
+  Moonshot/Kimi, local Ollama, or any OpenAI-compatible endpoint; model,
+  temperature, output language, opt-in image sending, timeout). API keys are
+  stored in the macOS Keychain (`app.lumora.ai`), never in `settings.toml`.
+  Prompt builders for caption, step guide (aware of step badges), alt text,
+  polish, translate and summarize; new `lumora-ai` crate with a blocking,
+  streaming, cancellable chat-completions client.
+
 ## [0.3.0] — 2026-11-16 (not yet hardware-tested)
 
 ### Added

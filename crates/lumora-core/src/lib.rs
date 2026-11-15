@@ -13,6 +13,7 @@
 //! [`geometry::flip_y`]).
 
 pub mod action;
+pub mod ai;
 pub mod annotate;
 pub mod beautify;
 pub mod color;

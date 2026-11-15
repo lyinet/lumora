@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/lumora-core", "crates/lumora-capture", "crates/lumora-ui", "apps/lumora"]
+members = ["crates/lumora-core", "crates/lumora-capture", "crates/lumora-ui", "crates/lumora-ai", "apps/lumora"]
 
 [workspace.package]
 version = "0.3.0"
@@ -20,6 +20,8 @@ toml = "0.8"
 serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
 log = "0.4"
+ureq = { version = "2", default-features = false, features = ["tls"] }
+security-framework = "3"
 
 objc2 = "0.6"
 block2 = "0.6"

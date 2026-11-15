@@ -335,6 +335,33 @@ messages! {
     ErrDocumentImage => "the embedded image couldn’t be decoded", "无法解码内嵌的图像";
     TargetDisplay => "display", "显示器";
     TargetWindow => "window", "窗口";
+
+    // -- AI writing (v0.4) ----------------------------------------------------------
+    AiMenu => "AI Writing", "AI 写作";
+    AiProviderQwen => "Qwen (Alibaba Cloud)", "通义千问（阿里云）";
+    AiProviderMoonshot => "Moonshot (Kimi)", "月之暗面（Kimi）";
+    AiProviderOllama => "Ollama (local)", "Ollama（本地）";
+    AiProviderCustom => "Custom (OpenAI-compatible)", "自定义（OpenAI 兼容）";
+    AiOutputAuto => "Match the screenshot", "跟随截图语言";
+    AiTaskCaption => "Write caption", "生成说明";
+    AiTaskStepGuide => "Step guide", "生成步骤说明";
+    AiTaskAltText => "Alt text", "生成替代文本";
+    AiTaskPolish => "Polish", "润色";
+    AiTaskTranslate => "Translate", "翻译";
+    AiTaskSummarize => "Summarize", "总结";
+    AiErrMissingKey => "Add an API key in Settings → AI.", "请在“设置 → AI”中添加 API 密钥。";
+    AiErrBadConfig => "Set a base URL and model in Settings → AI.", "请在“设置 → AI”中填写接口地址和模型。";
+    AiErrEmptyInput => "There’s no text to work with. Add text or allow sending the image.", "没有可处理的文字。请添加文字，或允许发送图片。";
+    AiErrBadKey => "The API key was rejected. Check it in Settings → AI.", "API 密钥无效，请在“设置 → AI”中检查。";
+    AiErrRateLimited => "Rate limit or quota reached. Try again later.", "已达到速率限制或额度上限，请稍后再试。";
+    AiErrNotFound => "Model or endpoint not found. Check the base URL and model name.", "未找到模型或接口，请检查接口地址和模型名称。";
+    AiErrServer => "The AI service had a problem (HTTP {0}). Try again later.", "AI 服务出现问题（HTTP {0}），请稍后再试。";
+    AiErrHttp => "The AI service returned HTTP {0}: {1}", "AI 服务返回 HTTP {0}：{1}";
+    AiErrTimeout => "The AI service took too long to respond.", "AI 服务响应超时。";
+    AiErrNetwork => "Couldn’t reach the AI service: {0}", "无法连接 AI 服务：{0}";
+    AiErrBadResponse => "Unexpected response from the AI service: {0}", "AI 服务返回了无法识别的内容：{0}";
+    AiErrCancelled => "Cancelled", "已取消";
+    AiErrKeychain => "Couldn’t access the Keychain: {0}", "无法访问钥匙串：{0}";
 }
 
 #[cfg(test)]

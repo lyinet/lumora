@@ -1,0 +1,20 @@
+[package]
+name = "lumora-ai"
+description = "Blocking OpenAI-compatible chat client (streaming, cancellation) and Keychain key storage for Lumora's AI writing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+lumora-core.workspace = true
+ureq.workspace = true
+log.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework.workspace = true
+
+[lints]
+workspace = true

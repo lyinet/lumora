@@ -20,7 +20,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Test platform-independent crates
-        run: cargo test --locked -p lumora-core -p lumora-ui -p lumora-capture
+        run: cargo test --locked -p lumora-core -p lumora-ui -p lumora-capture -p lumora-ai
 
   macos:
     name: macOS (fmt, clippy, test, universal .app)
