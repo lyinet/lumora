@@ -116,6 +116,22 @@ impl Document {
         Document { size, items: Vec::new(), crop: None, next_id: 1, history: History::default(), revision: 0 }
     }
 
+    /// A document restored from saved state (e.g. a `.lumora` file):
+    /// `items` bottom → top, `crop` clamped to the canvas, an empty undo
+    /// history, and the id counter past every restored id so new
+    /// annotations never collide. Returns `None` if two items share an id.
+    pub fn from_parts(size: Size, items: Vec<Annotation>, crop: Option<Rect>) -> Option<Self> {
+        let mut ids: Vec<AnnotationId> = items.iter().map(|a| a.id).collect();
+        ids.sort_unstable();
+        if ids.windows(2).any(|w| w[0] == w[1]) {
+            return None;
+        }
+        let next_id = ids.last().map_or(1, |m| m.saturating_add(1)).max(1);
+        let mut doc = Document { size, items, crop: None, next_id, history: History::default(), revision: 0 };
+        doc.crop = crop.and_then(|r| r.normalized().intersection(&doc.canvas()));
+        Some(doc)
+    }
+
     pub fn size(&self) -> Size {
         self.size
     }

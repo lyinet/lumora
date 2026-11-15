@@ -22,6 +22,7 @@ pub mod geometry;
 pub mod hotkey;
 pub mod i18n;
 pub mod layout;
+pub mod lumora_doc;
 pub mod ocr;
 pub mod recording;
 pub mod selection;
