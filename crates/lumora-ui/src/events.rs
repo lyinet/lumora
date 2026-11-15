@@ -81,6 +81,39 @@ pub enum EditorAction {
     /// The window closed. Carries the flattened image if there were
     /// unsaved edits (so the card thumbnail can follow).
     Closed(Option<EditorImage>),
+    /// Run an AI writing task; stream the answer back with
+    /// `EditorWindow::ai_delta` / `ai_finished` under `request.request`.
+    AiWrite(Box<AiWriteRequest>),
+    /// Stop AI request `request` (Stop, Close, or a newer request).
+    AiCancel(u64),
+    /// "Open AI Settings" in the result sheet.
+    OpenAiSettings,
+}
+
+/// An AI writing request from the editor. The app reads the key, runs OCR
+/// when needed and talks to the provider; the editor only shows the result.
+pub struct AiWriteRequest {
+    /// Per-editor request id; replies with another id are stale.
+    pub request: u64,
+    pub kind: lumora_core::ai::AiTaskKind,
+    /// The selected text annotation's text (Polish / Translate), if any.
+    pub source_text: Option<String>,
+    /// The annotations, for step badges and annotation text.
+    pub document: lumora_core::annotate::Document,
+    /// The unannotated capture (OCR runs on this).
+    pub base: CFRetained<CGImage>,
+    /// Pixels per point of `base`.
+    pub scale: f64,
+}
+
+impl std::fmt::Debug for AiWriteRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AiWriteRequest")
+            .field("request", &self.request)
+            .field("kind", &self.kind)
+            .field("has_source", &self.source_text.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 /// Onboarding panel buttons.
@@ -128,6 +161,23 @@ pub enum UiEvent {
     /// suspends global hotkeys meanwhile so the combo reaches the field.
     ShortcutRecording(bool),
     Onboarding(OnboardingAction),
+    /// The AI tab needs the stored API key for `provider`; the app reads
+    /// the Keychain and answers with `SettingsWindow::set_ai_key`.
+    AiKeyRequested(lumora_core::ai::AiProvider),
+    /// Store `key` for `provider` in the Keychain; an empty key deletes it.
+    /// Errors go back via `SettingsWindow::set_ai_key_error`.
+    AiKeySave {
+        provider: lumora_core::ai::AiProvider,
+        key: lumora_core::ai::Secret,
+    },
+    /// "Test connection": run `test_connection` off the main thread and
+    /// answer with `SettingsWindow::set_ai_test_result(id, …)`. `key` is
+    /// the field's current value (it may not be saved yet).
+    AiTestConnection {
+        id: u64,
+        settings: Box<lumora_core::ai::AiSettings>,
+        key: lumora_core::ai::Secret,
+    },
 }
 
 /// Where components send events. The app's implementation queues them and

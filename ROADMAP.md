@@ -32,17 +32,32 @@
   reopen via Open… / Finder double-click / Annotate; registered
   `app.lumora.document` UTI.
 
-## v0.4 — real-Mac bring-up, history, recording extras
+## v0.4 — AI Writing (built 2026-11-16, awaiting hardware QA)
+
+- ✅ Optional AI writing, off by default: OpenAI, DeepSeek, Qwen
+  (DashScope), Moonshot (Kimi), local Ollama or any OpenAI-compatible
+  endpoint; Settings → AI tab with model, temperature, output language,
+  timeout and "Test Connection"; API keys in the macOS Keychain.
+- ✅ Editor ✨ **AI Writing** menu (⌘J): caption, step guide, alt text,
+  polish, translate (English / 简体中文), summarize; streaming result sheet
+  with Stop / Retry / Copy / Insert as Text / Replace Text.
+- ✅ Privacy default: only on-device OCR text and annotation text are sent;
+  the screenshot image only with "Send screenshot image" turned on.
+
+## v0.5 — real-Mac bring-up, history, recording extras
 
 - Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
-  for everything v0.1–v0.3 that has only been type-checked (editor,
+  for everything v0.1–v0.4 that has only been type-checked (editor,
   beautify orientation / shadow sign, colour panel, `.lumora` ImageIO /
-  `openURLs` / LaunchServices registration, recording).
+  `openURLs` / LaunchServices registration, recording, AI sheet and
+  Keychain access).
 - Capture history window (⌥⇧H): browse, reopen, copy and delete past
   captures and their `.lumora` documents.
 - Recording extras: click ripples, keystroke HUD, microphone on macOS 14
   (`AVCaptureSession`), GIF export and trim on the card.
 - Scrolling capture.
+- OCR toast AI actions: run Polish / Translate / Summarize straight from
+  the Capture Text toast.
 
 ## Later
 

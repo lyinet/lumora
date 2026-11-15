@@ -48,6 +48,8 @@ pub enum ToolbarAction {
     Save,
     /// Show / hide the beautify panel.
     Beautify,
+    /// Open the AI writing menu.
+    Ai,
 }
 
 pub type ToolbarHandler = Rc<dyn Fn(ToolbarAction)>;
@@ -94,6 +96,7 @@ pub struct Toolbar {
     undo: Retained<NSButton>,
     redo: Retained<NSButton>,
     beautify: Retained<NSButton>,
+    ai: Retained<NSButton>,
     _drag: Retained<DragTile>,
     _targets: Vec<Retained<ActionTarget>>,
     active: Cell<Option<Tool>>,
@@ -389,6 +392,15 @@ impl Toolbar {
         if let Some(l) = beautify.layer() {
             l.setCornerRadius(radius::TOOL);
         }
+        let ai = trailing("sparkles", Msg::AiMenuTip, ToolbarAction::Ai, &mut targets);
+        if ai.image().is_none() {
+            if let Some(img) = symbol("text.bubble", tr(Msg::AiMenu)) {
+                ai.setImage(Some(&img));
+                ai.setTitle(&NSString::new());
+            }
+        }
+        ai.setEnabled(false);
+        ai.setToolTip(Some(&NSString::from_str(tr(Msg::AiMenuDisabledTip))));
         right.set(right.get() - 8.0);
         let redo = trailing("arrow.uturn.forward", Msg::Redo, ToolbarAction::Redo, &mut targets);
         let undo = trailing("arrow.uturn.backward", Msg::Undo, ToolbarAction::Undo, &mut targets);
@@ -407,6 +419,7 @@ impl Toolbar {
             undo,
             redo,
             beautify,
+            ai,
             _drag: drag,
             _targets: targets,
             active: Cell::new(None),
@@ -425,6 +438,19 @@ impl Toolbar {
                 l.setBackgroundColor(bg.as_deref());
             }
         });
+    }
+
+    /// AI writing button: enabled only when AI writing is on in Settings;
+    /// the disabled button's tooltip says where to turn it on.
+    pub fn set_ai_enabled(&self, enabled: bool) {
+        self.ai.setEnabled(enabled);
+        let tip = tr(if enabled { Msg::AiMenuTip } else { Msg::AiMenuDisabledTip });
+        self.ai.setToolTip(Some(&NSString::from_str(tip)));
+    }
+
+    /// The AI button (the menu pops up under it).
+    pub fn ai_button(&self) -> &NSButton {
+        &self.ai
     }
 
     /// Reflect the editor's state. Animates the tool pill when the tool

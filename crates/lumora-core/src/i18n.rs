@@ -195,6 +195,7 @@ messages! {
     TabShortcuts => "Shortcuts", "快捷键";
     TabCapture => "Capture", "截图";
     TabRecording => "Recording", "录制";
+    TabAi => "AI Writing", "AI 写作";
     SaveCapturesTo => "Save captures to:", "截图保存到：";
     Choose => "Choose…", "选择…";
     ChoosePrompt => "Choose", "选择";
@@ -335,6 +336,68 @@ messages! {
     ErrDocumentImage => "the embedded image couldn’t be decoded", "无法解码内嵌的图像";
     TargetDisplay => "display", "显示器";
     TargetWindow => "window", "窗口";
+
+    // -- AI writing (v0.4) ----------------------------------------------------------
+    AiMenu => "AI Writing", "AI 写作";
+    AiProviderQwen => "Qwen (Alibaba Cloud)", "通义千问（阿里云）";
+    AiProviderMoonshot => "Moonshot (Kimi)", "月之暗面（Kimi）";
+    AiProviderOllama => "Ollama (local)", "Ollama（本地）";
+    AiProviderCustom => "Custom (OpenAI-compatible)", "自定义（OpenAI 兼容）";
+    AiOutputAuto => "Match the screenshot", "跟随截图语言";
+    AiTaskCaption => "Write caption", "生成说明";
+    AiTaskStepGuide => "Step guide", "生成步骤说明";
+    AiTaskAltText => "Alt text", "生成替代文本";
+    AiTaskPolish => "Polish", "润色";
+    AiTaskTranslate => "Translate", "翻译";
+    AiTaskSummarize => "Summarize", "总结";
+    AiErrMissingKey => "Add an API key in Settings → AI.", "请在“设置 → AI”中添加 API 密钥。";
+    AiErrBadConfig => "Set a base URL and model in Settings → AI.", "请在“设置 → AI”中填写接口地址和模型。";
+    AiErrEmptyInput => "There’s no text to work with. Add text or allow sending the image.", "没有可处理的文字。请添加文字，或允许发送图片。";
+    AiErrBadKey => "The API key was rejected. Check it in Settings → AI.", "API 密钥无效，请在“设置 → AI”中检查。";
+    AiErrRateLimited => "Rate limit or quota reached. Try again later.", "已达到速率限制或额度上限，请稍后再试。";
+    AiErrNotFound => "Model or endpoint not found. Check the base URL and model name.", "未找到模型或接口，请检查接口地址和模型名称。";
+    AiErrServer => "The AI service had a problem (HTTP {0}). Try again later.", "AI 服务出现问题（HTTP {0}），请稍后再试。";
+    AiErrHttp => "The AI service returned HTTP {0}: {1}", "AI 服务返回 HTTP {0}：{1}";
+    AiErrTimeout => "The AI service took too long to respond.", "AI 服务响应超时。";
+    AiErrNetwork => "Couldn’t reach the AI service: {0}", "无法连接 AI 服务：{0}";
+    AiErrBadResponse => "Unexpected response from the AI service: {0}", "AI 服务返回了无法识别的内容：{0}";
+    AiErrCancelled => "Cancelled", "已取消";
+    AiErrKeychain => "Couldn’t access the Keychain: {0}", "无法访问钥匙串：{0}";
+    AiEnableLabel => "AI writing:", "AI 写作：";
+    AiEnable => "Enable AI writing in the editor", "在编辑器中启用 AI 写作";
+    AiProviderLabel => "Provider:", "服务商：";
+    AiBaseUrl => "Base URL:", "接口地址：";
+    AiModel => "Model:", "模型：";
+    AiApiKey => "API key:", "API 密钥：";
+    AiKeyPlaceholder => "Stored in the macOS Keychain", "保存在 macOS 钥匙串中";
+    AiNoKeyNeeded => "No key needed — leave it blank.", "无需密钥，留空即可。";
+    AiKeyOptional => "Optional — only if your endpoint requires one.", "可选，仅在接口需要时填写。";
+    AiTemperature => "Temperature:", "温度：";
+    AiOutputLanguage => "Output language:", "输出语言：";
+    AiImageLabel => "Screenshot:", "截图：";
+    AiSendImage => "Send screenshot image", "发送截图图片";
+    AiVisionHint => "This model may not accept images.", "此模型可能不支持图片。";
+    AiTimeout => "Timeout:", "超时：";
+    AiSecondsUnit => "seconds (5–600)", "秒（5–600）";
+    AiTestConnection => "Test Connection", "测试连接";
+    AiTesting => "Testing…", "正在测试…";
+    AiTestOk => "Connected.", "连接成功。";
+    AiTestModelMissing => "Connected, but the model wasn’t found in the list.", "已连接，但列表中未找到该模型。";
+    AiPrivacyLabel => "Privacy:", "隐私：";
+    AiPrivacyNote => "By default only recognised text and annotation text are sent. The screenshot image is sent only if you turn it on above. Your API key stays in the macOS Keychain.",
+        "默认只发送识别出的文字和标注文字；只有在上方开启后才会发送截图图片。API 密钥只保存在 macOS 钥匙串中。";
+    AiMenuTip => "AI Writing (⌘J)", "AI 写作（⌘J）";
+    AiMenuDisabledTip => "Enable in Settings → AI Writing", "请在“设置 → AI”中启用 AI 写作";
+    AiOpenSettings => "Open AI Settings", "打开 AI 设置";
+    AiStop => "Stop", "停止";
+    AiRetry => "Retry", "重试";
+    AiInsert => "Insert as Text", "插入为文字";
+    AiReplace => "Replace Text", "替换文字";
+    AiClose => "Close", "关闭";
+    AiReadingText => "Reading the screenshot’s text…", "正在识别截图中的文字…";
+    AiWriting => "Writing…", "正在生成…";
+    AiCopied => "Copied to the clipboard", "已拷贝到剪贴板";
+    AiStopped => "Stopped.", "已停止。";
 }
 
 #[cfg(test)]

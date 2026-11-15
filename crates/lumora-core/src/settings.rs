@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::action::Action;
+use crate::ai::AiSettings;
 use crate::beautify::BeautifyStyle;
 use crate::hotkey::Hotkey;
 use crate::i18n::LanguagePref;
@@ -36,6 +37,8 @@ pub struct Settings {
     pub recording: Recording,
     /// Last-used beautify style ("remember last"). Missing in pre-v0.3 files.
     pub beautify: BeautifyStyle,
+    /// AI writing (v0.4). The API key is in the Keychain, never here.
+    pub ai: AiSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -266,6 +269,7 @@ impl Settings {
             g.filename_template = crate::filename::DEFAULT_TEMPLATE.to_string();
         }
         self.beautify.validate();
+        self.ai.validate();
     }
 
     /// Whether fresh captures also get a `.lumora` document: only when they
@@ -417,6 +421,31 @@ mod tests {
         assert_eq!(c.beautify.padding, crate::beautify::MAX_PADDING);
         assert_eq!(c.beautify.aspect, AspectRatio::R9x16);
         assert!(c.beautify.shadow.enabled);
+    }
+
+    #[test]
+    fn v03_files_gain_ai_defaults() {
+        use crate::ai::{AiProvider, OutputLanguage};
+        let s = Settings::from_toml("[general]\nplay_sounds = false\n[beautify]\nenabled = true\n").unwrap();
+        assert_eq!(s.ai, AiSettings::default());
+        assert!(!s.ai.enabled && !s.ai.send_image);
+        let mut t = Settings::default();
+        t.ai.enabled = true;
+        t.ai.set_provider(AiProvider::Qwen);
+        t.ai.output_language = OutputLanguage::SimplifiedChinese;
+        let text = t.to_toml().unwrap();
+        assert!(
+            text.contains("[ai]")
+                && text.contains("provider = \"qwen\"")
+                && text.contains("output_language = \"zh-Hans\""),
+            "{text}"
+        );
+        assert!(!text.to_lowercase().contains("key"), "no API key in TOML");
+        assert_eq!(Settings::from_toml(&text).unwrap(), t);
+        let c = Settings::from_toml("[ai]\nprovider = \"ollama\"\ntemperature = 5.0\nbase_url = \"\"\n").unwrap();
+        assert_eq!(c.ai.base_url, "http://localhost:11434/v1");
+        assert_eq!(c.ai.model, "llama3.2");
+        assert_eq!(c.ai.temperature, 2.0);
     }
 
     #[test]

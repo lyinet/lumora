@@ -6,6 +6,28 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-16 (not yet hardware-tested)
+
+### Added
+- **AI writing** — optional, off by default. Turn it on in Settings → AI
+  and pick a provider: OpenAI, DeepSeek, Qwen (Alibaba Cloud DashScope),
+  Moonshot (Kimi), a local Ollama server, or any OpenAI-compatible endpoint
+  (base URL, model, temperature, output language — match the screenshot,
+  English or 简体中文 — and timeout; "Test Connection" checks the key and
+  model). In the annotation editor, the ✨ **AI Writing** button (⌘J) offers
+  Write caption, Step guide (follows your numbered step badges), Alt text,
+  Polish, Translate (English / 简体中文) and Summarize. Polish and Translate
+  work on the selected text annotation, otherwise on the screenshot's
+  recognised text. The answer streams into a result sheet with Stop, Retry,
+  Copy and Insert as Text (or Replace Text for the selected annotation —
+  one undoable edit); problems with the key or settings come with an
+  "Open AI Settings" button.
+  **Privacy:** text is recognised on-device with Vision; by default only
+  that text and your annotation text are sent to the provider you chose.
+  The screenshot image is sent only if you turn on "Send screenshot image"
+  (for vision models). API keys live in the macOS Keychain
+  (`app.lumora.ai`), never in `settings.toml`, and are never logged.
+
 ## [0.3.0] — 2026-11-16 (not yet hardware-tested)
 
 ### Added

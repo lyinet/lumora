@@ -35,7 +35,7 @@
 <br>
 
 > [!NOTE]
-> **Lumora is in early alpha (v0.1).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested — but it **has not been run on real hardware yet**, so expect rough edges. Hardware bring-up is the next milestone. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
+> **Lumora is in early alpha (v0.4).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested — but it **has not been run on real hardware yet**, so expect rough edges. Hardware bring-up is the next milestone. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
 
 ## Features
 
@@ -74,6 +74,7 @@
 - **Shutter, then fly** — a flash over the region, then the capture shrinks onto its card while the card slides in.
 - **Beautify** — frame a capture on a gradient, colour or image background with padding, rounded corners, a soft shadow, an optional macOS window frame and fixed aspect ratios (16:9, 1:1, …), edited live from the ✨ panel in the annotation editor.
 - **Editable `.lumora` documents** — every saved screenshot keeps a `.lumora` file beside its PNG with the original capture, annotations and beautify style; double-click it in Finder (or use Open…) and every arrow, label and crop is still editable.
+- **AI Writing (optional, off by default)** — press ✨ / <kbd>⌘</kbd><kbd>J</kbd> in the editor to write a caption, a step guide, alt text, or to polish, translate (English / 简体中文) or summarize, streamed into a sheet you can insert as a text annotation. Bring your own provider: OpenAI, DeepSeek, Qwen, Kimi (Moonshot), a local Ollama or any OpenAI-compatible endpoint. Your API key stays in the macOS Keychain; by default only the on-device recognised text and your annotation text are sent — the screenshot itself only if you opt in.
 
 ## Keyboard shortcuts
 
@@ -147,7 +148,7 @@ NOTARY_PROFILE=lumora-notary scripts/bundle.sh
 The pure-logic crates build and test anywhere:
 
 ```sh
-cargo test -p lumora-core -p lumora-ui   # geometry, springs, selection, settings, hotkeys, tokens
+cargo test -p lumora-core -p lumora-ui -p lumora-ai   # geometry, springs, selection, settings, hotkeys, tokens
 ```
 
 With the Apple targets installed you can type-check the whole app from any host:
@@ -175,69 +176,40 @@ Settings are stored as TOML at `~/Library/Application Support/Lumora/settings.to
   <img src="assets/readme/architecture.svg" width="720" alt="Four crates, dependencies pointing down: apps/lumora, lumora-ui, lumora-capture, lumora-core">
 </p>
 
-A Cargo workspace of four crates with a strict dependency direction. Logic that doesn't need the OS lives in the bottom crate and is tested on every host; every crate above it is a thin, typed layer over Apple frameworks.
+A Cargo workspace of five crates with a strict dependency direction. Logic that doesn't need the OS lives in the bottom crate and is tested on every host; every crate above it is a thin, typed layer over Apple frameworks.
 
 | Crate | What it owns |
 |---|---|
 | [`apps/lumora`](apps/lumora) | The binary: `NSApplication`, status item, Carbon hotkeys, app state and capture/record flows |
-| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation: overlay, Quick Access, pins, shutter, countdown, recording HUD, settings, onboarding, annotation editor + beautify panel |
+| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation: overlay, Quick Access, pins, shutter, countdown, recording HUD, settings, onboarding, annotation editor + beautify panel + AI sheet |
+| [`lumora-ai`](crates/lumora-ai) | OpenAI-compatible streaming client and Keychain key storage for AI Writing |
 | [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit, ImageIO, AVFoundation, pasteboard, beautify renderer |
-| [`lumora-core`](crates/lumora-core) | Pure Rust: geometry, springs, selection state machine, snapping, settings, file names, hotkey parsing, layout, recording state machine, beautify model, `.lumora` document format |
+| [`lumora-core`](crates/lumora-core) | Pure Rust: geometry, springs, selection state machine, snapping, settings, file names, hotkey parsing, layout, recording state machine, beautify model, `.lumora` document format, AI settings / prompts / stream parsing |
 
 Deep dives: [ARCHITECTURE.md](ARCHITECTURE.md) (threading, data flow, coordinate spaces) · [DESIGN.md](DESIGN.md) (colour, shape, type and motion tokens).
 
 ## Roadmap
 
-**v0.1 — written, type-checked, awaiting hardware testing**
+Everything below is written, type-checked and unit-tested, but **not yet run on real hardware**.
 
-- [x] Menu-bar app with global, rebindable shortcuts and conflict detection
-- [x] Area overlay on frozen frames: dim + cutout, crosshair, size pill, pixel loupe, window highlight, edge snapping, keyboard nudging
-- [x] Fullscreen and window capture; Retina PNGs with DPI metadata; clipboard
-- [x] Shutter flash, fly-to-card, Quick Access cards with drag-out
-- [x] Pin to screen
-- [x] Screen recording: H.264/HEVC, 30/60 fps, system audio, mic (macOS 15+), countdown, menu-bar timer, stop control
-- [x] Settings window, launch at login, Screen Recording onboarding
-- [x] Universal bundle script and CI
+- [x] **v0.1 — capture & record:** area / window / fullscreen capture on frozen frames, Quick Access, pins, screen recording, settings, onboarding
+- [x] **v0.2 — annotate:** annotation editor, OCR (Capture Text), toast HUD, zh-Hans localisation, app icon, window-only mode, multi-display areas
+- [x] **v0.3 — beautify:** backgrounds, padding, shadow, window frame, aspect ratios; editable `.lumora` documents
+- [x] **v0.4 — AI Writing:** captions, step guides, alt text, polish, translate, summarize with your own provider
 
-**v0.1.x — make it real (hardware bring-up)**
+**v0.5 — next**
 
-- [ ] Run on Apple Silicon + Intel, macOS 14 and 15; fix what the type checker couldn't catch
-- [ ] App icon (`.icns`) generated from the code-drawn mark
-- [ ] Microphone on macOS 14 via `AVCaptureSession`
-- [ ] ProMotion-synchronised window springs (`NSScreen.displayLink`)
-- [ ] Diagnostics: `os_log` subsystem, opt-in crash reports
-- [ ] Dedicated window-only mode
-- [ ] Selections spanning several displays
-
-<details>
-<summary><b>Further out — v0.2 annotate · v0.3 record like a pro · v0.4 share · later</b></summary>
-
-<br>
-
-**v0.2 — annotate**
-
-- [ ] Annotation editor: arrows, shapes, text, highlighter, blur/pixelate, numbered steps, crop
-- [x] Background and padding presets ("beautify") with rounded corners and shadow — shipped in v0.3, with editable `.lumora` documents
-- [ ] Scrolling capture, self-timer, capture previous area
-- [ ] OCR — copy text from any region
-
-**v0.3 — record like a pro**
-
-- [ ] Pause/resume, trim on the card, GIF export
-- [ ] Click and keystroke overlays, webcam bubble
-- [ ] Per-app audio selection, 4K/HDR options
-
-**v0.4 — share**
-
-- [ ] Cloud links (bring-your-own S3/R2 first), history browser
-- [ ] Shortcuts.app and URL-scheme automation, Sparkle updates
+- [ ] Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
+- [ ] Capture history window (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>)
+- [ ] Recording extras: click ripples, keystroke HUD, microphone on macOS 14, GIF export + trim
+- [ ] Scrolling capture
+- [ ] AI actions on the OCR toast
 
 **Later**
 
-- [ ] Mac App Store variant
-- [ ] Localisation (zh-Hans first, then ja, de, fr, es)
-
-</details>
+- [ ] Developer ID signing + notarization, Sparkle updates, Homebrew cask
+- [ ] Editor polish, recording pause/resume and webcam bubble, cloud links, Shortcuts automation
+- [ ] Mac App Store variant, more localisations (ja, zh-Hant, de, fr, es)
 
 Full details in [ROADMAP.md](ROADMAP.md) and [CHANGELOG.md](CHANGELOG.md).
 

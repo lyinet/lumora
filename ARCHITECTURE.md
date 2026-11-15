@@ -1,6 +1,6 @@
 # Architecture
 
-Lumora is a Cargo workspace of four crates with a strict dependency
+Lumora is a Cargo workspace of five crates with a strict dependency
 direction. Logic that doesn't need the OS lives in the bottom crate and is
 tested on every host; every crate above it is a thin, typed layer over Apple
 frameworks.
@@ -10,7 +10,11 @@ apps/lumora        binary: NSApplication, status item, hotkeys, App state, flows
    │
    ├── crates/lumora-ui        AppKit + Core Animation: overlay, Quick Access, pins,
    │      │                    shutter, countdown, recording HUD, settings, onboarding,
-   │      │                    annotation editor + beautify panel, toast HUD
+   │      │                    annotation editor + beautify panel + AI sheet,
+   │      │                    settings AI tab, toast HUD
+   │      │
+   ├──────┼── crates/lumora-ai        blocking OpenAI-compatible client (ureq + rustls),
+   │      │                           streaming + cancellation, Keychain key store
    │      │
    ├──────┴── crates/lumora-capture   ScreenCaptureKit, ImageIO, AVFoundation, pasteboard,
    │                 │                Vision OCR, multi-display stitching, beautify renderer
@@ -20,15 +24,17 @@ apps/lumora        binary: NSApplication, status item, hotkeys, App state, flows
                                               names, hotkey parsing, layout, recording FSM,
                                               annotation document + editor FSM, i18n,
                                               OCR text assembly, stitch planning,
-                                              beautify model, .lumora document format
+                                              beautify model, .lumora document format,
+                                              ai (settings, prompts, SSE parsing, errors)
 ```
 
 | Crate | macOS-only? | Tests | What it owns |
 |---|---|---|---|
-| `lumora-core` | no | 221 unit tests | `beautify` (style model, presets, layout, auto-balance), `lumora_doc` (`.lumora` container, DTO layer, schema migrations), `annotate` (paths, shapes, display list, command-pattern document, editor FSM), `i18n` (en + zh-Hans table, language resolution), `ocr` (reading-order assembly), `stitch` (multi-display plans), `geometry` (Rect/Point/Size, handles, pixel alignment, Quartz⇄AppKit flip), `spring` (closed-form damped oscillator + retargetable animator), `selection` (overlay interaction FSM), `snap` (window hit-testing, edge snapping), `settings` (serde/TOML model with validation), `filename` (templates, unique paths), `hotkey` (parse/format/Carbon codes/conflicts), `layout` (card stack, pill, loupe, fly transform), `recording` (lifecycle FSM), `color`, `format`, `action` |
+| `lumora-core` | no | 256 unit tests | `ai` (provider presets, `AiSettings`, prompt building per writing task, SSE/stream parsing, `AiError` with localised messages, settings-form helpers, `KeyStore` trait), `beautify` (style model, presets, layout, auto-balance), `lumora_doc` (`.lumora` container, DTO layer, schema migrations), `annotate` (paths, shapes, display list, command-pattern document, editor FSM), `i18n` (en + zh-Hans table, language resolution), `ocr` (reading-order assembly), `stitch` (multi-display plans), `geometry` (Rect/Point/Size, handles, pixel alignment, Quartz⇄AppKit flip), `spring` (closed-form damped oscillator + retargetable animator), `selection` (overlay interaction FSM), `snap` (window hit-testing, edge snapping), `settings` (serde/TOML model with validation), `filename` (templates, unique paths), `hotkey` (parse/format/Carbon codes/conflicts), `layout` (card stack, pill, loupe, fly transform), `recording` (lifecycle FSM), `color`, `format`, `action` |
 | `lumora-capture` | yes (error type is portable) | 1 (mac) | `content` (SCShareableContent → displays + z-ordered windows), `screenshot` (SCScreenshotManager), `image` (crop, stitch, pixel reads, PNG+DPI via ImageIO), `ocr` (VNRecognizeTextRequest), `beautify_render` (CoreGraphics background/shadow/frame compositing), `clipboard`, `recorder` (SCStream → AVAssetWriter), `permission` |
-| `lumora-ui` | yes (`tokens` is portable) | 3 (tokens) | All windows, views, layers and motion (incl. `editor`, `editor::beautify_panel`, `toast`); emits `UiEvent`s |
-| `lumora` (app) | yes | 1 | `App` state, `Command` dispatch, flows (capture, record, OCR, editor, `doc_flow` for `.lumora` save/open), Carbon hotkeys, status item, OS glue |
+| `lumora-ai` | client portable, Keychain macOS-only | 6 | `client` (blocking chat completions over `ureq`, SSE streaming with deltas, cancel flag, connection test, HTTP → `AiError`), `keychain` (`KeyStore` on the macOS Keychain, service `app.lumora.ai`); re-exports `lumora_core::ai` |
+| `lumora-ui` | yes (`tokens` is portable) | 3 (tokens) | All windows, views, layers and motion (incl. `editor`, `editor::beautify_panel`, `editor::ai_sheet`, `settings_window::ai`, `toast`); emits `UiEvent`s |
+| `lumora` (app) | yes | 1 | `App` state, `Command` dispatch, flows (capture, record, OCR, editor, `doc_flow` for `.lumora` save/open, `ai_flow` for Keychain key + Test Connection, `ai_write_flow` for editor AI writing), Carbon hotkeys, status item, OS glue |
 
 ## Coordinate spaces
 
@@ -152,6 +158,26 @@ ways, and `migrate` upgrades old schemas while newer ones are rejected.
 queue next to every saved PNG and reopens it (Open…, Finder via
 `application:openURLs:`, Quick Access Annotate) into the editor with every
 annotation still editable.
+
+### AI writing
+
+```
+Settings → AI tab (settings_window::ai) ─▶ UiEvent::AiKeyRequested / AiKeySave / AiTestConnection
+   └▶ apps/lumora::ai_flow ─▶ lumora_ai::Keychain · lumora_ai::test_connection (background queue)
+Editor ✨ menu / ⌘J ─▶ EditorAction::AiWrite(AiWriteRequest)
+   └▶ apps/lumora::ai_write_flow: key + settings check ─▶ background queue:
+          Vision OCR (if the task needs it) ─▶ lumora_core::ai::build_request ─▶ lumora_ai::complete
+          deltas ─▶ on_main, tagged with the request id ─▶ editor::ai_sheet
+```
+
+`lumora_core::ai` is pure (no network, no Keychain): provider presets,
+settings, prompts and stream parsing are unit-tested on every host. The API
+key lives only in the Keychain (`app.lumora.ai`, account = provider id),
+never in `AiSettings`/`settings.toml`, and is never logged. By default only
+recognised text and annotation text are sent; the PNG is attached as a data
+URL only when "Send screenshot image" is on. Stop sets the request's cancel
+flag; a stopped or retried request's late deltas are dropped by id. Insert /
+Replace go through the editor's command stack as one undoable edit.
 
 ## Localisation
 

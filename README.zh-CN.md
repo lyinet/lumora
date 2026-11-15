@@ -35,7 +35,7 @@
 <br>
 
 > [!NOTE]
-> **Lumora 目前处于早期 alpha 阶段（v0.1）。** 整个应用已能针对 Apple Silicon 和 Intel 通过类型检查与 clippy，与平台无关的核心逻辑也有单元测试覆盖——但它**还没有在真机上运行过**，难免会有粗糙之处。下一个里程碑就是真机调试。⭐ **点个 Star 关注进展**；哪些已验证、哪些尚未验证，请看 [STATUS.md](STATUS.md)。
+> **Lumora 目前处于早期 alpha 阶段（v0.4）。** 整个应用已能针对 Apple Silicon 和 Intel 通过类型检查与 clippy，与平台无关的核心逻辑也有单元测试覆盖——但它**还没有在真机上运行过**，难免会有粗糙之处。下一个里程碑就是真机调试。⭐ **点个 Star 关注进展**；哪些已验证、哪些尚未验证，请看 [STATUS.md](STATUS.md)。
 
 ## 功能
 
@@ -74,6 +74,7 @@
 - **先快门，再飞入** —— 选区闪一下白光，截图随即缩小飞向卡片，同时卡片滑入。
 - **美化** —— 为截图加上渐变、纯色或图片背景，配合留白、圆角、柔和阴影、可选的 macOS 窗口边框和固定比例（16:9、1:1 等），在标注编辑器的 ✨ 面板中实时编辑。
 - **可再编辑的 `.lumora` 文档** —— 每张保存的截图旁都会有一个 `.lumora` 文件，保存原始截图、标注和美化样式；在访达中双击（或用“打开…”），每个箭头、文字和裁剪都仍可编辑。
+- **AI 写作（可选，默认关闭）** —— 在编辑器中点 ✨ 或按 <kbd>⌘</kbd><kbd>J</kbd>，即可生成配图说明、步骤指南、替代文本，或进行润色、翻译（English / 简体中文）、总结，结果流式显示，可一键插入为文字标注。服务商自选：OpenAI、DeepSeek、通义千问、Kimi（月之暗面）、本地 Ollama 或任意 OpenAI 兼容接口。API 密钥保存在 macOS 钥匙串中；默认只发送在本机识别出的文字和你的标注文字——只有在你主动开启后才会发送截图本身。
 
 ## 快捷键
 
@@ -147,7 +148,7 @@ NOTARY_PROFILE=lumora-notary scripts/bundle.sh
 纯逻辑的 crate 可以在任何平台上构建和测试：
 
 ```sh
-cargo test -p lumora-core -p lumora-ui   # 几何、弹簧、选区、设置、快捷键、设计令牌
+cargo test -p lumora-core -p lumora-ui -p lumora-ai   # 几何、弹簧、选区、设置、快捷键、设计令牌
 ```
 
 安装 Apple 目标后，可以在任何主机上对整个应用做类型检查：
@@ -175,69 +176,40 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
   <img src="assets/readme/architecture.svg" width="720" alt="四个 crate，依赖方向自上而下：apps/lumora、lumora-ui、lumora-capture、lumora-core">
 </p>
 
-项目是一个由四个 crate 组成的 Cargo 工作区，依赖方向严格单向。不依赖操作系统的逻辑都放在最底层的 crate 中，在任何主机上都能测试；其上的每一层都是对 Apple 框架的一层轻薄、类型化的封装。
+项目是一个由五个 crate 组成的 Cargo 工作区，依赖方向严格单向。不依赖操作系统的逻辑都放在最底层的 crate 中，在任何主机上都能测试；其上的每一层都是对 Apple 框架的一层轻薄、类型化的封装。
 
 | Crate | 职责 |
 |---|---|
 | [`apps/lumora`](apps/lumora) | 可执行程序：`NSApplication`、状态栏图标、Carbon 全局快捷键、应用状态以及截图/录屏流程 |
-| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation：截图界面、快速访问、钉图、快门、倒计时、录屏控件、设置、引导、标注编辑器 + 美化面板 |
+| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation：截图界面、快速访问、钉图、快门、倒计时、录屏控件、设置、引导、标注编辑器 + 美化面板 + AI 结果面板 |
+| [`lumora-ai`](crates/lumora-ai) | AI 写作所用的 OpenAI 兼容流式客户端与钥匙串密钥存储 |
 | [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit、ImageIO、AVFoundation、剪贴板、美化渲染 |
-| [`lumora-core`](crates/lumora-core) | 纯 Rust：几何、弹簧、选区状态机、吸附、设置、文件名、快捷键解析、布局、录屏状态机、美化模型、`.lumora` 文档格式 |
+| [`lumora-core`](crates/lumora-core) | 纯 Rust：几何、弹簧、选区状态机、吸附、设置、文件名、快捷键解析、布局、录屏状态机、美化模型、`.lumora` 文档格式、AI 设置/提示词/流式解析 |
 
 深入了解：[ARCHITECTURE.md](ARCHITECTURE.md)（线程模型、数据流、坐标空间）· [DESIGN.md](DESIGN.md)（颜色、形状、字体与动效令牌）。
 
 ## 路线图
 
-**v0.1 —— 代码已完成并通过类型检查，等待真机测试**
+以下内容均已编写完成、通过类型检查和单元测试，但**尚未在真机上运行**。
 
-- [x] 菜单栏应用，全局快捷键可重新绑定并带冲突检测
-- [x] 在冻结画面上的区域截图：变暗 + 选区、十字准线、尺寸标签、像素放大镜、窗口高亮、边缘吸附、键盘微调
-- [x] 全屏与窗口截图；带 DPI 元数据的 Retina PNG；剪贴板
-- [x] 快门闪光、飞入卡片动画、可拖出的快速访问卡片
-- [x] 钉在屏幕上
-- [x] 屏幕录制：H.264/HEVC、30/60 fps、系统音频、麦克风（macOS 15+）、倒计时、菜单栏计时器、停止控件
-- [x] 设置窗口、登录时启动、屏幕录制权限引导
-- [x] 通用应用打包脚本与 CI
+- [x] **v0.1 —— 截图与录屏：** 在冻结画面上的区域/窗口/全屏截图、快速访问、钉图、屏幕录制、设置、引导
+- [x] **v0.2 —— 标注：** 标注编辑器、OCR（截取文字）、提示浮窗、简体中文本地化、应用图标、仅窗口模式、跨显示器选区
+- [x] **v0.3 —— 美化：** 背景、留白、阴影、窗口边框、固定比例；可再编辑的 `.lumora` 文档
+- [x] **v0.4 —— AI 写作：** 使用你自己的服务商生成说明、步骤指南、替代文本，以及润色、翻译、总结
 
-**v0.1.x —— 让它真正跑起来（真机调试）**
+**v0.5 —— 下一步**
 
-- [ ] 在 Apple Silicon 与 Intel、macOS 14 和 15 上运行；修复类型检查发现不了的问题
-- [ ] 由代码绘制的标志生成应用图标（`.icns`）
-- [ ] 通过 `AVCaptureSession` 在 macOS 14 上支持麦克风
-- [ ] 与 ProMotion 同步的窗口弹簧动画（`NSScreen.displayLink`）
-- [ ] 诊断：`os_log` 子系统、可选的崩溃报告
-- [ ] 独立的仅窗口模式
-- [ ] 跨多个显示器的选区
-
-<details>
-<summary><b>更远的计划 —— v0.2 标注 · v0.3 专业录屏 · v0.4 分享 · 以后</b></summary>
-
-<br>
-
-**v0.2 —— 标注**
-
-- [ ] 标注编辑器：箭头、形状、文字、荧光笔、模糊/马赛克、编号步骤、裁剪
-- [x] 背景与留白预设（“美化”），带圆角和阴影 —— 已在 v0.3 发布，同时支持可再编辑的 `.lumora` 文档
-- [ ] 滚动截图、自拍定时、截取上一次区域
-- [ ] OCR —— 从任意区域拷贝文字
-
-**v0.3 —— 专业录屏**
-
-- [ ] 暂停/继续、在卡片上剪辑、导出 GIF
-- [ ] 点击与按键可视化、摄像头气泡
-- [ ] 按应用选择音频、4K/HDR 选项
-
-**v0.4 —— 分享**
-
-- [ ] 云端链接（优先支持自带的 S3/R2）、历史记录浏览器
-- [ ] 快捷指令与 URL scheme 自动化、Sparkle 自动更新
+- [ ] 在 Apple Silicon 与 Intel（macOS 14 和 15）上真机调试并修复问题
+- [ ] 截图历史窗口（<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>）
+- [ ] 录屏增强：点击涟漪、按键提示、macOS 14 麦克风、导出 GIF 与剪辑
+- [ ] 滚动截图
+- [ ] 在 OCR 提示浮窗中直接使用 AI 操作
 
 **以后**
 
-- [ ] Mac App Store 版本
-- [ ] 本地化（首先是简体中文，然后是日、德、法、西）
-
-</details>
+- [ ] Developer ID 签名与公证、Sparkle 自动更新、Homebrew cask
+- [ ] 编辑器打磨、录屏暂停/继续与摄像头气泡、云端链接、快捷指令自动化
+- [ ] Mac App Store 版本、更多语言（日、繁中、德、法、西）
 
 完整内容见 [ROADMAP.md](ROADMAP.md) 和 [CHANGELOG.md](CHANGELOG.md)。
 

@@ -37,6 +37,7 @@ impl App {
         let Some((image, scale, document, beautify, name)) = info else { return };
         let beautify = beautify.unwrap_or_else(|| self.settings.borrow().beautify.clone());
         let editor = EditorWindow::show(self.mtm, id, image, scale, &name, beautify, document, self.sink.clone());
+        editor.set_ai_enabled(self.settings.borrow().ai.enabled);
         self.editors.borrow_mut().insert(id, editor);
     }
 
@@ -44,7 +45,11 @@ impl App {
         match action {
             EditorAction::Copied(_) => self.notify(Notice::Success(Msg::ToastCopied), None),
             EditorAction::Save(img) => self.write_annotated(id, img, true),
+            EditorAction::AiWrite(req) => self.on_ai_write(id, *req),
+            EditorAction::AiCancel(request) => self.on_ai_cancel(id, request),
+            EditorAction::OpenAiSettings => self.open_ai_settings(),
             EditorAction::Closed(img) => {
+                self.cancel_ai(id);
                 if let Some(img) = img {
                     self.write_annotated(id, img, false);
                 }
