@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::action::Action;
+use crate::beautify::BeautifyStyle;
 use crate::hotkey::Hotkey;
 use crate::i18n::LanguagePref;
 
@@ -33,6 +34,8 @@ pub struct Settings {
     pub shortcuts: Shortcuts,
     pub capture: Capture,
     pub recording: Recording,
+    /// Last-used beautify style ("remember last"). Missing in pre-v0.3 files.
+    pub beautify: BeautifyStyle,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -44,6 +47,10 @@ pub struct General {
     pub filename_template: String,
     pub copy_to_clipboard: bool,
     pub save_to_disk: bool,
+    /// Also write an editable `.lumora` document (original capture +
+    /// annotations + beautify) next to each saved screenshot. Ignored when
+    /// `save_to_disk` is off. Missing in pre-v0.3 files (defaults on).
+    pub save_editable_document: bool,
     pub show_quick_access: bool,
     /// Open the annotation editor right after every screenshot.
     pub open_editor_after_capture: bool,
@@ -108,6 +115,7 @@ impl Default for General {
             filename_template: crate::filename::DEFAULT_TEMPLATE.to_string(),
             copy_to_clipboard: true,
             save_to_disk: true,
+            save_editable_document: true,
             show_quick_access: true,
             open_editor_after_capture: false,
             quick_access_timeout: 6.0,
@@ -257,6 +265,13 @@ impl Settings {
         if g.filename_template.trim().is_empty() {
             g.filename_template = crate::filename::DEFAULT_TEMPLATE.to_string();
         }
+        self.beautify.validate();
+    }
+
+    /// Whether fresh captures also get a `.lumora` document: only when they
+    /// are saved to disk at all.
+    pub fn writes_editable_document(&self) -> bool {
+        self.general.save_to_disk && self.general.save_editable_document
     }
 
     /// Resolved save folder for a given home directory.
@@ -309,6 +324,19 @@ mod tests {
         assert_eq!(s.recording.codec, Codec::Hevc);
         assert!(s.recording.show_cursor);
         assert_eq!(s.general, General::default());
+    }
+
+    #[test]
+    fn editable_document_defaults_on_for_old_files() {
+        let old = Settings::from_toml("[general]\nsave_to_disk = true\ncopy_to_clipboard = false\n").unwrap();
+        assert!(old.general.save_editable_document);
+        assert!(old.writes_editable_document());
+        let off = Settings::from_toml("[general]\nsave_editable_document = false\n").unwrap();
+        assert!(!off.general.save_editable_document);
+        assert!(!off.writes_editable_document());
+        let no_disk = Settings::from_toml("[general]\nsave_to_disk = false\n").unwrap();
+        assert!(no_disk.general.save_editable_document);
+        assert!(!no_disk.writes_editable_document(), "never without save_to_disk");
     }
 
     #[test]
@@ -365,6 +393,30 @@ mod tests {
         let t = Settings::default().to_toml().unwrap();
         assert!(t.contains("language = \"system\""));
         assert!(t.contains("capture_text = \"⌥⇧2\""));
+    }
+
+    #[test]
+    fn v02_files_gain_beautify_defaults() {
+        let s = Settings::from_toml("[general]\nplay_sounds = false\n[recording]\nfps = 30\n").unwrap();
+        assert_eq!(s.beautify, BeautifyStyle::default());
+        assert!(!s.general.play_sounds);
+    }
+
+    #[test]
+    fn beautify_section_round_trips_and_validates() {
+        use crate::beautify::{AspectRatio, Background, Rgba, WindowChrome};
+        let mut s = Settings::default();
+        s.beautify.enabled = true;
+        s.beautify.background = Background::Solid(Rgba::new(10, 20, 30, 255));
+        s.beautify.aspect = AspectRatio::R16x9;
+        s.beautify.chrome = WindowChrome::MacDark;
+        let t = s.to_toml().unwrap();
+        assert!(t.contains("[beautify]"), "{t}");
+        assert_eq!(Settings::from_toml(&t).unwrap(), s);
+        let c = Settings::from_toml("[beautify]\npadding = 1000.0\naspect = \"9:16\"\n").unwrap();
+        assert_eq!(c.beautify.padding, crate::beautify::MAX_PADDING);
+        assert_eq!(c.beautify.aspect, AspectRatio::R9x16);
+        assert!(c.beautify.shadow.enabled);
     }
 
     #[test]

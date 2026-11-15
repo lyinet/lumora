@@ -261,3 +261,31 @@ impl EditorWindowDelegate {
         unsafe { msg_send![super(this), init] }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Flipped container (beautify panel document view)
+// ---------------------------------------------------------------------------
+
+define_class!(
+    /// A plain top-down view so panel rows can be laid out from the top.
+    #[unsafe(super(NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "LumoraEditorFlippedView"]
+    pub struct FlippedView;
+
+    unsafe impl NSObjectProtocol for FlippedView {}
+
+    impl FlippedView {
+        #[unsafe(method(isFlipped))]
+        fn is_flipped(&self) -> bool {
+            true
+        }
+    }
+);
+
+impl FlippedView {
+    pub fn new(mtm: MainThreadMarker, frame: CGRect) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(());
+        unsafe { msg_send![super(this), initWithFrame: frame] }
+    }
+}

@@ -215,6 +215,15 @@ impl Editor {
         }
     }
 
+    /// An editor over an existing document (a reopened `.lumora` file).
+    /// The document's history is kept as given — [`Document::from_parts`]
+    /// starts it empty — and step numbering continues from its badges.
+    pub fn with_document(doc: Document) -> Self {
+        let mut e = Editor::new(doc.size());
+        e.doc = doc;
+        e
+    }
+
     pub fn document(&self) -> &Document {
         &self.doc
     }

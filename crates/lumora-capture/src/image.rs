@@ -5,9 +5,9 @@ use std::path::Path;
 
 use lumora_core::color::Rgb8;
 use lumora_core::geometry::Rect;
-use objc2_core_foundation::{CFData, CFDictionary, CFNumber, CFRetained, CFString, CFType, CFURL};
+use objc2_core_foundation::{CFData, CFDictionary, CFMutableData, CFNumber, CFRetained, CFString, CFType, CFURL};
 use objc2_core_graphics::{CGDataProvider, CGImage, CGImageByteOrderInfo};
-use objc2_image_io::{kCGImagePropertyDPIHeight, kCGImagePropertyDPIWidth, CGImageDestination};
+use objc2_image_io::{kCGImagePropertyDPIHeight, kCGImagePropertyDPIWidth, CGImageDestination, CGImageSource};
 
 use crate::content::rect_to_cg;
 use crate::CaptureError;
@@ -148,6 +148,16 @@ pub fn write_png(image: &CGImage, path: &Path, scale: f64) -> Result<(), Capture
     let png = CFString::from_static_str("public.png");
     // SAFETY: valid URL and UTI; options may be NULL.
     let dest = unsafe { CGImageDestination::with_url(&url, &png, 1, None) }.ok_or_else(|| err("cannot create file"))?;
+    add_png_image(&dest, image, scale);
+    if unsafe { dest.finalize() } {
+        Ok(())
+    } else {
+        Err(err("encoding failed"))
+    }
+}
+
+/// Add `image` to `dest` with DPI = `72 × scale`.
+fn add_png_image(dest: &CGImageDestination, image: &CGImage, scale: f64) {
     let dpi = CFNumber::new_f64(72.0 * scale.max(1.0));
     // SAFETY: the ImageIO property keys are valid static CFStrings.
     let keys: [&CFString; 2] = unsafe { [kCGImagePropertyDPIWidth, kCGImagePropertyDPIHeight] };
@@ -155,9 +165,30 @@ pub fn write_png(image: &CGImage, path: &Path, scale: f64) -> Result<(), Capture
     let props = CFDictionary::<CFString, CFType>::from_slices(&keys, &values);
     // SAFETY: `props` is a CFString → CFNumber dictionary as ImageIO expects.
     unsafe { dest.add_image(image, Some(props.as_opaque())) };
-    if unsafe { dest.finalize() } {
-        Ok(())
-    } else {
-        Err(err("encoding failed"))
+}
+
+/// Encode `image` as PNG in memory (same DPI metadata as [`write_png`]);
+/// used for the original capture inside `.lumora` documents.
+pub fn png_bytes(image: &CGImage, scale: f64) -> Result<Vec<u8>, CaptureError> {
+    let err = || CaptureError::Framework("PNG encoding failed".into());
+    let data = CFMutableData::new(None, 0).ok_or_else(err)?;
+    let png = CFString::from_static_str("public.png");
+    // SAFETY: valid mutable data and UTI; options may be NULL.
+    let dest = unsafe { CGImageDestination::with_data(&data, &png, 1, None) }.ok_or_else(err)?;
+    add_png_image(&dest, image, scale);
+    // SAFETY: one image was added.
+    if !unsafe { dest.finalize() } {
+        return Err(err());
     }
+    drop(dest);
+    Ok(data.to_vec())
+}
+
+/// Decode PNG (or any ImageIO-readable) bytes into an image.
+pub fn decode_image(bytes: &[u8]) -> Option<CFRetained<CGImage>> {
+    let data = CFData::from_bytes(bytes);
+    // SAFETY: valid data; options may be NULL.
+    let source = unsafe { CGImageSource::with_data(&data, None) }?;
+    // SAFETY: index 0 of a valid source; options may be NULL.
+    unsafe { source.image_at_index(0, None) }
 }

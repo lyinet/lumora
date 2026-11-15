@@ -52,11 +52,16 @@ pub enum CardAction {
     DraggedOut,
 }
 
-/// A flattened editor export.
+/// A flattened editor export, plus the editable state it came from (for
+/// the `.lumora` document saved next to it).
 pub struct EditorImage {
     pub image: CFRetained<CGImage>,
     /// Pixels per point.
     pub scale: f64,
+    /// The annotations (and crop) that `image` flattens.
+    pub document: lumora_core::annotate::Document,
+    /// The editor's beautify style at export time.
+    pub beautify: lumora_core::beautify::BeautifyStyle,
 }
 
 impl std::fmt::Debug for EditorImage {
@@ -112,6 +117,13 @@ pub enum UiEvent {
     CountdownCancelled,
     StopRecording,
     SettingsChanged(Box<Settings>),
+    /// An editor's beautify panel changed the style ("remember last"): the
+    /// app stores it in `Settings::beautify`, saves, and pushes it to the
+    /// other open editors. `from` is the editor's capture id.
+    BeautifyChanged {
+        from: u64,
+        style: Box<lumora_core::beautify::BeautifyStyle>,
+    },
     /// The Shortcuts tab started/stopped recording a key combo; the app
     /// suspends global hotkeys meanwhile so the combo reaches the field.
     ShortcutRecording(bool),

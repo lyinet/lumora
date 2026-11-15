@@ -9,18 +9,26 @@
 //!
 //! ```text
 //! canvas root (flipped)
-//! ├── stage shadow
-//! ├── stage  (image rect on screen, rounded, masks)
-//! │   └── content (document points, scaled by zoom, offset by the crop)
-//! │       ├── base image
-//! │       └── annotations — one container per annotation, z-ordered
+//! ├── beautify background (canvas rect; solid / gradient / image; hidden when off)
+//! ├── stage shadow (frame rect, shadowPath)
+//! ├── frame (rounded, masks; = the image rect when beautify is off)
+//! │   ├── chrome bar + traffic lights (beautify window frame)
+//! │   └── stage  (image rect, masks to the crop)
+//! │       └── content (document points, scaled by zoom, offset by the crop)
+//! │           ├── base image
+//! │           └── annotations — one container per annotation, z-ordered
 //! └── chrome (view points): selection outline + handles, crop overlay
 //! ```
+//!
+//! The beautify panel ([`beautify_panel`]) edits the editor's style; the
+//! preview is re-laid on every change ([`lumora_core::beautify::preview_geometry`])
+//! and the style goes back to the app as [`UiEvent::BeautifyChanged`].
 //!
 //! Exports (⌘C, ⌘S, drag-out, close-with-edits) flatten through
 //! [`render::flatten`] at the capture's native scale and go to the app as
 //! [`EditorAction`]s; the editor never writes the capture file itself.
 
+mod beautify_panel;
 mod render;
 mod toolbar;
 mod views;
@@ -33,6 +41,7 @@ use lumora_core::annotate::document::{Annotation, AnnotationId};
 use lumora_core::annotate::editor::{Editor, Effect, Input, Key, Tool};
 use lumora_core::annotate::render::{ops_bounds, render as render_ops};
 use lumora_core::annotate::shape::Shape;
+use lumora_core::beautify::{preview_geometry, Adjust, Background, BeautifyStyle, Preset, Rgba};
 use lumora_core::geometry::{Point, Rect, Size};
 use lumora_core::i18n::{tr, trf, Msg};
 use objc2::rc::Retained;
@@ -45,7 +54,9 @@ use objc2_app_kit::{
 use objc2_core_foundation::{CFRetained, CGPoint, CGSize};
 use objc2_core_graphics::CGImage;
 use objc2_foundation::{NSArray, NSString};
-use objc2_quartz_core::{CALayer, CAShapeLayer, CATransform3D};
+use objc2_quartz_core::{CAGradientLayer, CALayer, CAShapeLayer, CATransaction, CATransform3D};
+
+use self::beautify_panel::{cg_rgba, choose_background_image, set_gradient, BeautifyPanel, PanelEvent, PanelHandler};
 
 use self::render::{annotation_font, build_layer, flatten, LayerContext, RedactionCache};
 pub use self::toolbar::ToolbarAction;
@@ -81,6 +92,17 @@ pub(crate) struct State {
     base: CFRetained<CGImage>,
     scale: f64,
     file_name: String,
+    /// The editor's beautify style: drives the live preview and ⌘C /
+    /// drag-out exports (when enabled); mirrored to Settings on change.
+    beautify: RefCell<BeautifyStyle>,
+    panel: BeautifyPanel,
+    bg: Retained<CALayer>,
+    bg_gradient: Retained<CAGradientLayer>,
+    frame: Retained<CALayer>,
+    bar: Retained<CALayer>,
+    lights: Vec<Retained<CALayer>>,
+    /// Decoded wallpaper for `Background::Image` (`None` = failed to load).
+    bg_image: RefCell<Option<(PathBuf, Option<CFRetained<CGImage>>)>>,
     window: Retained<NSWindow>,
     canvas: Retained<CanvasView>,
     toolbar: Toolbar,
@@ -113,27 +135,66 @@ impl std::fmt::Debug for EditorWindow {
     }
 }
 
+/// Flatten `doc` onto `base` (at `scale` pixels per point) outside an open
+/// editor, e.g. for the thumbnail of a reopened `.lumora` document. Main
+/// thread only.
+pub fn flatten_document(
+    base: &CGImage,
+    scale: f64,
+    doc: &lumora_core::annotate::Document,
+) -> Option<CFRetained<CGImage>> {
+    flatten(base, scale, doc, &mut RedactionCache::default())
+}
+
 impl EditorWindow {
+    /// Adopt a beautify style changed elsewhere (Settings, another
+    /// editor): updates the panel, the live preview and later exports.
+    /// Emits nothing.
+    pub fn set_beautify(&self, style: BeautifyStyle) {
+        let s = &self.state;
+        if s.closed.get() || *s.beautify.borrow() == style {
+            return;
+        }
+        *s.beautify.borrow_mut() = style.clone();
+        s.panel.sync(&style);
+        s.toolbar.set_beautify_state(s.panel.is_open(), style.enabled);
+        s.layout_with(true);
+    }
+
     /// Open an editor for capture `id`. `image` is the capture at `scale`
-    /// pixels per point; `file_name` titles the window.
+    /// pixels per point; `file_name` titles the window. `beautify` is
+    /// applied to copied and dragged exports when its `enabled` is set (the
+    /// app applies it to ⌘S writes itself). `document` restores earlier
+    /// annotations (a reopened `.lumora` file); its size must match the
+    /// image's point size, otherwise it is ignored.
+    #[allow(clippy::too_many_arguments)]
     pub fn show(
         mtm: MainThreadMarker,
         id: u64,
         image: CFRetained<CGImage>,
         scale: f64,
         file_name: &str,
+        beautify: BeautifyStyle,
+        document: Option<lumora_core::annotate::Document>,
         sink: EventSink,
     ) -> Self {
         let scale = scale.max(1.0);
         let px = (CGImage::width(Some(&image)) as f64, CGImage::height(Some(&image)) as f64);
         let doc_size = Size::new(px.0 / scale, px.1 / scale);
+        let document = document.filter(|d| {
+            let s = d.size();
+            (s.width - doc_size.width).abs() < 0.5 && (s.height - doc_size.height).abs() < 0.5
+        });
 
         // Window: image + margins + toolbar, within 90 % of the screen.
         let visible = crate::util::screen_under_mouse(mtm)
             .map(|s| rect(s.visibleFrame()))
             .unwrap_or(Rect::new(0.0, 0.0, 1440.0, 900.0));
         let m = size::EDITOR_CANVAS_MARGIN;
-        let want = Size::new(doc_size.width + 2.0 * m, doc_size.height + 2.0 * m + size::EDITOR_TOOLBAR_HEIGHT);
+        let beautify = beautify.validated();
+        let shown_size =
+            if beautify.enabled { lumora_core::beautify::layout(doc_size, &beautify).canvas } else { doc_size };
+        let want = Size::new(shown_size.width + 2.0 * m, shown_size.height + 2.0 * m + size::EDITOR_TOOLBAR_HEIGHT);
         let w = want.width.clamp(size::EDITOR_MIN_WIDTH, visible.width() * 0.9);
         let h = want.height.clamp(size::EDITOR_MIN_HEIGHT, visible.height() * 0.9);
         let frame = Rect::new(visible.mid().x - w / 2.0, visible.mid().y - h / 2.0, w, h);
@@ -174,16 +235,39 @@ impl EditorWindow {
         canvas.setWantsLayer(true);
         container.addSubview(&canvas);
 
+        let bg = CALayer::new();
+        bg.setMasksToBounds(true);
+        bg.setHidden(true);
+        // SAFETY: a valid gravity constant.
+        bg.setContentsGravity(unsafe { objc2_quartz_core::kCAGravityResizeAspectFill });
+        let bg_gradient = CAGradientLayer::new();
+        bg.addSublayer(&bg_gradient);
+        root.addSublayer(&bg);
         let stage_shadow = CALayer::new();
         stage_shadow.setShadowOpacity(0.45);
         stage_shadow.setShadowRadius(18.0);
         stage_shadow.setShadowOffset(CGSize::new(0.0, 8.0));
         root.addSublayer(&stage_shadow);
+        let frame_layer = CALayer::new();
+        frame_layer.setMasksToBounds(true);
+        frame_layer.setCornerRadius(radius::EDITOR_IMAGE);
+        frame_layer.setCornerCurve(unsafe { objc2_quartz_core::kCACornerCurveContinuous });
+        root.addSublayer(&frame_layer);
+        let bar = CALayer::new();
+        bar.setHidden(true);
+        frame_layer.addSublayer(&bar);
+        let lights: Vec<Retained<CALayer>> = lumora_core::beautify::WindowChrome::LIGHT_COLORS
+            .iter()
+            .map(|c| {
+                let l = CALayer::new();
+                l.setBackgroundColor(Some(&cg_rgba(*c)));
+                bar.addSublayer(&l);
+                l
+            })
+            .collect();
         let stage = CALayer::new();
         stage.setMasksToBounds(true);
-        stage.setCornerRadius(radius::EDITOR_IMAGE);
-        stage.setCornerCurve(unsafe { objc2_quartz_core::kCACornerCurveContinuous });
-        root.addSublayer(&stage);
+        frame_layer.addSublayer(&stage);
         let content = CALayer::new();
         content.setAnchorPoint(CGPoint::new(0.0, 0.0));
         content.setBounds(cg_rect(Rect { origin: Point::ZERO, size: doc_size }));
@@ -211,11 +295,25 @@ impl EditorWindow {
                     State::toolbar_action(&s, a);
                 }
             });
+            let w = weak.clone();
+            let panel_handler: PanelHandler = Rc::new(move |e| {
+                if let Some(s) = w.upgrade() {
+                    State::beautify_event(&s, e);
+                }
+            });
+            let panel = BeautifyPanel::new(mtm, canvas_frame.width(), canvas_frame.height(), panel_handler);
+            panel.sync(&beautify);
+            container.addSubview(&panel.view);
             let toolbar = Toolbar::new(mtm, content_rect.width(), content_rect.height(), handler, drag.clone());
+            toolbar.set_beautify_state(false, beautify.enabled);
             container.addSubview(&toolbar.view);
             let w = weak.clone();
             let color_target = ActionTarget::new(mtm, move |_| {
                 let (Some(s), Some(mtm)) = (w.upgrade(), MainThreadMarker::new()) else { return };
+                // The beautify colour well drives the shared panel itself.
+                if s.panel.well_active() {
+                    return;
+                }
                 if let Some(c) = rgb8_of(&NSColorPanel::sharedColorPanel(mtm).color()) {
                     let effect = s.editor.borrow_mut().set_color(c);
                     State::apply(&s, effect);
@@ -226,10 +324,21 @@ impl EditorWindow {
                 mtm,
                 id,
                 sink,
-                editor: RefCell::new(Editor::new(doc_size)),
+                editor: RefCell::new(match document {
+                    Some(d) => Editor::with_document(d),
+                    None => Editor::new(doc_size),
+                }),
                 base: image,
                 scale,
                 file_name: file_name.to_string(),
+                beautify: RefCell::new(beautify.clone()),
+                panel,
+                bg,
+                bg_gradient,
+                frame: frame_layer,
+                bar,
+                lights,
+                bg_image: RefCell::new(None),
                 window: window.clone(),
                 canvas: canvas.clone(),
                 toolbar,
@@ -305,36 +414,149 @@ impl State {
         }
     }
 
-    /// Fit the shown rect into the canvas (never upscaled) and position
-    /// the stage. Called on resize and when the shown rect changes.
+    /// Fit the shown rect (plus the beautify canvas, when on) into the
+    /// canvas area left of the panel (never upscaled) and position every
+    /// preview layer. Called on resize and when the shown rect changes.
     fn layout(&self) {
+        self.layout_with(false);
+    }
+
+    /// [`State::layout`], optionally with a short implicit animation (for
+    /// discrete changes such as toggling the panel or the window frame).
+    fn layout_with(&self, animate: bool) {
         let b = rect(self.canvas.bounds());
         let shown = self.wanted_shown();
         if shown.is_empty() {
             return;
         }
-        let avail = b.inset(size::EDITOR_CANVAS_MARGIN, size::EDITOR_CANVAS_MARGIN);
-        let zoom = (avail.width() / shown.width()).min(avail.height() / shown.height()).clamp(0.05, 1.0);
-        let (w, h) = (shown.width() * zoom, shown.height() * zoom);
+        let mut avail = b.inset(size::EDITOR_CANVAS_MARGIN, size::EDITOR_CANVAS_MARGIN);
+        if self.panel.is_open() {
+            avail = Rect::new(
+                avail.min_x(),
+                avail.min_y(),
+                (avail.width() - beautify_panel::WIDTH).max(1.0),
+                avail.height(),
+            );
+        }
+        let style = self.beautify.borrow().clone();
+        let g = preview_geometry(shown.size, &style, avail, radius::EDITOR_IMAGE);
+        let zoom = g.zoom;
+        // Snap the image to device pixels; move everything else with it.
         let backing = self.window.backingScaleFactor();
-        let stage = Rect::new((b.width() - w) / 2.0, (b.height() - h) / 2.0, w, h).rounded(backing);
-        without_actions(|| {
-            self.stage.setFrame(cg_rect(stage));
-            self.stage_shadow.setFrame(cg_rect(stage));
+        let snapped = g.content.rounded(backing);
+        let (dx, dy) = (snapped.min_x() - g.content.min_x(), snapped.min_y() - g.content.min_y());
+        let stage = Rect::new(snapped.min_x(), snapped.min_y(), g.content.width(), g.content.height());
+        let frame = g.frame.offset(dx, dy);
+        let canvas = g.canvas.offset(dx, dy);
+        let local = |r: Rect| r.offset(-frame.min_x(), -frame.min_y());
+        let apply = || {
+            self.bg.setHidden(!style.enabled);
+            self.bg.setFrame(cg_rect(canvas));
+            if style.enabled {
+                self.apply_background(&style.background, canvas.size);
+            }
+            self.frame.setFrame(cg_rect(frame));
+            self.frame.setCornerRadius(g.corner_radius);
+            let fill = style.enabled.then(|| cg_rgba(style.chrome.bar_color().unwrap_or(Rgba::WHITE)));
+            self.frame.setBackgroundColor(fill.as_deref());
+            match (style.enabled, g.chrome_bar, style.chrome.bar_color()) {
+                (true, Some(bar), Some(c)) => {
+                    self.bar.setHidden(false);
+                    self.bar.setFrame(cg_rect(local(bar)));
+                    self.bar.setBackgroundColor(Some(&cg_rgba(c)));
+                    if let Some((centres, d)) = g.traffic_lights() {
+                        for (l, p) in self.lights.iter().zip(centres) {
+                            let p = (p.x - bar.min_x(), p.y - bar.min_y());
+                            l.setFrame(cg_rect(Rect::new(p.0 - d / 2.0, p.1 - d / 2.0, d, d)));
+                            l.setCornerRadius(d / 2.0);
+                        }
+                    }
+                }
+                _ => self.bar.setHidden(true),
+            }
+            self.stage.setFrame(cg_rect(local(stage)));
+            self.stage_shadow.setFrame(cg_rect(frame));
             self.stage_shadow.setShadowPath(Some(&crate::util::round_rect_path(
-                Rect::new(0.0, 0.0, stage.width(), stage.height()),
-                radius::EDITOR_IMAGE,
+                Rect::new(0.0, 0.0, frame.width(), frame.height()),
+                g.corner_radius,
             )));
+            let (opacity, blur, offset) = if !style.enabled {
+                (0.45, 18.0, 8.0)
+            } else if style.shadow.enabled {
+                (style.shadow.opacity, style.shadow.radius * zoom, style.shadow.offset_y * zoom)
+            } else {
+                (0.0, 0.0, 0.0)
+            };
+            self.stage_shadow.setShadowOpacity(opacity as f32);
+            self.stage_shadow.setShadowRadius(blur);
+            self.stage_shadow.setShadowOffset(CGSize::new(0.0, offset));
             self.content.setTransform(CATransform3D::new_scale(zoom, zoom, 1.0));
             self.content.setPosition(CGPoint::new(-shown.min_x() * zoom, -shown.min_y() * zoom));
             self.chrome.setFrame(cg_rect(b));
-        });
+        };
+        if animate {
+            CATransaction::begin();
+            CATransaction::setAnimationDuration(0.22);
+            apply();
+            CATransaction::commit();
+        } else {
+            without_actions(apply);
+        }
         self.zoom.set(zoom);
         self.stage_rect.set(stage);
         self.shown.set(shown);
         self.editor.borrow_mut().set_zoom(zoom);
         self.draw_chrome();
         self.position_text_field();
+    }
+
+    /// Fill the background layer for `bg` over a canvas of `size`.
+    fn apply_background(&self, bg: &Background, size: Size) {
+        self.bg_gradient.setFrame(cg_rect(Rect { origin: Point::ZERO, size }));
+        let image = match bg {
+            Background::Image(path) => self.background_image(path),
+            _ => None,
+        };
+        let gradient = |from, to, angle| {
+            set_gradient(&self.bg_gradient, from, to, angle, size);
+            self.bg_gradient.setHidden(false);
+            self.bg.setBackgroundColor(None);
+        };
+        // SAFETY: clearing or setting a CGImage as contents is valid.
+        unsafe { self.bg.setContents(image.as_deref().map(cf_as_object)) };
+        match bg {
+            Background::None => {
+                self.bg_gradient.setHidden(true);
+                self.bg.setBackgroundColor(None);
+            }
+            Background::Solid(c) => {
+                self.bg_gradient.setHidden(true);
+                self.bg.setBackgroundColor(Some(&cg_rgba(*c)));
+            }
+            Background::LinearGradient { from, to, angle_deg } => gradient(*from, *to, *angle_deg),
+            Background::Image(_) if image.is_some() => {
+                self.bg_gradient.setHidden(true);
+                self.bg.setBackgroundColor(None);
+            }
+            Background::Image(_) => {
+                // Same fallback as the renderer.
+                let (from, to, angle) = Preset::DEFAULT.stops();
+                gradient(from, to, angle);
+            }
+        }
+    }
+
+    /// The decoded wallpaper at `path`, cached per path.
+    fn background_image(&self, path: &std::path::Path) -> Option<CFRetained<CGImage>> {
+        let mut cache = self.bg_image.borrow_mut();
+        match cache.as_ref() {
+            Some((p, img)) if p == path => img.clone(),
+            _ => {
+                let img = lumora_capture::beautify_render::load_image(path);
+                *cache = Some((path.to_path_buf(), img.clone()));
+                img
+            }
+        }
     }
 
     fn to_doc(&self, p: (f64, f64)) -> Point {
@@ -490,11 +712,55 @@ impl State {
                     this.save();
                     Effect::None
                 }
+                ToolbarAction::Beautify => {
+                    drop(ed);
+                    State::toggle_panel(this);
+                    Effect::None
+                }
             }
         };
         State::apply(this, effect);
         // Tool/option changes with nothing selected still need the toolbar.
         this.sync(None);
+    }
+
+    // -- beautify -------------------------------------------------------------
+
+    fn toggle_panel(this: &Rc<State>) {
+        let open = !this.panel.is_open();
+        this.panel.set_open(open);
+        this.toolbar.set_beautify_state(open, this.beautify.borrow().enabled);
+        this.layout_with(true);
+    }
+
+    /// A panel edit: fold it into the style, re-lay the preview and tell
+    /// the app (which saves it as "remember last").
+    fn beautify_event(this: &Rc<State>, event: PanelEvent) {
+        if this.closed.get() {
+            return;
+        }
+        let adjust = match event {
+            PanelEvent::Adjust(a) => a,
+            PanelEvent::ChooseImage => match choose_background_image(this.mtm) {
+                Some(path) => Adjust::Background(Background::Image(path)),
+                None => {
+                    this.panel.sync(&this.beautify.borrow());
+                    return;
+                }
+            },
+        };
+        // Continuous controls track the pointer; discrete ones animate.
+        let animate =
+            matches!(adjust, Adjust::Enabled(_) | Adjust::Chrome(_) | Adjust::Aspect(_) | Adjust::AutoBalance(_));
+        let changed = this.beautify.borrow_mut().apply(adjust);
+        let style = this.beautify.borrow().clone();
+        this.panel.sync(&style);
+        if !changed {
+            return;
+        }
+        this.toolbar.set_beautify_state(this.panel.is_open(), style.enabled);
+        this.layout_with(animate);
+        (this.sink)(UiEvent::BeautifyChanged { from: this.id, style: Box::new(style) });
     }
 
     fn apply(this: &Rc<State>, effect: Effect) {
@@ -715,27 +981,40 @@ impl State {
         flatten(&self.base, self.scale, ed.document(), &mut self.redactions.borrow_mut())
     }
 
+    /// The flattened image plus the state it was made from.
+    fn editor_image(&self) -> Option<EditorImage> {
+        let image = self.flatten()?;
+        Some(EditorImage {
+            image,
+            scale: self.scale,
+            document: self.editor.borrow().document().clone(),
+            beautify: self.beautify.borrow().clone(),
+        })
+    }
+
+    /// The flattened image with the beautify style applied (if enabled).
+    fn export_image(&self) -> Option<CFRetained<CGImage>> {
+        let image = self.flatten()?;
+        let style = self.beautify.borrow().clone();
+        Some(lumora_capture::beautify_render::beautify_for_export(image, &style, self.scale))
+    }
+
     fn copy(&self) {
-        let Some(image) = self.flatten() else { return };
-        lumora_capture::clipboard::copy_image(&image, self.scale, None);
-        (self.sink)(UiEvent::Editor {
-            id: self.id,
-            action: EditorAction::Copied(EditorImage { image, scale: self.scale }),
-        });
+        let Some(img) = self.editor_image() else { return };
+        let out = lumora_capture::beautify_render::beautify_for_export(img.image.clone(), &img.beautify, self.scale);
+        lumora_capture::clipboard::copy_image(&out, self.scale, None);
+        (self.sink)(UiEvent::Editor { id: self.id, action: EditorAction::Copied(img) });
     }
 
     fn save(&self) {
-        let Some(image) = self.flatten() else { return };
+        let Some(img) = self.editor_image() else { return };
         self.saved_revision.set(self.editor.borrow().document().revision());
-        (self.sink)(UiEvent::Editor {
-            id: self.id,
-            action: EditorAction::Save(EditorImage { image, scale: self.scale }),
-        });
+        (self.sink)(UiEvent::Editor { id: self.id, action: EditorAction::Save(img) });
     }
 
     /// Flatten to a temp PNG for drag-and-drop.
     fn export_for_drag(&self) -> Option<(PathBuf, Retained<NSImage>)> {
-        let image = self.flatten()?;
+        let image = self.export_image()?;
         let stem = std::path::Path::new(&self.file_name)
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
@@ -748,6 +1027,7 @@ impl State {
     }
 
     fn open_color_panel(&self) {
+        self.panel.deactivate_well();
         let panel = NSColorPanel::sharedColorPanel(self.mtm);
         panel.setShowsAlpha(false);
         panel.setColor(&crate::util::ns_rgb8(self.editor.borrow().style().color));
@@ -765,13 +1045,14 @@ impl State {
             return;
         }
         State::end_text_edit(self);
+        self.panel.deactivate_well();
         if NSColorPanel::sharedColorPanelExists(self.mtm) {
             let panel = NSColorPanel::sharedColorPanel(self.mtm);
             // SAFETY: clearing the target is always valid.
             unsafe { panel.setTarget(None) };
         }
         let dirty = self.editor.borrow().document().revision() != self.saved_revision.get();
-        let image = if dirty { self.flatten().map(|image| EditorImage { image, scale: self.scale }) } else { None };
+        let image = if dirty { self.editor_image() } else { None };
         (self.sink)(UiEvent::Editor { id: self.id, action: EditorAction::Closed(image) });
     }
 }

@@ -8,6 +8,8 @@
 //! * [`screenshot`] — still captures via `SCScreenshotManager`.
 //! * [`image`] — cropping, pixel access for the loupe, PNG encoding with
 //!   Retina DPI metadata.
+//! * [`beautify_render`] — draw a capture on a beautify canvas
+//!   (background, shadow, rounded frame, window chrome).
 //! * [`clipboard`] — put a capture on the pasteboard.
 //! * [`recorder`] — `SCStream` → `AVAssetWriter` MP4 recording.
 //! * [`ocr`] — on-device text recognition (Vision).
@@ -25,6 +27,8 @@ mod send;
 #[cfg(target_os = "macos")]
 pub use send::SendBox;
 
+#[cfg(target_os = "macos")]
+pub mod beautify_render;
 #[cfg(target_os = "macos")]
 pub mod clipboard;
 #[cfg(target_os = "macos")]

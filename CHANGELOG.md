@@ -4,6 +4,30 @@ All notable changes to Lumora are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [0.3.0] — 2026-11-16 (not yet hardware-tested)
+
+### Added
+- **Beautify** — frame captures on a background before sharing: 8 gradient
+  presets, a custom solid colour or your own image (PNG / JPEG / HEIC),
+  padding, corner radius, drop shadow (blur, opacity, on/off), an optional
+  macOS-style window frame (light / dark), fixed aspect ratios (16:9, 9:16,
+  4:3, 3:2, 1:1) and auto-balance. Edit it from the ✨ panel in the
+  annotation editor with a live Core Animation preview; the last style is
+  remembered (Settings) and applied to saved, copied and dragged-out images
+  when enabled.
+- **Editable .lumora documents** — every saved screenshot gets a
+  `<name>.lumora` next to its PNG holding the original capture, its
+  annotations and (when enabled) the beautify style; editor saves keep it in
+  sync. Reopen it from the menu bar (Open…, ⌘O in the menu), by
+  double-clicking it in Finder, or with Annotate on its Quick Access card —
+  every arrow, label and crop stays editable. Written atomically; skipped
+  when "Save to disk" is off; toggle in Settings → General ("Also save an
+  editable .lumora document", on by default). Lumora registers the
+  `app.lumora.document` type (`.lumora`, `application/x-lumora`) as its
+  owner. Damaged or newer-format files open with an explanatory alert.
+
 ## [0.2.0] — 2026-11-15 (unreleased, not yet hardware-tested)
 
 ### Added

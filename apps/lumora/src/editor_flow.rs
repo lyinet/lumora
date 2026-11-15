@@ -20,15 +20,23 @@ impl App {
             e.focus();
             return;
         }
+        self.hydrate_from_disk(id);
+        // Re-editing starts from the original capture plus the saved
+        // annotations (non-destructive); records without one (none today)
+        // edit their current image.
         let info = self.captures.borrow().get(&id).and_then(|r| {
             if r.video {
                 return None;
             }
             let name = r.file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            Some((r.image.clone()?, r.scale, name))
+            match &r.editable {
+                Some(ed) => Some((ed.original.clone(), ed.scale, ed.document.clone(), ed.beautify.clone(), name)),
+                None => Some((r.image.clone()?, r.scale, None, None, name)),
+            }
         });
-        let Some((image, scale, name)) = info else { return };
-        let editor = EditorWindow::show(self.mtm, id, image, scale, &name, self.sink.clone());
+        let Some((image, scale, document, beautify, name)) = info else { return };
+        let beautify = beautify.unwrap_or_else(|| self.settings.borrow().beautify.clone());
+        let editor = EditorWindow::show(self.mtm, id, image, scale, &name, beautify, document, self.sink.clone());
         self.editors.borrow_mut().insert(id, editor);
     }
 
@@ -48,9 +56,10 @@ impl App {
         }
     }
 
-    /// Replace the capture's image and rewrite its file in the background.
+    /// Replace the capture's image and rewrite its file (and its `.lumora`
+    /// document) in the background.
     fn write_annotated(self: &Rc<Self>, id: u64, img: EditorImage, notify: bool) {
-        let file = {
+        let (file, job) = {
             let mut caps = self.captures.borrow_mut();
             let Some(rec) = caps.get_mut(&id) else { return };
             let (pw, ph) = lumora_capture::image::pixel_size(&img.image);
@@ -58,12 +67,24 @@ impl App {
                 Rect { origin: rec.frame.origin, size: Size::new(pw as f64 / img.scale, ph as f64 / img.scale) };
             rec.image = Some(img.image.clone());
             rec.scale = img.scale;
-            rec.file.clone()
+            if let Some(ed) = rec.editable.as_mut() {
+                ed.document = Some(img.document);
+                ed.beautify = Some(img.beautify.clone());
+            }
+            (rec.file.clone(), self.doc_job(rec))
         };
+        if let Some(job) = job {
+            self.spawn_doc_write(job);
+        }
         let image = img.image;
         let scale = img.scale;
+        // The record keeps the plain annotated image (card, pin); re-editing
+        // starts from the original + document; only the file gets the
+        // beautified version, in the editor's style.
+        let style = img.beautify;
         DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
             move || {
+                let image = lumora_capture::beautify_render::beautify_for_export(image, &style, scale);
                 let result = lumora_capture::image::write_png(&image, &file, scale);
                 on_main(move |app| match result {
                     Ok(()) => {

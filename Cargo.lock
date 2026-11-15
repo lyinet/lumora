@@ -52,6 +52,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "itoa"
+version = "1.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
+
+[[package]]
 name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -65,7 +71,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "lumora"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "block2",
  "dispatch2",
@@ -83,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "lumora-capture"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "block2",
  "dispatch2",
@@ -106,16 +112,17 @@ dependencies = [
 
 [[package]]
 name = "lumora-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
+ "serde_json",
  "thiserror",
  "toml",
 ]
 
 [[package]]
 name = "lumora-ui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "block2",
  "dispatch2",
@@ -165,6 +172,7 @@ dependencies = [
  "objc2-core-video",
  "objc2-foundation",
  "objc2-quartz-core",
+ "objc2-uniform-type-identifiers",
 ]
 
 [[package]]
@@ -546,6 +554,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_json"
+version = "1.0.154"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
+dependencies = [
+ "itoa",
+ "memchr",
+ "serde",
+ "serde_core",
+ "zmij",
+]
+
+[[package]]
 name = "serde_spanned"
 version = "0.6.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -640,3 +661,9 @@ checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "zmij"
+version = "1.0.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"

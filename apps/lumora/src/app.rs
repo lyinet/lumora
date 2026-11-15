@@ -128,6 +128,44 @@ pub struct CaptureRecord {
     /// Whether `file` lives in the temp dir (Save moves it).
     pub temp: bool,
     pub video: bool,
+    /// What re-editing starts from (screenshots only).
+    pub editable: Option<Editable>,
+}
+
+/// The non-destructive state behind a screenshot: the original capture
+/// plus the annotations last saved on it. Re-editing starts from here, and
+/// the `.lumora` document next to the file is written from it.
+pub struct Editable {
+    /// The original capture (un-annotated, un-beautified).
+    pub original: CFRetained<CGImage>,
+    /// Pixels per point of `original`.
+    pub scale: f64,
+    /// `original` PNG-encoded, once known (kept byte-exact for documents
+    /// opened from disk).
+    pub png: Option<Arc<Vec<u8>>>,
+    /// Annotations last saved; `None` = none drawn yet.
+    pub document: Option<lumora_core::annotate::Document>,
+    /// Beautify style last saved with it; `None` = follow Settings.
+    pub beautify: Option<lumora_core::beautify::BeautifyStyle>,
+    /// Unix seconds when the capture was taken.
+    pub created_at: u64,
+    /// Opened from a `.lumora` file: keep that file updated regardless of
+    /// the "save editable document" setting.
+    pub from_file: bool,
+}
+
+impl Editable {
+    pub fn new(original: CFRetained<CGImage>, scale: f64) -> Self {
+        Editable {
+            original,
+            scale,
+            png: None,
+            document: None,
+            beautify: None,
+            created_at: crate::system::unix_now(),
+            from_file: false,
+        }
+    }
 }
 
 pub struct App {
@@ -256,6 +294,7 @@ impl App {
                 let folder = self.settings.borrow().save_folder(&self.home);
                 system::open_folder(&folder);
             }
+            Command::OpenDocument => self.open_document_panel(),
             Command::ShowSettings => self.show_settings(),
             Command::ShowOnboarding => self.show_onboarding(),
             Command::Quit => NSApplication::sharedApplication(self.mtm).terminate(None),
@@ -311,6 +350,7 @@ impl App {
             UiEvent::CountdownCancelled => self.cancel_recording_setup(),
             UiEvent::StopRecording => self.stop_recording(),
             UiEvent::SettingsChanged(s) => self.apply_settings(*s),
+            UiEvent::BeautifyChanged { from, style } => self.on_beautify_changed(from, *style),
             UiEvent::ShortcutRecording(on) => self.hotkeys.borrow_mut().suspend(on),
             UiEvent::Onboarding(action) => self.on_onboarding(action),
         }
@@ -321,7 +361,14 @@ impl App {
             CardAction::Copy => {
                 if let Some(rec) = self.captures.borrow().get(&id) {
                     match (&rec.image, rec.video) {
-                        (Some(img), false) => lumora_capture::clipboard::copy_image(img, rec.scale, Some(&rec.file)),
+                        (Some(img), false) => {
+                            // The record holds the plain capture; the file
+                            // (and so the clipboard) gets the beautified one.
+                            let style = self.settings.borrow().beautify.clone();
+                            let out =
+                                lumora_capture::beautify_render::beautify_for_export(img.clone(), &style, rec.scale);
+                            lumora_capture::clipboard::copy_image(&out, rec.scale, Some(&rec.file));
+                        }
                         _ => lumora_capture::clipboard::copy_file(&rec.file),
                     }
                 }
@@ -364,6 +411,10 @@ impl App {
             CardAction::Delete => {
                 if let Some(rec) = self.captures.borrow_mut().remove(&id) {
                     system::trash(&rec.file);
+                    let doc = lumora_core::lumora_doc::doc_path_for(&rec.file);
+                    if rec.editable.is_some() && doc.exists() {
+                        system::trash(&doc);
+                    }
                 }
                 self.quick.dismiss(id);
             }
@@ -411,10 +462,41 @@ impl App {
                 log::warn!("launch at login: {e}");
             }
         }
+        let beautify = s.beautify.clone();
         drop(s);
+        for editor in self.editors.borrow().values() {
+            editor.set_beautify(beautify.clone());
+        }
         self.apply_hotkeys();
         if language_changed {
             self.apply_language();
+        }
+    }
+
+    /// An editor's beautify panel changed the style: remember it (Settings,
+    /// saved to disk) and push it to the other editors and the Settings
+    /// window's snapshot.
+    fn on_beautify_changed(self: &Rc<Self>, from: u64, style: lumora_core::beautify::BeautifyStyle) {
+        let style = style.validated();
+        {
+            let mut s = self.settings.borrow_mut();
+            if s.beautify == style {
+                return;
+            }
+            s.beautify = style.clone();
+        }
+        if let Some(path) = &self.settings_path {
+            if let Err(e) = self.settings.borrow().save(path) {
+                log::error!("saving settings failed: {e}");
+            }
+        }
+        for (id, editor) in self.editors.borrow().iter() {
+            if *id != from {
+                editor.set_beautify(style.clone());
+            }
+        }
+        if let Some(w) = self.settings_window.borrow().as_ref() {
+            w.set_beautify(style);
         }
     }
 

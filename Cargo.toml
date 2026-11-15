@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/lumora-core", "crates/lumora-capture", "crates/lumora-ui", "apps/lumora"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.80"
 license = "MIT"
@@ -17,6 +17,7 @@ lumora-ui = { path = "crates/lumora-ui" }
 
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 thiserror = "2"
 log = "0.4"
 

@@ -1,19 +1,22 @@
 //! `NSApplicationDelegate` and menu action receiver.
 
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
-use objc2_app_kit::NSApplicationDelegate;
-use objc2_foundation::{NSNotification, NSObject};
+use objc2_app_kit::{NSApplication, NSApplicationDelegate};
+use objc2_foundation::{NSArray, NSNotification, NSObject, NSURL};
 
-use crate::app::{post_command, App};
+use crate::app::{on_main, post_command, App};
 use crate::command::Command;
 
 pub struct DelegateIvars {
     app: RefCell<Option<Rc<App>>>,
+    /// Documents Finder asked us to open before the app finished starting.
+    pending: RefCell<Vec<PathBuf>>,
 }
 
 define_class!(
@@ -30,6 +33,22 @@ define_class!(
         fn did_finish_launching(&self, _notification: &NSNotification) {
             let app = App::start(self.mtm(), self);
             *self.ivars().app.borrow_mut() = Some(app);
+            let pending = std::mem::take(&mut *self.ivars().pending.borrow_mut());
+            if !pending.is_empty() {
+                on_main(move |app| app.open_documents(pending));
+            }
+        }
+
+        /// Finder double-click / Open With on `.lumora` documents.
+        #[unsafe(method(application:openURLs:))]
+        fn open_urls(&self, _application: &NSApplication, urls: &NSArray<NSURL>) {
+            let paths: Vec<PathBuf> =
+                urls.iter().filter_map(|u| u.path()).map(|p| PathBuf::from(p.to_string())).collect();
+            if self.ivars().app.borrow().is_some() {
+                on_main(move |app| app.open_documents(paths));
+            } else {
+                self.ivars().pending.borrow_mut().extend(paths);
+            }
         }
 
         #[unsafe(method(applicationWillTerminate:))]
@@ -72,6 +91,11 @@ define_class!(
             post_command(Command::OpenFolder);
         }
 
+        #[unsafe(method(openLumoraDocument:))]
+        fn open_lumora_document(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::OpenDocument);
+        }
+
         #[unsafe(method(showSettings:))]
         fn show_settings(&self, _sender: Option<&AnyObject>) {
             post_command(Command::ShowSettings);
@@ -91,7 +115,8 @@ define_class!(
 
 impl AppDelegate {
     pub fn new(mtm: MainThreadMarker) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(DelegateIvars { app: RefCell::new(None) });
+        let this =
+            Self::alloc(mtm).set_ivars(DelegateIvars { app: RefCell::new(None), pending: RefCell::new(Vec::new()) });
         // SAFETY: NSObject's designated initialiser.
         unsafe { msg_send![super(this), init] }
     }

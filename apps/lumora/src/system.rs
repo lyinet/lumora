@@ -36,6 +36,11 @@ pub fn apply_language(pref: lumora_core::i18n::LanguagePref) -> lumora_core::i18
     lang
 }
 
+/// Seconds since the Unix epoch (UTC).
+pub fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
 pub fn home_dir() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/tmp"))
 }

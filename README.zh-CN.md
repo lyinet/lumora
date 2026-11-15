@@ -72,6 +72,8 @@
 - **键盘级精度** —— 不碰鼠标也能移动选区、锁定比例、逐点微调（见下文）。
 - **符合物理的动效** —— 每一次出现、吸附、微调和重排都是一个阻尼弹簧，被打断时会保留速度继续过渡。直接操作从不加动画，选区永远不会落后于你的指针。
 - **先快门，再飞入** —— 选区闪一下白光，截图随即缩小飞向卡片，同时卡片滑入。
+- **美化** —— 为截图加上渐变、纯色或图片背景，配合留白、圆角、柔和阴影、可选的 macOS 窗口边框和固定比例（16:9、1:1 等），在标注编辑器的 ✨ 面板中实时编辑。
+- **可再编辑的 `.lumora` 文档** —— 每张保存的截图旁都会有一个 `.lumora` 文件，保存原始截图、标注和美化样式；在访达中双击（或用“打开…”），每个箭头、文字和裁剪都仍可编辑。
 
 ## 快捷键
 
@@ -178,9 +180,9 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
 | Crate | 职责 |
 |---|---|
 | [`apps/lumora`](apps/lumora) | 可执行程序：`NSApplication`、状态栏图标、Carbon 全局快捷键、应用状态以及截图/录屏流程 |
-| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation：截图界面、快速访问、钉图、快门、倒计时、录屏控件、设置、引导 |
-| [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit、ImageIO、AVFoundation、剪贴板 |
-| [`lumora-core`](crates/lumora-core) | 纯 Rust：几何、弹簧、选区状态机、吸附、设置、文件名、快捷键解析、布局、录屏状态机 |
+| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation：截图界面、快速访问、钉图、快门、倒计时、录屏控件、设置、引导、标注编辑器 + 美化面板 |
+| [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit、ImageIO、AVFoundation、剪贴板、美化渲染 |
+| [`lumora-core`](crates/lumora-core) | 纯 Rust：几何、弹簧、选区状态机、吸附、设置、文件名、快捷键解析、布局、录屏状态机、美化模型、`.lumora` 文档格式 |
 
 深入了解：[ARCHITECTURE.md](ARCHITECTURE.md)（线程模型、数据流、坐标空间）· [DESIGN.md](DESIGN.md)（颜色、形状、字体与动效令牌）。
 
@@ -215,7 +217,7 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
 **v0.2 —— 标注**
 
 - [ ] 标注编辑器：箭头、形状、文字、荧光笔、模糊/马赛克、编号步骤、裁剪
-- [ ] 背景与留白预设（“美化”），带圆角和阴影
+- [x] 背景与留白预设（“美化”），带圆角和阴影 —— 已在 v0.3 发布，同时支持可再编辑的 `.lumora` 文档
 - [ ] 滚动截图、自拍定时、截取上一次区域
 - [ ] OCR —— 从任意区域拷贝文字
 

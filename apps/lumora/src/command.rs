@@ -15,6 +15,8 @@ pub enum Command {
     /// Start (choose area) or stop a recording.
     ToggleRecording,
     OpenFolder,
+    /// Choose `.lumora` documents to reopen in the editor.
+    OpenDocument,
     ShowSettings,
     ShowOnboarding,
     Quit,
