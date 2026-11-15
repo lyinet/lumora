@@ -351,6 +351,27 @@ impl Editor {
         }
     }
 
+    /// Smart redaction: cover each of `rects` (document points) with a
+    /// redaction in `mode`, all as one undo step. Returns how many were
+    /// added (with [`Effect::Redraw`] when any were).
+    pub fn add_redactions(&mut self, rects: &[Rect], mode: RedactMode) -> (usize, Effect) {
+        self.finish_gesture();
+        let canvas = self.doc.canvas();
+        let shapes: Vec<Shape> = rects
+            .iter()
+            .filter_map(|r| r.normalized().intersection(&canvas))
+            .filter(|r| r.width() >= 1.0 && r.height() >= 1.0)
+            .map(|rect| Shape::Redact { rect, mode })
+            .collect();
+        let ids = self.doc.add_many(shapes, self.style);
+        if ids.is_empty() {
+            (0, Effect::None)
+        } else {
+            self.selected = None;
+            (ids.len(), Effect::Redraw)
+        }
+    }
+
     pub fn delete_selected(&mut self) -> Effect {
         match self.selected.take() {
             Some(id) if self.doc.remove(id) => Effect::Redraw,
@@ -1106,5 +1127,25 @@ mod tests {
         }
         assert_eq!(Tool::from_key('z'), None);
         assert!(!Tool::Redact.uses_color() && Tool::Arrow.uses_color());
+    }
+
+    #[test]
+    fn smart_redactions_are_one_undo_step() {
+        let mut e = Editor::new(Size::new(200.0, 100.0));
+        let rects =
+            [Rect::new(10.0, 10.0, 30.0, 10.0), Rect::new(150.0, 80.0, 100.0, 50.0), Rect::new(0.0, 0.0, 0.5, 9.0)];
+        let (n, effect) = e.add_redactions(&rects, RedactMode::Blur);
+        assert_eq!((n, effect), (2, Effect::Redraw));
+        assert_eq!(e.document().items().len(), 2);
+        // Clipped to the canvas.
+        assert!(
+            matches!(e.document().items()[1].shape, Shape::Redact { rect, mode: RedactMode::Blur } if rect == Rect::new(150.0, 80.0, 50.0, 20.0))
+        );
+        assert_eq!(e.undo(), Effect::Redraw);
+        assert!(e.document().is_empty());
+        assert_eq!(e.redo(), Effect::Redraw);
+        assert_eq!(e.document().items().len(), 2);
+        assert_eq!(e.add_redactions(&[], RedactMode::Pixelate), (0, Effect::None));
+        assert_eq!(e.document().history().undo_len(), 1);
     }
 }

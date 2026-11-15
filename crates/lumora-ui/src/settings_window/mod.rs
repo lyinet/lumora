@@ -4,6 +4,7 @@
 //! [`UiEvent::SettingsChanged`]; the app persists and re-applies it.
 
 mod ai;
+mod redact;
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -857,6 +858,8 @@ fn build_capture(
     form.y -= 8.0;
     form.label_only(tr(Msg::TextRecognitionLabel));
     form.note_inline(tr(Msg::TextRecognitionNote));
+    form.y -= 10.0;
+    redact::build_redact(form, state, targets);
 }
 
 fn build_ai(

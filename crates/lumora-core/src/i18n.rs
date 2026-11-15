@@ -398,6 +398,29 @@ messages! {
     AiWriting => "Writing…", "正在生成…";
     AiCopied => "Copied to the clipboard", "已拷贝到剪贴板";
     AiStopped => "Stopped.", "已停止。";
+    ToolSmartRedact => "Smart Redact (⌘⇧R)", "智能打码（⌘⇧R）";
+    ToolSmartRedactBusy => "Finding sensitive info…", "正在查找敏感信息…";
+    ToastRedacted => "Redacted {0} items", "已打码 {0} 处";
+    ToastRedactedOne => "Redacted 1 item", "已打码 1 处";
+    ToastRedactUndo => "Press ⌘Z to undo", "按 ⌘Z 撤销";
+    ToastRedactNothing => "Nothing sensitive found", "未发现敏感信息";
+    ToastRedactNothingDetail => "Use the Pixelate / Blur tool to hide anything by hand.", "可用马赛克 / 模糊工具手动遮盖。";
+    ToastRedactFailed => "Smart redaction failed", "智能打码失败";
+    RedactAiFailed => "AI check failed; local results only.", "AI 检查失败，仅使用本地检测结果。";
+    ToastAutoRedacted => "Auto-redacted {0} items", "已自动打码 {0} 处";
+    RedactSectionLabel => "Smart redaction:", "智能打码：";
+    RedactEmail => "Email addresses", "邮箱地址";
+    RedactPhone => "Phone numbers", "电话号码";
+    RedactIdCard => "ID card numbers", "身份证号";
+    RedactBankCard => "Bank card numbers", "银行卡号";
+    RedactSecret => "API keys & tokens", "API 密钥与令牌";
+    RedactIp => "IP addresses", "IP 地址";
+    RedactUrlToken => "Tokens in links", "链接中的令牌";
+    RedactFaces => "Faces", "人脸";
+    RedactStyleLabel => "Redaction style:", "打码样式：";
+    RedactAiCheck => "Also check with AI (sends text only)", "同时用 AI 检查（仅发送文字）";
+    RedactAuto => "Redact new screenshots before copy / save", "复制 / 保存新截图前自动打码";
+    RedactNote => "Detection runs on this Mac. AI check needs AI Writing enabled.", "检测在本机完成；AI 检查需先启用 AI 写作。";
 }
 
 #[cfg(test)]

@@ -26,6 +26,7 @@ pub mod layout;
 pub mod lumora_doc;
 pub mod ocr;
 pub mod recording;
+pub mod redact;
 pub mod selection;
 pub mod settings;
 pub mod snap;

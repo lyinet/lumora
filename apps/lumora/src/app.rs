@@ -262,6 +262,12 @@ impl App {
         self.toasts.show(kind, tr(msg), detail.as_deref());
     }
 
+    /// A toast with a ready-made (formatted) title.
+    pub fn notify_text(&self, kind: ToastKind, title: &str, detail: Option<&str>) {
+        log::info!("toast: {title}");
+        self.toasts.show(kind, title, detail);
+    }
+
     pub fn shutdown(&self) {
         // Finalise an in-flight recording synchronously is not possible
         // here; dropping the recorder cancels it cleanly.

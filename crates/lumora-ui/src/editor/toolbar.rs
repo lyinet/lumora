@@ -50,6 +50,8 @@ pub enum ToolbarAction {
     Beautify,
     /// Open the AI writing menu.
     Ai,
+    /// Find and redact sensitive info (⌘⇧R).
+    SmartRedact,
 }
 
 pub type ToolbarHandler = Rc<dyn Fn(ToolbarAction)>;
@@ -97,6 +99,7 @@ pub struct Toolbar {
     redo: Retained<NSButton>,
     beautify: Retained<NSButton>,
     ai: Retained<NSButton>,
+    smart_redact: Retained<NSButton>,
     _drag: Retained<DragTile>,
     _targets: Vec<Retained<ActionTarget>>,
     active: Cell<Option<Tool>>,
@@ -401,6 +404,13 @@ impl Toolbar {
         }
         ai.setEnabled(false);
         ai.setToolTip(Some(&NSString::from_str(tr(Msg::AiMenuDisabledTip))));
+        let smart_redact = trailing("eye.slash.circle", Msg::ToolSmartRedact, ToolbarAction::SmartRedact, &mut targets);
+        if smart_redact.image().is_none() {
+            if let Some(img) = symbol("eye.slash", tr(Msg::ToolSmartRedact)) {
+                smart_redact.setImage(Some(&img));
+                smart_redact.setTitle(&NSString::new());
+            }
+        }
         right.set(right.get() - 8.0);
         let redo = trailing("arrow.uturn.forward", Msg::Redo, ToolbarAction::Redo, &mut targets);
         let undo = trailing("arrow.uturn.backward", Msg::Undo, ToolbarAction::Undo, &mut targets);
@@ -420,6 +430,7 @@ impl Toolbar {
             redo,
             beautify,
             ai,
+            smart_redact,
             _drag: drag,
             _targets: targets,
             active: Cell::new(None),
@@ -446,6 +457,14 @@ impl Toolbar {
         self.ai.setEnabled(enabled);
         let tip = tr(if enabled { Msg::AiMenuTip } else { Msg::AiMenuDisabledTip });
         self.ai.setToolTip(Some(&NSString::from_str(tip)));
+    }
+
+    /// Smart Redact button: disabled (with a "working" tooltip) while a
+    /// detection runs.
+    pub fn set_smart_redact_busy(&self, busy: bool) {
+        self.smart_redact.setEnabled(!busy);
+        let tip = tr(if busy { Msg::ToolSmartRedactBusy } else { Msg::ToolSmartRedact });
+        self.smart_redact.setToolTip(Some(&NSString::from_str(tip)));
     }
 
     /// The AI button (the menu pops up under it).

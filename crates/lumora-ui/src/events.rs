@@ -88,6 +88,26 @@ pub enum EditorAction {
     AiCancel(u64),
     /// "Open AI Settings" in the result sheet.
     OpenAiSettings,
+    /// Smart Redact: find sensitive info in the capture and answer with
+    /// `EditorWindow::smart_redact_finished` under `request.request`.
+    SmartRedact(Box<SmartRedactRequest>),
+}
+
+/// A smart-redaction request from the editor. The app runs OCR, face
+/// detection and (when enabled) the AI check off the main thread.
+pub struct SmartRedactRequest {
+    /// Per-editor request id; replies with another id are stale.
+    pub request: u64,
+    /// The unannotated capture (detection runs on this).
+    pub base: CFRetained<CGImage>,
+    /// Pixels per point of `base`.
+    pub scale: f64,
+}
+
+impl std::fmt::Debug for SmartRedactRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmartRedactRequest").field("request", &self.request).finish_non_exhaustive()
+    }
 }
 
 /// An AI writing request from the editor. The app reads the key, runs OCR

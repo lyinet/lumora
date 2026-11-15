@@ -16,6 +16,7 @@ use crate::ai::AiSettings;
 use crate::beautify::BeautifyStyle;
 use crate::hotkey::Hotkey;
 use crate::i18n::LanguagePref;
+use crate::redact::RedactSettings;
 
 /// Errors from loading or saving settings.
 #[derive(Debug, Error)]
@@ -39,6 +40,8 @@ pub struct Settings {
     pub beautify: BeautifyStyle,
     /// AI writing (v0.4). The API key is in the Keychain, never here.
     pub ai: AiSettings,
+    /// Smart redaction (v0.5). Missing in older files.
+    pub redact: RedactSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -328,6 +331,18 @@ mod tests {
         assert_eq!(s.recording.codec, Codec::Hevc);
         assert!(s.recording.show_cursor);
         assert_eq!(s.general, General::default());
+    }
+
+    #[test]
+    fn redact_section_defaults_for_old_files_and_round_trips() {
+        let old = Settings::from_toml("[general]\ncopy_to_clipboard = false\n").unwrap();
+        assert_eq!(old.redact, crate::redact::RedactSettings::default());
+        let mut s = Settings::default();
+        s.redact.ai_check = true;
+        s.redact.mode = crate::annotate::RedactMode::Blur;
+        let t = s.to_toml().unwrap();
+        assert!(t.contains("[redact]") && t.contains("mode = \"blur\""));
+        assert_eq!(Settings::from_toml(&t).unwrap(), s);
     }
 
     #[test]

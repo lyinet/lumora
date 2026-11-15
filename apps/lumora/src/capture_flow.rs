@@ -15,6 +15,7 @@ use lumora_capture::content::ShareableContent;
 use lumora_capture::image::StitchPart;
 use lumora_capture::screenshot::{self, Shot, ShotOptions, ShotTarget};
 use lumora_capture::CaptureError;
+use lumora_core::annotate::{Document, Shape, Style};
 use lumora_core::filename::{render, unique_path, CaptureKind};
 use lumora_core::geometry::{Rect, Size};
 use lumora_core::selection::Target;
@@ -23,6 +24,7 @@ use lumora_core::stitch::{self, Source};
 use lumora_ui::events::{FrozenDisplay, OverlayMode};
 use lumora_ui::overlay::{OverlayConfig, OverlayController};
 use lumora_ui::quick_access::CardContent;
+use lumora_ui::toast::ToastKind;
 use lumora_ui::{shutter, util};
 use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGImage;
@@ -204,11 +206,53 @@ impl App {
         });
     }
 
-    /// Common tail of every screenshot: name, shutter, Quick Access card,
-    /// background PNG encode, then clipboard.
+    /// Common tail of every screenshot. With "redact before copy / save"
+    /// on, local smart-redaction detectors run first (off the main thread;
+    /// never the AI check) and their redactions are applied as editable
+    /// annotations.
     pub fn finish_capture(self: &Rc<Self>, image: CFRetained<CGImage>, scale: f64, frame: Rect) {
+        let redact = self.settings.borrow().redact.clone();
+        if !redact.auto_redact {
+            return self.finish_capture_with(image, scale, frame, Vec::new());
+        }
+        background().exec_async(move || {
+            let rects = match crate::redact_flow::detect_sync(&image, scale, &redact, None) {
+                Ok(d) => d.rects,
+                Err(e) => {
+                    log::warn!("auto-redaction failed: {e}");
+                    Vec::new()
+                }
+            };
+            on_main(move |app| app.finish_capture_with(image, scale, frame, rects));
+        });
+    }
+
+    /// Name, shutter, Quick Access card, background PNG encode, then
+    /// clipboard. `redactions` (points) are flattened into what is shown,
+    /// saved and copied, and kept as annotations for re-editing.
+    fn finish_capture_with(
+        self: &Rc<Self>,
+        original: CFRetained<CGImage>,
+        scale: f64,
+        frame: Rect,
+        redactions: Vec<Rect>,
+    ) {
         let id = self.next_id();
         let s = self.settings.borrow().clone();
+        let mut document = None;
+        let mut image = original.clone();
+        if !redactions.is_empty() {
+            let (pw, ph) = lumora_capture::image::pixel_size(&original);
+            let mut doc = Document::new(Size::new(pw as f64 / scale, ph as f64 / scale));
+            let mode = s.redact.mode;
+            let shapes = redactions.iter().map(|&rect| Shape::Redact { rect, mode }).collect();
+            let n = doc.add_many(shapes, Style::default()).len();
+            if let Some(flat) = lumora_ui::editor::flatten_document(&original, scale, &doc) {
+                image = flat;
+                document = Some(doc);
+                self.notify_text(ToastKind::Success, &trf(Msg::ToastAutoRedacted, &[&n]), None);
+            }
+        }
         let stem = render(&s.general.filename_template, &system::now_parts(), CaptureKind::Screenshot);
         let (dir, temp) =
             if s.general.save_to_disk { (s.save_folder(&self.home), false) } else { (system::temp_dir(), true) };
@@ -244,7 +288,7 @@ impl App {
             file: file.clone(),
             temp,
             video: false,
-            editable: Some(Editable::new(image.clone(), scale)),
+            editable: Some(Editable { document, ..Editable::new(original, scale) }),
         };
         // The editable document keeps the original capture (not the
         // beautified export) plus the beautify style, when enabled.

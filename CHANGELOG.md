@@ -6,6 +6,25 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Smart Redaction (智能打码)** — the editor's new Smart Redact button
+  (<kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd>) finds personal and secret data and
+  covers every hit with a pixelate (or blur) redaction, all as one undo step,
+  with a "Redacted N items" toast. Local-first: detectors in `lumora-core`
+  run over the on-device Vision OCR boxes — emails, phone numbers (mainland
+  China mobiles with separators, international `+…`), Chinese resident ID
+  numbers (MOD 11-2 checksum), bank cards (Luhn + issuer prefix), API keys
+  and tokens (`sk-`, `ghp_`/`github_pat_`, `AKIA`, Slack `xox?-`, JWTs,
+  high-entropy hex/base64), IPv4 addresses and secrets in URL queries — and
+  matches are mapped back to sub-rectangles of the OCR boxes with CJK-aware
+  glyph widths. Faces come from Vision's face detector.
+- Settings → Capture → Smart redaction: per-category toggles, faces,
+  pixelate/blur, an optional **AI check** (off by default; sends the
+  recognised text lines only, never the image, and needs AI Writing on) and
+  **redact new screenshots before copy / save** (off by default; local
+  detectors only, redactions stay editable in the `.lumora` document).
+- `[redact]` settings section (older settings files load unchanged).
+
 ## [0.4.0] — 2026-11-16 (not yet hardware-tested)
 
 ### Added

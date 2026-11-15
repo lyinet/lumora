@@ -48,6 +48,7 @@ impl App {
             EditorAction::AiWrite(req) => self.on_ai_write(id, *req),
             EditorAction::AiCancel(request) => self.on_ai_cancel(id, request),
             EditorAction::OpenAiSettings => self.open_ai_settings(),
+            EditorAction::SmartRedact(req) => self.on_smart_redact(id, *req),
             EditorAction::Closed(img) => {
                 self.cancel_ai(id);
                 if let Some(img) = img {

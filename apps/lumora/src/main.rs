@@ -26,6 +26,8 @@ mod logger;
 #[cfg(target_os = "macos")]
 mod record_flow;
 #[cfg(target_os = "macos")]
+mod redact_flow;
+#[cfg(target_os = "macos")]
 mod status;
 #[cfg(target_os = "macos")]
 mod system;
