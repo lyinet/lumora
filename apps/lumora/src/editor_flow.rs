@@ -28,7 +28,8 @@ impl App {
             Some((r.image.clone()?, r.scale, name))
         });
         let Some((image, scale, name)) = info else { return };
-        let editor = EditorWindow::show(self.mtm, id, image, scale, &name, self.sink.clone());
+        let beautify = self.settings.borrow().beautify.clone();
+        let editor = EditorWindow::show(self.mtm, id, image, scale, &name, beautify, self.sink.clone());
         self.editors.borrow_mut().insert(id, editor);
     }
 
@@ -62,8 +63,12 @@ impl App {
         };
         let image = img.image;
         let scale = img.scale;
+        // The record keeps the plain annotated image (re-editing starts
+        // from it); only the file gets the beautified version.
+        let style = self.settings.borrow().beautify.clone();
         DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
             move || {
+                let image = lumora_capture::beautify_render::beautify_for_export(image, &style, scale);
                 let result = lumora_capture::image::write_png(&image, &file, scale);
                 on_main(move |app| match result {
                     Ok(()) => {

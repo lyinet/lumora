@@ -81,6 +81,8 @@ pub(crate) struct State {
     base: CFRetained<CGImage>,
     scale: f64,
     file_name: String,
+    /// Beautify style applied to ⌘C and drag-out exports (when enabled).
+    beautify: RefCell<lumora_core::beautify::BeautifyStyle>,
     window: Retained<NSWindow>,
     canvas: Retained<CanvasView>,
     toolbar: Toolbar,
@@ -114,14 +116,22 @@ impl std::fmt::Debug for EditorWindow {
 }
 
 impl EditorWindow {
+    /// Replace the beautify style used for ⌘C / drag-out exports.
+    pub fn set_beautify(&self, style: lumora_core::beautify::BeautifyStyle) {
+        *self.state.beautify.borrow_mut() = style;
+    }
+
     /// Open an editor for capture `id`. `image` is the capture at `scale`
-    /// pixels per point; `file_name` titles the window.
+    /// pixels per point; `file_name` titles the window. `beautify` is
+    /// applied to copied and dragged exports when its `enabled` is set (the
+    /// app applies it to ⌘S writes itself).
     pub fn show(
         mtm: MainThreadMarker,
         id: u64,
         image: CFRetained<CGImage>,
         scale: f64,
         file_name: &str,
+        beautify: lumora_core::beautify::BeautifyStyle,
         sink: EventSink,
     ) -> Self {
         let scale = scale.max(1.0);
@@ -230,6 +240,7 @@ impl EditorWindow {
                 base: image,
                 scale,
                 file_name: file_name.to_string(),
+                beautify: RefCell::new(beautify),
                 window: window.clone(),
                 canvas: canvas.clone(),
                 toolbar,
@@ -715,9 +726,18 @@ impl State {
         flatten(&self.base, self.scale, ed.document(), &mut self.redactions.borrow_mut())
     }
 
+    /// The flattened image with the beautify style applied (if enabled).
+    fn export_image(&self) -> Option<CFRetained<CGImage>> {
+        let image = self.flatten()?;
+        let style = self.beautify.borrow().clone();
+        Some(lumora_capture::beautify_render::beautify_for_export(image, &style, self.scale))
+    }
+
     fn copy(&self) {
         let Some(image) = self.flatten() else { return };
-        lumora_capture::clipboard::copy_image(&image, self.scale, None);
+        let style = self.beautify.borrow().clone();
+        let out = lumora_capture::beautify_render::beautify_for_export(image.clone(), &style, self.scale);
+        lumora_capture::clipboard::copy_image(&out, self.scale, None);
         (self.sink)(UiEvent::Editor {
             id: self.id,
             action: EditorAction::Copied(EditorImage { image, scale: self.scale }),
@@ -735,7 +755,7 @@ impl State {
 
     /// Flatten to a temp PNG for drag-and-drop.
     fn export_for_drag(&self) -> Option<(PathBuf, Retained<NSImage>)> {
-        let image = self.flatten()?;
+        let image = self.export_image()?;
         let stem = std::path::Path::new(&self.file_name)
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())

@@ -242,7 +242,11 @@ impl App {
         }
 
         let copy = s.general.copy_to_clipboard;
+        // The record, card and editor keep the plain capture; the saved file
+        // and the clipboard get the beautified one (when enabled).
+        let style = s.beautify;
         background().exec_async(move || {
+            let image = lumora_capture::beautify_render::beautify_for_export(image, &style, scale);
             let result = lumora_capture::image::write_png(&image, &file, scale);
             on_main(move |_app| match result {
                 Ok(()) => {

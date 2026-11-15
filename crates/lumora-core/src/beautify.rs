@@ -541,6 +541,66 @@ pub fn layout_at_scale(content: Size, style: &BeautifyStyle, scale: f64) -> Beau
     }
 }
 
+// ---------------------------------------------------------------------------
+// Rendering helpers (pure maths shared with the CoreGraphics renderer)
+// ---------------------------------------------------------------------------
+
+/// The rect that covers `bounds` with an image of `image` size while keeping
+/// its aspect ratio (CSS `background-size: cover`), centred. The result is
+/// at least as large as `bounds` on both axes; the overflow is meant to be
+/// clipped. Degenerate input (empty or non-finite) returns `bounds`.
+pub fn aspect_fill_rect(image: Size, bounds: Rect) -> Rect {
+    let ok = |v: f64| v.is_finite() && v > 0.0;
+    if !ok(image.width) || !ok(image.height) || !ok(bounds.width()) || !ok(bounds.height()) {
+        return bounds;
+    }
+    let k = (bounds.width() / image.width).max(bounds.height() / image.height);
+    let (w, h) = (image.width * k, image.height * k);
+    let c = bounds.mid();
+    Rect::new(c.x - w / 2.0, c.y - h / 2.0, w, h)
+}
+
+/// A y-down rect on a canvas `canvas_height` tall, in y-up (Core Graphics
+/// bitmap) coordinates. Its own inverse.
+pub fn rect_y_up(r: Rect, canvas_height: f64) -> Rect {
+    crate::geometry::flip_y(r, canvas_height)
+}
+
+/// Point version of [`rect_y_up`].
+pub fn point_y_up(p: Point, canvas_height: f64) -> Point {
+    crate::geometry::flip_point_y(p, canvas_height)
+}
+
+/// Arguments for `CGContextSetShadowWithColor` in a y-up bitmap context.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CgShadow {
+    /// Horizontal offset (always 0).
+    pub dx: f64,
+    /// Vertical offset, y-up: negative moves the shadow down. Shadow offsets
+    /// are in the context's base space and ignore the CTM.
+    pub dy: f64,
+    /// Blur radius in pixels.
+    pub blur: f64,
+    /// Opacity of the black shadow colour, `0..=1`.
+    pub alpha: f64,
+}
+
+impl Shadow {
+    /// The shadow to set on a y-up context drawing at `scale` pixels per
+    /// point, or `None` when it would be invisible. Validates its inputs.
+    pub fn cg_params(&self, scale: f64) -> Option<CgShadow> {
+        let k = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+        let d = Shadow::default();
+        let alpha = clamp_finite(self.opacity, 0.0, 1.0, d.opacity);
+        if !self.enabled || alpha <= 0.0 {
+            return None;
+        }
+        let blur = clamp_finite(self.radius, 0.0, MAX_SHADOW_RADIUS, d.radius) * k;
+        let off = clamp_finite(self.offset_y, -MAX_SHADOW_OFFSET, MAX_SHADOW_OFFSET, d.offset_y) * k;
+        Some(CgShadow { dx: 0.0, dy: -off, blur, alpha })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -786,5 +846,77 @@ mod tests {
         fn contains_content(&self, r: &Rect) -> bool {
             Rect::new(0.0, 0.0, self.width, self.height).contains_rect(r)
         }
+    }
+
+    #[test]
+    fn aspect_fill_covers_and_centres() {
+        let b = Rect::new(10.0, 20.0, 200.0, 100.0);
+        // Square image into a 2:1 box: scaled to 200×200, centred vertically.
+        let r = aspect_fill_rect(Size::new(50.0, 50.0), b);
+        assert_eq!(r, Rect::new(10.0, -30.0, 200.0, 200.0));
+        // Wide image into the box: height matches, width overflows.
+        let r = aspect_fill_rect(Size::new(400.0, 100.0), b);
+        assert_eq!(r, Rect::new(-90.0, 20.0, 400.0, 100.0));
+        assert!(r.width() >= b.width() && r.height() >= b.height());
+        assert_eq!(r.mid(), b.mid());
+        // Exact ratio: identical.
+        assert_eq!(aspect_fill_rect(Size::new(20.0, 10.0), b), b);
+    }
+
+    #[test]
+    fn aspect_fill_degenerate_returns_bounds() {
+        let b = Rect::new(0.0, 0.0, 100.0, 50.0);
+        assert_eq!(aspect_fill_rect(Size::new(0.0, 10.0), b), b);
+        assert_eq!(aspect_fill_rect(Size::new(f64::NAN, 10.0), b), b);
+        assert_eq!(
+            aspect_fill_rect(Size::new(10.0, 10.0), Rect::new(0.0, 0.0, 0.0, 5.0)),
+            Rect::new(0.0, 0.0, 0.0, 5.0)
+        );
+    }
+
+    #[test]
+    fn y_up_flip_round_trips() {
+        let r = Rect::new(5.0, 10.0, 30.0, 20.0);
+        let up = rect_y_up(r, 100.0);
+        assert_eq!(up, Rect::new(5.0, 70.0, 30.0, 20.0));
+        assert_eq!(rect_y_up(up, 100.0), r);
+        assert_eq!(point_y_up(Point::new(3.0, 0.0), 100.0), Point::new(3.0, 100.0));
+        // The chrome bar (top of frame, y-down) ends up at the frame's top in y-up.
+        let l = layout(Size::new(100.0, 50.0), &BeautifyStyle { chrome: WindowChrome::MacLight, ..flat(10.0) });
+        let h = l.canvas.height;
+        let bar = rect_y_up(l.chrome_bar.unwrap(), h);
+        let frame = rect_y_up(l.frame, h);
+        assert_eq!(bar.max_y(), frame.max_y());
+        assert_eq!(rect_y_up(l.content, h).min_y(), frame.min_y());
+    }
+
+    #[test]
+    fn gradient_endpoints_flip_with_canvas() {
+        // 180° runs top→bottom in y-down; in y-up the start is the larger y.
+        let rect = Rect::new(0.0, 0.0, 100.0, 100.0);
+        let (a, b) = gradient_endpoints(rect, 180.0);
+        let (a, b) = (point_y_up(a, 100.0), point_y_up(b, 100.0));
+        assert!(a.y > b.y);
+        assert!((a.y - 100.0).abs() < 1e-9 && b.y.abs() < 1e-9);
+    }
+
+    #[test]
+    fn cg_shadow_points_down_in_y_up_space() {
+        let s = Shadow { enabled: true, radius: 20.0, opacity: 0.5, offset_y: 10.0 };
+        let p = s.cg_params(2.0).unwrap();
+        assert_eq!(p, CgShadow { dx: 0.0, dy: -20.0, blur: 40.0, alpha: 0.5 });
+        let up = Shadow { offset_y: -4.0, ..s }.cg_params(1.0).unwrap();
+        assert_eq!(up.dy, 4.0);
+    }
+
+    #[test]
+    fn cg_shadow_invisible_or_invalid() {
+        let s = Shadow::default();
+        assert!(Shadow { enabled: false, ..s }.cg_params(1.0).is_none());
+        assert!(Shadow { opacity: 0.0, ..s }.cg_params(1.0).is_none());
+        let p = Shadow { radius: 1e9, offset_y: f64::NAN, opacity: 2.0, enabled: true }.cg_params(f64::NAN).unwrap();
+        assert_eq!(p.blur, MAX_SHADOW_RADIUS);
+        assert_eq!(p.dy, -Shadow::default().offset_y);
+        assert_eq!(p.alpha, 1.0);
     }
 }

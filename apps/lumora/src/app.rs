@@ -321,7 +321,14 @@ impl App {
             CardAction::Copy => {
                 if let Some(rec) = self.captures.borrow().get(&id) {
                     match (&rec.image, rec.video) {
-                        (Some(img), false) => lumora_capture::clipboard::copy_image(img, rec.scale, Some(&rec.file)),
+                        (Some(img), false) => {
+                            // The record holds the plain capture; the file
+                            // (and so the clipboard) gets the beautified one.
+                            let style = self.settings.borrow().beautify.clone();
+                            let out =
+                                lumora_capture::beautify_render::beautify_for_export(img.clone(), &style, rec.scale);
+                            lumora_capture::clipboard::copy_image(&out, rec.scale, Some(&rec.file));
+                        }
                         _ => lumora_capture::clipboard::copy_file(&rec.file),
                     }
                 }
