@@ -11,7 +11,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Error bodies larger than this are not read in full.
 const MAX_ERROR_BODY: u64 = 64 * 1024;
 
-fn agent(cfg: &AiSettings) -> ureq::Agent {
+pub(crate) fn agent(cfg: &AiSettings) -> ureq::Agent {
     let t = Duration::from_secs(u64::from(cfg.timeout_secs.max(1)));
     ureq::AgentBuilder::new()
         .timeout_connect(CONNECT_TIMEOUT)
@@ -21,7 +21,7 @@ fn agent(cfg: &AiSettings) -> ureq::Agent {
         .build()
 }
 
-fn with_auth(req: ureq::Request, key: Option<&str>) -> ureq::Request {
+pub(crate) fn with_auth(req: ureq::Request, key: Option<&str>) -> ureq::Request {
     match key.map(str::trim).filter(|k| !k.is_empty()) {
         Some(k) => req.set("Authorization", &format!("Bearer {k}")),
         None => req,
@@ -32,7 +32,7 @@ fn is_timeout(e: &std::io::Error) -> bool {
     matches!(e.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock)
 }
 
-fn io_error(e: std::io::Error) -> AiError {
+pub(crate) fn io_error(e: std::io::Error) -> AiError {
     if is_timeout(&e) {
         AiError::Timeout
     } else {
@@ -40,7 +40,7 @@ fn io_error(e: std::io::Error) -> AiError {
     }
 }
 
-fn map_error(e: ureq::Error) -> AiError {
+pub(crate) fn map_error(e: ureq::Error) -> AiError {
     match e {
         ureq::Error::Status(status, resp) => {
             let mut body = String::new();
@@ -173,7 +173,7 @@ pub fn test_connection(cfg: &AiSettings, key: Option<&str>) -> Result<Connection
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use lumora_core::ai::{build_request, AiContext, AiProvider, WritingTask};
     use lumora_core::i18n::Language;
@@ -183,7 +183,9 @@ mod tests {
 
     /// A one-shot HTTP server. Returns the base URL and a channel yielding
     /// the raw request it received. `respond` writes the response.
-    fn server(respond: impl FnOnce(&mut std::net::TcpStream) + Send + 'static) -> (String, mpsc::Receiver<String>) {
+    pub(crate) fn server(
+        respond: impl FnOnce(&mut std::net::TcpStream) + Send + 'static,
+    ) -> (String, mpsc::Receiver<String>) {
         let l = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = l.local_addr().unwrap();
         let (tx, rx) = mpsc::channel();

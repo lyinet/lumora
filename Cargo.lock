@@ -280,6 +280,8 @@ dependencies = [
  "log",
  "lumora-core",
  "security-framework",
+ "serde_json",
+ "thiserror",
  "ureq",
 ]
 
