@@ -80,6 +80,7 @@
 - **Screenshot → table / code** — rebuild a table from a screenshot on your Mac (rows and columns recovered from the text positions) and copy it as Markdown or CSV, or turn a screenshot of code back into code with its indentation restored. With AI Writing on, AI refines the on-device result; the editor's AI menu has Extract table and Extract code too.
 - **Click ripples** — while recording, every click draws a springy ring (blue for left, orange for right) that appears in the video, while the border, stop button and toasts stay out of it. Toggle it in Settings → Recording. Each click is also logged with its time, position and app to a `<movie>.events.json` file next to the video, ready for step-by-step tutorials.
 - **Recording → tutorial** — click **Make Tutorial** on a recording's Quick Access card (or **Make Tutorial from Recording…** in the menu bar) and Lumora turns the clicks into a step-by-step guide: a frame just after each click with a highlight ring, cropped around the pointer, titled from the text next to it (read on your Mac). With AI on, the steps are written by your provider from text only — app, window title and nearby words, never the frames. Edit or delete steps, then export Markdown, a single self-contained HTML page (light and dark), or copy Markdown.
+- **Subtitles, summary and chapters** — click **Subtitles** on a recording's Quick Access card (or **Transcribe Recording…** in the menu bar). Speech is recognised on your Mac with Apple Speech by default (strictly on-device unless you allow Apple's servers), or by your AI provider's Whisper-compatible endpoint (audio up to 25 MB). Choose the spoken language (Chinese, English or the app's language) and the audio source (microphone, system audio or both) in Settings → Recording. Lumora then writes a short summary and chapters — by AI when it's on (text only), otherwise locally from pauses and clicks. Edit the lines, then export SRT or WebVTT, or copy the chapters (YouTube-style) and the summary. Everything is kept in `<movie>.transcript.json` and reopens with your edits.
 - **Microphone recording on macOS 14+** — record your voice with the screen on macOS 14 as well as 15, from the system default or a microphone you pick in Settings → Recording. Lumora asks for microphone access the first time.
 
 ## Keyboard shortcuts
@@ -210,6 +211,7 @@ Everything below is written, type-checked and unit-tested, but **not yet run on 
 - [ ] Capture history window (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>)
 - [x] Click ripples, click-event log (`.events.json`) and microphone on macOS 14
 - [x] Recording → step-by-step tutorial (Markdown / HTML export, optional AI write-up)
+- [x] Subtitles, summary and chapters for recordings (on-device or cloud, SRT / VTT export)
 - [ ] Recording extras: keystroke HUD, GIF export + trim
 - [ ] Scrolling capture
 - [x] OCR actions (summarize, translate, checklist) and screenshot → table / code, local-first

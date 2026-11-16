@@ -101,6 +101,11 @@ define_class!(
             post_command(Command::MakeTutorial);
         }
 
+        #[unsafe(method(transcribeRecording:))]
+        fn transcribe_recording(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::Transcribe);
+        }
+
         #[unsafe(method(showSettings:))]
         fn show_settings(&self, _sender: Option<&AnyObject>) {
             post_command(Command::ShowSettings);

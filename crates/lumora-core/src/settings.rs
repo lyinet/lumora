@@ -42,6 +42,93 @@ pub struct Settings {
     pub ai: AiSettings,
     /// Smart redaction (v0.5). Missing in older files.
     pub redact: RedactSettings,
+    /// Subtitles / transcription (v0.5). Missing in older files.
+    pub transcribe: Transcribe,
+}
+
+/// Which recogniser turns a recording's speech into text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscribeEngine {
+    /// Apple Speech on this Mac (no upload).
+    #[default]
+    OnDevice,
+    /// The AI provider's OpenAI-compatible `/audio/transcriptions`.
+    Cloud,
+}
+
+/// Spoken language of recordings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum TranscribeLanguage {
+    /// The app's UI language.
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "zh-CN")]
+    ZhCn,
+    #[serde(rename = "en-US")]
+    EnUs,
+}
+
+impl TranscribeLanguage {
+    /// Resolved locale (`zh-CN` / `en-US`); `Auto` follows `ui`.
+    pub fn locale(self, ui: crate::i18n::Language) -> &'static str {
+        match self {
+            Self::ZhCn => "zh-CN",
+            Self::EnUs => "en-US",
+            Self::Auto => match ui {
+                crate::i18n::Language::ZhHans => "zh-CN",
+                crate::i18n::Language::En => "en-US",
+            },
+        }
+    }
+
+    /// ISO-639-1 hint for cloud engines (`zh` / `en`).
+    pub fn iso639(self, ui: crate::i18n::Language) -> &'static str {
+        if self.locale(ui).starts_with("zh") {
+            "zh"
+        } else {
+            "en"
+        }
+    }
+}
+
+/// Which audio of a recording to transcribe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TranscribeAudio {
+    Mic,
+    System,
+    #[default]
+    Mixed,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Transcribe {
+    pub engine: TranscribeEngine,
+    pub language: TranscribeLanguage,
+    pub audio_source: TranscribeAudio,
+    /// Model for the cloud engine.
+    pub cloud_model: String,
+    /// On-device engine: refuse (instead of using Apple's servers) when the
+    /// recogniser can't run locally for the language.
+    pub strict_on_device: bool,
+}
+
+/// Default cloud transcription model.
+pub const DEFAULT_CLOUD_MODEL: &str = "whisper-1";
+
+impl Default for Transcribe {
+    fn default() -> Self {
+        Transcribe {
+            engine: TranscribeEngine::OnDevice,
+            language: TranscribeLanguage::Auto,
+            audio_source: TranscribeAudio::Mixed,
+            cloud_model: DEFAULT_CLOUD_MODEL.to_string(),
+            strict_on_device: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -289,6 +376,11 @@ impl Settings {
         }
         self.beautify.validate();
         self.ai.validate();
+        let t = &mut self.transcribe;
+        t.cloud_model = t.cloud_model.trim().to_string();
+        if t.cloud_model.is_empty() {
+            t.cloud_model = DEFAULT_CLOUD_MODEL.to_string();
+        }
     }
 
     /// Whether fresh captures also get a `.lumora` document: only when they
@@ -321,6 +413,37 @@ impl Recording {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transcribe_section_defaults_for_old_files_and_round_trips() {
+        let old = Settings::from_toml("[recording]\nfps = 30\n").unwrap();
+        assert_eq!(old.transcribe, Transcribe::default());
+        assert_eq!(old.transcribe.engine, TranscribeEngine::OnDevice);
+        assert_eq!(old.transcribe.audio_source, TranscribeAudio::Mixed);
+        assert!(old.transcribe.strict_on_device);
+        assert_eq!(old.transcribe.cloud_model, "whisper-1");
+        let mut s = Settings::default();
+        s.transcribe.engine = TranscribeEngine::Cloud;
+        s.transcribe.language = TranscribeLanguage::ZhCn;
+        s.transcribe.audio_source = TranscribeAudio::Mic;
+        s.transcribe.strict_on_device = false;
+        let t = s.to_toml().unwrap();
+        assert!(t.contains("[transcribe]") && t.contains("engine = \"cloud\"") && t.contains("language = \"zh-CN\""));
+        assert_eq!(Settings::from_toml(&t).unwrap(), s);
+        let blank = Settings::from_toml("[transcribe]\ncloud_model = \"  \"\nlanguage = \"en-US\"\n").unwrap();
+        assert_eq!(blank.transcribe.cloud_model, "whisper-1");
+        assert_eq!(blank.transcribe.language, TranscribeLanguage::EnUs);
+    }
+
+    #[test]
+    fn transcribe_language_resolves_auto_from_ui() {
+        use crate::i18n::Language;
+        assert_eq!(TranscribeLanguage::Auto.locale(Language::ZhHans), "zh-CN");
+        assert_eq!(TranscribeLanguage::Auto.locale(Language::En), "en-US");
+        assert_eq!(TranscribeLanguage::ZhCn.locale(Language::En), "zh-CN");
+        assert_eq!(TranscribeLanguage::EnUs.iso639(Language::ZhHans), "en");
+        assert_eq!(TranscribeLanguage::Auto.iso639(Language::ZhHans), "zh");
+    }
 
     #[test]
     fn defaults_round_trip() {

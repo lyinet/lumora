@@ -41,6 +41,9 @@ extern "C" {}
 pub const CHUNK_THRESHOLD_SECS: f64 = 55.0;
 /// Chunk length (seconds) for long audio.
 pub const CHUNK_SECS: f64 = 50.0;
+/// Start of the [`CaptureError::SpeechUnavailable`] message when strict
+/// on-device mode refuses a recognizer that would use Apple's servers.
+pub const STRICT_UNAVAILABLE: &str = "on-device recognition is not supported";
 /// How often a blocked wait checks the cancel flag.
 const POLL: Duration = Duration::from_millis(150);
 
@@ -359,7 +362,16 @@ fn map_speech_error(domain: &str, code: isize, msg: String) -> Result<Vec<Word>,
 /// into [`CHUNK_SECS`] pieces and times are offset back. Returns grouped,
 /// un-normalised segments (see [`crate::words::group_words`]). Blocks;
 /// setting `cancel` stops it with [`CaptureError::Cancelled`].
-pub fn transcribe_on_device(audio: &Path, locale: &str, cancel: Arc<AtomicBool>) -> Result<Vec<Segment>, CaptureError> {
+///
+/// With `strict`, a recognizer that can't run on this Mac for `locale`
+/// fails with [`CaptureError::SpeechUnavailable`] instead of falling back to
+/// Apple's servers (the message suggests the Cloud engine).
+pub fn transcribe_on_device(
+    audio: &Path,
+    locale: &str,
+    strict: bool,
+    cancel: Arc<AtomicBool>,
+) -> Result<Vec<Segment>, CaptureError> {
     match speech_authorization() {
         SpeechAuthorization::Authorized => {}
         SpeechAuthorization::NotDetermined | SpeechAuthorization::Denied => return Err(CaptureError::SpeechDenied),
@@ -387,6 +399,11 @@ pub fn transcribe_on_device(audio: &Path, locale: &str, cancel: Arc<AtomicBool>)
         (recognizer, on_device)
     };
     if !on_device {
+        if strict {
+            return Err(CaptureError::SpeechUnavailable(format!(
+                "{STRICT_UNAVAILABLE} for “{locale}” on this Mac; use the Cloud engine instead"
+            )));
+        }
         log::warn!("speech: on-device recognition not supported for {locale}; Apple servers will be used");
     }
 

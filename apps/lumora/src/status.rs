@@ -25,6 +25,9 @@ pub struct StatusBar {
     /// Items re-titled when the language changes.
     fixed_items: Vec<(Msg, Retained<NSMenuItem>)>,
     recording: std::cell::Cell<bool>,
+    /// "Transcribe Recording…", or "Cancel Transcription" while one runs.
+    transcribe_item: Retained<NSMenuItem>,
+    transcribing: std::cell::Cell<bool>,
     idle_icon: Retained<NSImage>,
     rec_icon: Retained<NSImage>,
 }
@@ -110,6 +113,8 @@ impl StatusBar {
         menu.addItem(&open_doc);
         let tutorial_item = menu_item(mtm, tr(Msg::MakeTutorialMenu), sel!(makeTutorial:), target);
         menu.addItem(&tutorial_item);
+        let transcribe_item = menu_item(mtm, tr(Msg::TranscribeMenu), sel!(transcribeRecording:), target);
+        menu.addItem(&transcribe_item);
         menu.addItem(&NSMenuItem::separatorItem(mtm));
         let settings_item = menu_item(mtm, tr(Msg::SettingsMenu), sel!(showSettings:), target);
         settings_item.setKeyEquivalent(&NSString::from_str(","));
@@ -136,6 +141,8 @@ impl StatusBar {
                 (Msg::QuitLumora, quit),
             ],
             recording: std::cell::Cell::new(false),
+            transcribe_item,
+            transcribing: std::cell::Cell::new(false),
             idle_icon,
             rec_icon,
         };
@@ -153,6 +160,15 @@ impl StatusBar {
         }
         let rec = if self.recording.get() { tr(Msg::StopRecording) } else { tr(Msg::RecordScreen) };
         self.record_item.setTitle(&NSString::from_str(rec));
+        self.set_transcribing(self.transcribing.get());
+    }
+
+    /// Switch the transcribe item between "Transcribe Recording…" and
+    /// "Cancel Transcription".
+    pub fn set_transcribing(&self, on: bool) {
+        self.transcribing.set(on);
+        let title = if on { tr(Msg::CancelTranscribeMenu) } else { tr(Msg::TranscribeMenu) };
+        self.transcribe_item.setTitle(&NSString::from_str(title));
     }
 
     pub fn update_shortcuts(&self, settings: &Settings) {

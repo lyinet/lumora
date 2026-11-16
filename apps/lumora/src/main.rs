@@ -34,6 +34,8 @@ mod system;
 #[cfg(target_os = "macos")]
 mod text_flow;
 #[cfg(target_os = "macos")]
+mod transcribe_flow;
+#[cfg(target_os = "macos")]
 mod tutorial_flow;
 
 #[cfg(target_os = "macos")]

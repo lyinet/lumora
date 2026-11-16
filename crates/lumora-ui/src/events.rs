@@ -52,6 +52,20 @@ pub enum CardAction {
     DraggedOut,
     /// "Make Tutorial" (recordings with a click log).
     Tutorial,
+    /// "Subtitles" (recordings): transcribe, or reopen the transcript.
+    Subtitles,
+}
+
+/// What the transcript window tells the app. Each carries the transcript
+/// with the window's current edits.
+#[derive(Debug)]
+pub enum TranscriptAction {
+    ExportSrt(Box<lumora_core::transcript::Transcript>),
+    ExportVtt(Box<lumora_core::transcript::Transcript>),
+    CopyChapters(Box<lumora_core::transcript::Transcript>),
+    CopySummary(Box<lumora_core::transcript::Transcript>),
+    /// The window closed (the app saves `.transcript.json` and drops it).
+    Closed(Box<lumora_core::transcript::Transcript>),
 }
 
 /// What the tutorial window tells the app. Each carries the tutorial with
@@ -233,6 +247,11 @@ pub enum UiEvent {
     Tutorial {
         id: u64,
         action: TutorialAction,
+    },
+    /// A transcript window (`id` from `TranscriptWindow::show`).
+    Transcript {
+        id: u64,
+        action: TranscriptAction,
     },
     /// The AI tab needs the stored API key for `provider`; the app reads
     /// the Keychain and answers with `SettingsWindow::set_ai_key`.

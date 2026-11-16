@@ -558,6 +558,10 @@ fn build_buttons(
         let at = actions.len() - 1; // before Delete
         actions.insert(at, ("list.number", tr(Msg::MakeTutorial), CardAction::Tutorial));
     }
+    if is_video {
+        let at = actions.len() - 1; // before Delete, after Tutorial
+        actions.insert(at, ("captions.bubble", tr(Msg::MakeSubtitles), CardAction::Subtitles));
+    }
     let b = size::CARD_BUTTON;
     let gap = 6.0;
     let total = actions.len() as f64 * b + (actions.len() as f64 - 1.0) * gap;

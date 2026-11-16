@@ -19,9 +19,9 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
 use objc2::{define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSBackingStoreType, NSButton, NSControlStateValueOff, NSControlStateValueOn, NSEvent,
-    NSEventModifierFlags, NSFont, NSOpenPanel, NSPopUpButton, NSResponder, NSTabView, NSTabViewDelegate, NSTabViewItem,
-    NSTextAlignment, NSTextField, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
+    NSApplication, NSBackingStoreType, NSBox, NSBoxType, NSButton, NSControlStateValueOff, NSControlStateValueOn,
+    NSEvent, NSEventModifierFlags, NSFont, NSOpenPanel, NSPopUpButton, NSResponder, NSTabView, NSTabViewDelegate,
+    NSTabViewItem, NSTextAlignment, NSTextField, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSNotification, NSObject, NSString};
@@ -971,6 +971,105 @@ fn build_recording(
         |s| s.recording.show_clicks,
         |s, v| s.recording.show_clicks = v,
     );
+    build_subtitles(form, state, targets);
+}
+
+/// Subtitles (v0.5): engine, spoken language, audio source, cloud model and
+/// strict on-device mode, under the recording options.
+fn build_subtitles(form: &mut Form<'_>, state: &Rc<State>, targets: &mut Vec<Retained<ActionTarget>>) {
+    use lumora_core::settings::{TranscribeAudio, TranscribeEngine, TranscribeLanguage};
+    form.y -= 10.0;
+    form.view.addSubview(&separator_line(form.mtm, form.y + 4.0));
+    popup(
+        form,
+        targets,
+        state,
+        tr(Msg::TranscribeEngineLabel),
+        &[tr(Msg::TranscribeOnDevice), tr(Msg::TranscribeCloud)],
+        |s| usize::from(s.transcribe.engine == TranscribeEngine::Cloud),
+        |s, i| s.transcribe.engine = if i == 1 { TranscribeEngine::Cloud } else { TranscribeEngine::OnDevice },
+    );
+    popup(
+        form,
+        targets,
+        state,
+        tr(Msg::TranscribeLanguageLabel),
+        &[tr(Msg::TranscribeLanguageAuto), tr(Msg::TranscribeLanguageZh), tr(Msg::TranscribeLanguageEn)],
+        |s| match s.transcribe.language {
+            TranscribeLanguage::Auto => 0,
+            TranscribeLanguage::ZhCn => 1,
+            TranscribeLanguage::EnUs => 2,
+        },
+        |s, i| {
+            s.transcribe.language = match i {
+                1 => TranscribeLanguage::ZhCn,
+                2 => TranscribeLanguage::EnUs,
+                _ => TranscribeLanguage::Auto,
+            }
+        },
+    );
+    popup(
+        form,
+        targets,
+        state,
+        tr(Msg::TranscribeAudioLabel),
+        &[tr(Msg::TranscribeAudioMixed), tr(Msg::TranscribeAudioMic), tr(Msg::TranscribeAudioSystem)],
+        |s| match s.transcribe.audio_source {
+            TranscribeAudio::Mixed => 0,
+            TranscribeAudio::Mic => 1,
+            TranscribeAudio::System => 2,
+        },
+        |s, i| {
+            s.transcribe.audio_source = match i {
+                1 => TranscribeAudio::Mic,
+                2 => TranscribeAudio::System,
+                _ => TranscribeAudio::Mixed,
+            }
+        },
+    );
+    checkbox(
+        form,
+        targets,
+        state,
+        "",
+        tr(Msg::TranscribeStrict),
+        |s| s.transcribe.strict_on_device,
+        |s, v| s.transcribe.strict_on_device = v,
+    );
+
+    // Cloud model: a short text field, committed on Return / end editing.
+    let current = state.settings.borrow().transcribe.cloud_model.clone();
+    let field = NSTextField::textFieldWithString(&NSString::from_str(&current), form.mtm);
+    field.setFrame(cg_rect(Rect::new(0.0, 0.0, 160.0, 22.0)));
+    if let Some(cell) = field.cell() {
+        // SAFETY: NSCell responds to setSendsActionOnEndEditing:.
+        let _: () = unsafe { objc2::msg_send![&*cell, setSendsActionOnEndEditing: true] };
+    }
+    let st = state.clone();
+    let t = ActionTarget::new(form.mtm, move |sender: &AnyObject| {
+        let Some(tf) = sender.downcast_ref::<NSTextField>() else { return };
+        let mut v = tf.stringValue().to_string().trim().to_string();
+        if v.is_empty() {
+            v = lumora_core::settings::DEFAULT_CLOUD_MODEL.to_string();
+            tf.setStringValue(&NSString::from_str(&v));
+        }
+        if st.settings.borrow().transcribe.cloud_model != v {
+            st.update(|s| s.transcribe.cloud_model = v);
+        }
+    });
+    // SAFETY: target kept alive by the window controller.
+    unsafe {
+        field.setTarget(Some(&t));
+        field.setAction(Some(ActionTarget::action()));
+    }
+    form.add(tr(Msg::TranscribeCloudModel), &field, ROW_H);
+    targets.push(t);
+}
+
+fn separator_line(mtm: MainThreadMarker, y: f64) -> Retained<NSBox> {
+    let line = NSBox::initWithFrame(NSBox::alloc(mtm), cg_rect(Rect::new(LABEL_X, y, CONTENT_W - 2.0 * LABEL_X, 1.0)));
+    line.setBoxType(NSBoxType::Separator);
+    line
 }
 
 /// Microphone device picker: "System default" + connected devices. A saved

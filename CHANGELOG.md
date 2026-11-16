@@ -11,6 +11,7 @@ All notable changes to Lumora are documented here. The format follows
 - Transcript chapters and summary (AI with local fallback).
 - Cloud transcription via OpenAI-compatible /audio/transcriptions (25 MB limit).
 - On-device transcription with Apple Speech; speech permission string.
+- Subtitles UI: "Subtitles" on a recording's Quick Access card and "Transcribe Recording…" in the menu bar (becomes "Cancel Transcription" while running; an existing `.transcript.json` reopens); Settings → Recording rows for engine (on-device / cloud), spoken language, audio source, cloud model and strict on-device mode (`[transcribe]` settings section); progress toasts, localised speech errors; a transcript window (Esc / ⌘W) with editable lines, summary and chapters, Export SRT / VTT, Copy Chapters, Copy Summary; edits saved back on close.
 - **Recording → step-by-step tutorial** — "Make Tutorial" on a recording's
   Quick Access card (shown when it has a click log) and "Make Tutorial from
   Recording…" in the menu bar (open panel for `.mp4` / `.mov`; a recording
