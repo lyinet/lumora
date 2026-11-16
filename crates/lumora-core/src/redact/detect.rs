@@ -216,6 +216,141 @@ fn card_prefix_ok(d: &str) -> bool {
     }
 }
 
+/// Exact issuer prefix + length of a real card network, for ungrouped digit
+/// runs (where grouping gives no evidence). Visa, Mastercard, Amex, Diners,
+/// Discover, JCB and UnionPay.
+fn card_network_ok(d: &str) -> bool {
+    let n = d.len();
+    let p = |k: usize| d.get(..k).and_then(|p| p.parse::<u32>().ok()).unwrap_or(0);
+    let long = (16..=19).contains(&n);
+    match () {
+        _ if d.starts_with('4') => matches!(n, 13 | 16 | 19),
+        _ if (51..=55).contains(&p(2)) || (2221..=2720).contains(&p(4)) => n == 16,
+        _ if matches!(p(2), 34 | 37) => n == 15,
+        _ if (300..=305).contains(&p(3)) || matches!(p(2), 36 | 38 | 39) => (14..=19).contains(&n),
+        _ if p(4) == 6011 || (644..=649).contains(&p(3)) || p(2) == 65 => long,
+        _ if (3528..=3589).contains(&p(4)) => long,
+        _ if matches!(p(2), 62 | 81) => long,
+        _ => false,
+    }
+}
+
+/// Words that mark a following number as a card (case-insensitive).
+const CARD_KEYWORDS: &[&str] = &[
+    "card no",
+    "card",
+    "cc#",
+    "卡号",
+    "银行卡",
+    "信用卡",
+    "借记卡",
+    "储蓄卡",
+    "visa",
+    "master",
+    "amex",
+    "unionpay",
+    "银联",
+    "账号",
+];
+
+/// Words that mark a following number as an order / waybill / transaction id.
+const VETO_KEYWORDS: &[&str] = &[
+    "订单",
+    "单号",
+    "运单",
+    "快递",
+    "物流",
+    "流水",
+    "交易号",
+    "编号",
+    "发票",
+    "order",
+    "tracking",
+    "invoice",
+    "txn",
+    "transaction",
+    "ref",
+    "serial",
+    "s/n",
+];
+
+/// How far before a digit run (in chars, same line) a keyword may sit.
+const CARD_CONTEXT_CHARS: usize = 16;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CardContext {
+    None,
+    Card,
+    Veto,
+}
+
+/// The keyword nearest before `start` (within [`CARD_CONTEXT_CHARS`], same
+/// line) decides: a card word, a veto word, or neither. ASCII keywords must
+/// stand as words (`ref` doesn't fire inside "preferred").
+fn card_context(s: &[char], start: usize) -> CardContext {
+    let mut from = start.saturating_sub(CARD_CONTEXT_CHARS);
+    if let Some(nl) = s[from..start].iter().rposition(|&c| c == '\n' || c == '\r') {
+        from += nl + 1;
+    }
+    let window: Vec<char> = s[from..start].iter().flat_map(|c| c.to_lowercase()).collect();
+    let is_word = |c: Option<&char>| c.is_some_and(|c| c.is_ascii_alphanumeric());
+    // Latest end position of any match of `kws` in the window.
+    let last = |kws: &[&str]| -> Option<usize> {
+        let mut best = None;
+        for kw in kws {
+            let k: Vec<char> = kw.chars().collect();
+            let ascii = kw.is_ascii();
+            for i in (0..window.len()).rev() {
+                let end = i + k.len();
+                if end > window.len() || window[i..end] != k[..] {
+                    continue;
+                }
+                if ascii
+                    && (is_word(i.checked_sub(1).and_then(|j| window.get(j)))
+                        || window.get(end).is_some_and(|c| c.is_ascii_alphabetic()))
+                {
+                    continue;
+                }
+                best = best.max(Some(end));
+                break;
+            }
+        }
+        best
+    };
+    match (last(CARD_KEYWORDS), last(VETO_KEYWORDS)) {
+        (None, None) => CardContext::None,
+        (Some(_), None) => CardContext::Card,
+        (None, Some(_)) => CardContext::Veto,
+        (Some(c), Some(v)) => {
+            if c > v {
+                CardContext::Card
+            } else {
+                CardContext::Veto
+            }
+        }
+    }
+}
+
+/// Bank card rule. Grouped runs (4-4-4-4, 4-6-5…) are strong evidence on
+/// their own; an ungrouped 13–19 digit run is far more often an order or
+/// transaction number, so it also needs an exact network prefix + length and
+/// a card keyword just before it. A nearby order/waybill/txn word vetoes both.
+fn is_bank_card(s: &[char], run: &NumberRun) -> bool {
+    let d = run.digits.as_str();
+    if !(13..=19).contains(&d.len()) || !luhn_valid(d) || !card_groups_ok(&run.groups) {
+        return false;
+    }
+    let ctx = card_context(s, run.range.start);
+    if ctx == CardContext::Veto {
+        return false;
+    }
+    if run.groups.len() > 1 {
+        card_prefix_ok(d)
+    } else {
+        card_network_ok(d) && ctx == CardContext::Card
+    }
+}
+
 fn card_groups_ok(groups: &[usize]) -> bool {
     match groups.len() {
         1 => true,
@@ -239,7 +374,7 @@ fn numbers(s: &[char]) -> Vec<Hit> {
             || (n == 13 && d.starts_with("86") && is_cn_mobile(&d[2..]))
         {
             Some(Category::Phone)
-        } else if (13..=19).contains(&n) && luhn_valid(d) && card_prefix_ok(d) && card_groups_ok(&run.groups) {
+        } else if is_bank_card(s, &run) {
             Some(Category::BankCard)
         } else {
             None
@@ -533,6 +668,61 @@ mod tests {
         one("Amex 3782 822463 10005", Category::BankCard, "3782 822463 10005");
         // Luhn-valid but a timestamp (prefix 2024) / wrong grouping.
         assert!(cats("ts 20240115123045 order 4111 11 1111 1111 1111").is_empty());
+    }
+
+    /// Append the Luhn check digit to `body`.
+    fn with_check(body: &str) -> String {
+        (0..10).map(|c| format!("{body}{c}")).find(|d| luhn_valid(d)).unwrap()
+    }
+
+    #[test]
+    fn ungrouped_cards_need_a_network_and_a_keyword() {
+        // Order number vs card keyword, same Luhn-valid Visa number.
+        assert!(cats("订单号 4532015112830366").is_empty());
+        one("卡号 4532015112830366", Category::BankCard, "4532015112830366");
+        // Grouped: no keyword needed.
+        one("4532 0151 1283 0366", Category::BankCard, "4532 0151 1283 0366");
+        // Ungrouped with no keyword at all: not flagged.
+        assert!(cats("4532015112830366").is_empty());
+        // 19 digits, prefix 33 matches no network, even with a keyword.
+        let n33 = with_check("330123456789012345");
+        assert!(luhn_valid(&n33) && n33.len() == 19);
+        assert!(cats(&n33).is_empty());
+        assert!(cats(&format!("卡号 {n33}")).is_empty());
+        // Wrong length for the network (Visa 15, Amex 16).
+        let visa15 = with_check("45320151128303");
+        assert!(cats(&format!("card {visa15}")).is_empty());
+        let amex16 = with_check("378282246310005");
+        assert!(cats(&format!("Amex {amex16}")).is_empty());
+        // Keyword-backed networks.
+        one("Amex 378282246310005", Category::BankCard, "378282246310005");
+        one("Card No: 5555555555554444", Category::BankCard, "5555555555554444");
+        let up = with_check("621700123456789012");
+        one(&format!("银联卡号：{up}"), Category::BankCard, &up);
+        one(&format!("信用卡 {}", with_check("356600202036050")), Category::BankCard, &with_check("356600202036050"));
+    }
+
+    #[test]
+    fn card_veto_words_and_keyword_distance() {
+        for t in [
+            "Order #4532015112830366",
+            "Tracking: 4532015112830366",
+            "交易流水 6217001234567890128",
+            "运单号:4532015112830366",
+            "Ref 4532 0151 1283 0366",
+            "txn 4532 0151 1283 0366",
+            // Card word first, veto word nearer wins.
+            "银行卡交易流水 4532015112830366",
+        ] {
+            assert!(cats(t).is_empty(), "{t}: {:?}", cats(t));
+        }
+        // Nearest keyword is the card word.
+        one("order paid by card 4532015112830366", Category::BankCard, "4532015112830366");
+        // "ref" inside a word is not a veto.
+        one("preferred card 4532015112830366", Category::BankCard, "4532015112830366");
+        // Keyword too far back (> 16 chars) or on another line.
+        assert!(cats("card ............................ 4532015112830366").is_empty());
+        assert!(cats("卡号\n4532015112830366").is_empty());
     }
 
     #[test]
