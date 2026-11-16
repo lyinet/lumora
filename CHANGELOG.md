@@ -7,6 +7,7 @@ All notable changes to Lumora are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Transcript core: SRT/WebVTT export with CJK-aware line wrapping.
 - **Recording → step-by-step tutorial** — "Make Tutorial" on a recording's
   Quick Access card (shown when it has a click log) and "Make Tutorial from
   Recording…" in the menu bar (open panel for `.mp4` / `.mov`; a recording

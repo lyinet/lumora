@@ -34,6 +34,7 @@ pub mod settings;
 pub mod snap;
 pub mod spring;
 pub mod stitch;
+pub mod transcript;
 pub mod tutorial;
 
 pub use action::Action;
