@@ -52,6 +52,10 @@ impl Rgba {
     /// Parse `#RRGGBBAA`, `#RRGGBB` or `#RGB` (leading `#` optional).
     pub fn from_hex(s: &str) -> Option<Rgba> {
         let t = s.trim().trim_start_matches('#');
+        // Byte-indexed slicing below; non-ASCII input would panic.
+        if !t.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
         if t.len() == 8 {
             let rgb = Rgb8::from_hex(&t[..6])?;
             let a = u8::from_str_radix(&t[6..], 16).ok()?;
@@ -763,6 +767,16 @@ mod tests {
     use super::*;
     use crate::i18n::Language;
     use std::collections::HashSet;
+
+    #[test]
+    fn rgba_hex_rejects_non_ascii_without_panicking() {
+        for bad in ["aé123", "é1", "#ééé12", "aé12345", "#0A84FFé", "+0A84FFF"] {
+            assert_eq!(Rgba::from_hex(bad), None, "{bad:?}");
+        }
+        assert_eq!(Rgba::from_hex("#0A84FF80"), Some(Rgba::new(0x0A, 0x84, 0xFF, 0x80)));
+        let err: Result<Rgba, _> = Rgba::try_from("aé123".to_string());
+        assert!(err.is_err());
+    }
 
     fn flat(padding: f64) -> BeautifyStyle {
         BeautifyStyle { padding, auto_balance: false, ..BeautifyStyle::default() }

@@ -16,6 +16,7 @@ pub mod action;
 pub mod ai;
 pub mod annotate;
 pub mod beautify;
+pub mod cleanup;
 pub mod click_log;
 pub mod color;
 pub mod extract;

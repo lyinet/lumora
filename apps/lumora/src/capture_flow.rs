@@ -34,6 +34,22 @@ use lumora_core::i18n::{tr, trf, Msg};
 use crate::app::{on_main, App, CaptureRecord, Editable, Mode, Notice};
 use crate::system;
 
+/// Encode `image` to PNG once, write it to `path` and return the bytes (for
+/// the `.lumora` document that embeds the same PNG).
+fn write_png_shared(
+    image: &CGImage,
+    path: &std::path::Path,
+    scale: f64,
+) -> Result<std::sync::Arc<Vec<u8>>, CaptureError> {
+    let err = |reason: String| CaptureError::Write { path: path.display().to_string(), reason };
+    let png = lumora_capture::image::png_bytes(image, scale).map_err(|e| err(e.to_string()))?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| err(e.to_string()))?;
+    }
+    std::fs::write(path, &png).map_err(|e| err(e.to_string()))?;
+    Ok(std::sync::Arc::new(png))
+}
+
 fn background() -> dispatch2::DispatchRetained<DispatchQueue> {
     DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated))
 }
@@ -285,6 +301,8 @@ impl App {
         } else {
             shutter::play(self.mtm, &image, appkit_frame, None, || {});
         }
+        // No auto-redaction: the saved image is the original capture.
+        let unredacted = document.is_none();
         let rec = CaptureRecord {
             image: Some(image.clone()),
             scale,
@@ -298,30 +316,48 @@ impl App {
         // beautified export) plus the beautify style, when enabled.
         let job = self.doc_job(&rec);
         self.captures.borrow_mut().insert(id, rec);
-        if let Some(job) = job {
-            self.spawn_doc_write(job);
-        }
-        if edit_now {
-            self.open_editor(id);
-        }
-
         let copy = s.general.copy_to_clipboard;
         // The record, card and editor keep the plain capture; the saved file
         // and the clipboard get the beautified one (when enabled).
         let style = s.beautify;
+        // Plain capture and a `.lumora` to write: both files hold the same
+        // PNG, so encode it once (below) and hand the bytes to the doc job.
+        let shared_job = match job {
+            Some(job) if !style.enabled && unredacted => Some(job),
+            Some(job) => {
+                self.spawn_doc_write(job);
+                None
+            }
+            None => None,
+        };
+        if edit_now {
+            self.open_editor(id);
+        }
+        // Nothing to render: fill the clipboard now rather than after the
+        // encode + write. The file URL resolves once the PNG lands.
+        if copy && !style.enabled {
+            lumora_capture::clipboard::copy_image(&image, scale, Some(&file));
+        }
+
         background().exec_async(move || {
             let image = lumora_capture::beautify_render::beautify_for_export(image, &style, scale);
-            let result = lumora_capture::image::write_png(&image, &file, scale);
+            if copy && style.enabled {
+                // Rendered: hop to main for the clipboard before encoding.
+                let (img, f) = (image.clone(), file.clone());
+                on_main(move |_| lumora_capture::clipboard::copy_image(&img, scale, Some(&f)));
+            }
+            let result = match shared_job {
+                Some(job) => write_png_shared(&image, &file, scale).map(|png| {
+                    on_main(move |app| app.spawn_doc_write(job.with_png(png)));
+                }),
+                None => lumora_capture::image::write_png(&image, &file, scale),
+            };
             on_main(move |_app| match result {
-                Ok(()) => {
-                    log::info!("saved {}", file.display());
-                    if copy {
-                        lumora_capture::clipboard::copy_image(&image, scale, Some(&file));
-                    }
-                }
+                Ok(()) => log::info!("saved {}", file.display()),
                 Err(e) => {
                     log::error!("{e}");
                     if copy {
+                        // Drop the dangling file URL.
                         lumora_capture::clipboard::copy_image(&image, scale, None);
                     }
                     _app.notify(Notice::Error(Msg::ToastSaveFailed), Some(error_text(&e)));

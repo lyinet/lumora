@@ -29,7 +29,12 @@ use crate::app::{on_main, App};
 /// An open tutorial window and the movie it belongs to.
 pub struct OpenTutorial {
     pub window: TutorialWindow,
+    /// Where the movie is now (updated when Save moves it out of the
+    /// scratch folder while the window is open).
     pub movie: PathBuf,
+    /// Where it was when the window opened; the window's step image paths
+    /// are relative to this.
+    pub origin: PathBuf,
 }
 
 /// How the background run ended.
@@ -108,23 +113,13 @@ impl App {
             );
         }
 
-        // AI: settings and key are read here (Keychain on the main thread).
+        // AI: settings here; the key is read on the background queue (a
+        // Keychain prompt must not block the main run loop).
         let mut cfg = self.settings.borrow().ai.clone();
         cfg.validate();
-        let ai = if cfg.writes_tutorials() {
-            match Keychain.get(cfg.provider) {
-                Ok(key) if cfg.check_ready(key.as_deref()).is_ok() => Some((cfg, key)),
-                Ok(_) => None,
-                Err(e) => {
-                    log::warn!("reading the {} API key failed: {e:?}", cfg.provider.id());
-                    None
-                }
-            }
-        } else {
-            None
-        };
+        let ai_cfg = cfg.writes_tutorials().then_some(cfg);
         let ai_wanted = self.settings.borrow().ai.writes_tutorials();
-        log::info!("making tutorial: {} steps (AI: {})", tutorial.steps.len(), ai.is_some());
+        log::info!("making tutorial: {} steps (AI: {})", tutorial.steps.len(), ai_cfg.is_some());
         self.notify_text(
             ToastKind::Success,
             tr(Msg::ToastTutorialWorking),
@@ -140,6 +135,14 @@ impl App {
                     Ok(()) => {
                         // OCR hints are in now: better local titles first.
                         t.apply_local_titles(ui);
+                        let ai = ai_cfg.and_then(|cfg| match Keychain.get(cfg.provider) {
+                            Ok(key) if cfg.check_ready(key.as_deref()).is_ok() => Some((cfg, key)),
+                            Ok(_) => None,
+                            Err(e) => {
+                                log::warn!("reading the {} API key failed: {e:?}", cfg.provider.id());
+                                None
+                            }
+                        });
                         let mut ai_failed = ai_wanted && ai.is_none();
                         if let Some((cfg, key)) = ai {
                             on_main(|app| app.notify_text(ToastKind::Success, tr(Msg::ToastTutorialWriting), None));
@@ -195,13 +198,25 @@ impl App {
         }
         let id = self.next_id();
         let window = TutorialWindow::show(self.mtm, id, t, base_dir(&movie), self.sink.clone());
-        self.tutorials.borrow_mut().insert(id, OpenTutorial { window, movie });
+        let origin = movie.clone();
+        self.tutorials.borrow_mut().insert(id, OpenTutorial { window, movie, origin });
     }
 
     pub fn on_tutorial(self: &Rc<Self>, id: u64, action: TutorialAction) {
-        let Some(movie) = self.tutorials.borrow().get(&id).map(|o| o.movie.clone()) else { return };
+        let Some((movie, origin)) = self.tutorials.borrow().get(&id).map(|o| (o.movie.clone(), o.origin.clone()))
+        else {
+            return;
+        };
         let base = base_dir(&movie);
         let ui = language();
+        // If the movie was saved elsewhere meanwhile, re-point the window's
+        // copy at the moved `<stem>.tutorial/` folder.
+        let action = match action {
+            TutorialAction::ExportMarkdown(t) => TutorialAction::ExportMarkdown(relocated(t, &origin, &movie)),
+            TutorialAction::ExportHtml(t) => TutorialAction::ExportHtml(relocated(t, &origin, &movie)),
+            TutorialAction::CopyMarkdown(t) => TutorialAction::CopyMarkdown(relocated(t, &origin, &movie)),
+            TutorialAction::Closed(t) => TutorialAction::Closed(relocated(t, &origin, &movie)),
+        };
         match action {
             TutorialAction::ExportMarkdown(t) => {
                 save_steps(&movie, &t);
@@ -217,9 +232,19 @@ impl App {
                 save_steps(&movie, &t);
                 let name = format!("{}.html", stem(&movie));
                 let Some(path) = util::choose_save_path(self.mtm, &base, &name, "html") else { return };
-                let html =
-                    export::to_html(&t, ui, |s| s.image.as_deref().and_then(|rel| std::fs::read(base.join(rel)).ok()));
-                self.finish_export(&path, html.as_bytes());
+                // Reading + base64-encoding every step image is slow: build
+                // and write off the main thread, toast back on it.
+                DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated))
+                    .exec_async(move || {
+                        let html = export::to_html(&t, ui, |s| {
+                            s.image
+                                .as_deref()
+                                .filter(|rel| tutorial::is_safe_relative(rel))
+                                .and_then(|rel| std::fs::read(base.join(rel)).ok())
+                        });
+                        let result = std::fs::write(&path, html.as_bytes());
+                        on_main(move |app| app.report_export(&path, result));
+                    });
             }
             TutorialAction::CopyMarkdown(t) => {
                 save_steps(&movie, &t);
@@ -239,7 +264,11 @@ impl App {
     }
 
     fn finish_export(self: &Rc<Self>, path: &Path, bytes: &[u8]) {
-        match std::fs::write(path, bytes) {
+        self.report_export(path, std::fs::write(path, bytes));
+    }
+
+    fn report_export(self: &Rc<Self>, path: &Path, result: std::io::Result<()>) {
+        match result {
             Ok(()) => {
                 log::info!("exported tutorial to {}", path.display());
                 let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
@@ -252,4 +281,11 @@ impl App {
             }
         }
     }
+}
+
+fn relocated(mut t: Box<tutorial::Tutorial>, origin: &Path, movie: &Path) -> Box<tutorial::Tutorial> {
+    if origin != movie {
+        t.relocate(origin, movie);
+    }
+    t
 }

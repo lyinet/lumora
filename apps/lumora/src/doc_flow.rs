@@ -30,6 +30,12 @@ pub struct DocJob {
 }
 
 impl DocJob {
+    /// Use already-encoded PNG bytes of the original (skips a second encode).
+    pub fn with_png(mut self, png: Arc<Vec<u8>>) -> Self {
+        self.png = Some(png);
+        self
+    }
+
     /// Encode and write atomically. Returns the original's PNG bytes (to
     /// cache on the record).
     fn run(self) -> Result<Arc<Vec<u8>>, String> {
