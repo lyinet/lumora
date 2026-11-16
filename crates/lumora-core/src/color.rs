@@ -21,6 +21,12 @@ impl Rgb8 {
     /// Parse `#RRGGBB`, `RRGGBB` or `#RGB`.
     pub fn from_hex(s: &str) -> Option<Rgb8> {
         let s = s.trim().trim_start_matches('#');
+        // Byte-indexed slicing below: reject anything that isn't plain hex
+        // (non-ASCII would panic on a char boundary; `+` would sneak past
+        // `from_str_radix`).
+        if !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return None;
+        }
         let n = |h: &str| u8::from_str_radix(h, 16).ok();
         match s.len() {
             6 => Some(Rgb8::new(n(&s[0..2])?, n(&s[2..4])?, n(&s[4..6])?)),
@@ -63,6 +69,13 @@ impl Rgb8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hex_rejects_non_ascii_without_panicking() {
+        for bad in ["aé123", "é1", "#ééé12", "+fffff", "+ff", "é"] {
+            assert_eq!(Rgb8::from_hex(bad), None, "{bad:?}");
+        }
+    }
 
     #[test]
     fn hex_round_trip() {
