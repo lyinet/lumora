@@ -60,6 +60,14 @@ pub(crate) enum Phase {
     Failed,
 }
 
+/// Compact title for Copy as CSV when the button row is crowded ("CSV" is
+/// the same in every language; the full title stays as the tooltip).
+const CSV_SHORT: &str = "CSV";
+
+fn set_title(b: &NSButton, title: &str) {
+    b.setTitle(&NSString::from_str(title));
+}
+
 pub(crate) struct AiSheet {
     pub view: Retained<NSVisualEffectView>,
     title: Retained<NSTextField>,
@@ -72,7 +80,9 @@ pub(crate) struct AiSheet {
     insert: Retained<NSButton>,
     csv: Retained<NSButton>,
     settings: Retained<NSButton>,
-    _close: Retained<NSButton>,
+    /// Trailing buttons, right to left: Close, Copy, [Insert], CSV. Laid
+    /// out by [`AiSheet::layout_trailing`] so hidden ones leave no gap.
+    trailing: Vec<Retained<NSButton>>,
     _targets: Vec<Retained<ActionTarget>>,
     buffer: RefCell<String>,
     phase: Cell<Phase>,
@@ -228,19 +238,17 @@ impl AiSheet {
         settings.setFrame(cg_rect(Rect::new(x, PAD, f.size.width, BUTTON_H)));
         view.addSubview(&settings);
         // Trailing, left to right: [CSV] [Insert] [Copy] [Close].
-        let mut right = w - PAD;
-        let trailing: Vec<&Retained<NSButton>> =
-            if opts.insert { vec![&close, &copy, &insert, &csv] } else { vec![&close, &copy, &csv] };
-        for b in trailing {
-            let bw = b.frame().size.width.max(64.0);
-            right -= bw;
-            b.setFrame(cg_rect(Rect::new(right, PAD, bw, BUTTON_H)));
+        let trailing: Vec<Retained<NSButton>> = if opts.insert {
+            vec![close.clone(), copy.clone(), insert.clone(), csv.clone()]
+        } else {
+            vec![close.clone(), copy.clone(), csv.clone()]
+        };
+        for b in &trailing {
             b.setAutoresizingMask(NSAutoresizingMaskOptions::ViewMinXMargin);
             view.addSubview(b);
-            right -= 8.0;
         }
 
-        AiSheet {
+        let sheet = AiSheet {
             view,
             title,
             status,
@@ -252,13 +260,15 @@ impl AiSheet {
             insert,
             csv,
             settings,
-            _close: close,
+            trailing,
             _targets: targets,
             buffer: RefCell::new(String::new()),
             phase: Cell::new(Phase::Hidden),
             fallback: RefCell::new(None),
             mono: Cell::new(false),
-        }
+        };
+        sheet.layout_trailing();
+        sheet
     }
 
     pub fn phase(&self) -> Phase {
@@ -313,6 +323,7 @@ impl AiSheet {
     /// Show "Copy as CSV" (table results).
     pub fn set_csv_visible(&self, visible: bool) {
         self.csv.setHidden(!visible);
+        self.layout_trailing();
     }
 
     /// Monospaced body text (code and tables).
@@ -361,12 +372,14 @@ impl AiSheet {
             self.sync_controls();
             self.set_status(&lumora_core::i18n::trf(Msg::TextAiKeptLocal, &[&message]), true);
             self.settings.setHidden(!settings);
+            self.layout_trailing();
             return;
         }
         self.set_status(message, true);
         self.phase.set(Phase::Failed);
         self.sync_controls();
         self.settings.setHidden(!settings);
+        self.layout_trailing();
         // The status line truncates; long errors also go in the body when
         // there is no partial text to keep.
         if self.buffer.borrow().is_empty() {
@@ -442,6 +455,41 @@ impl AiSheet {
         self.copy.setEnabled(has_text);
         self.insert.setEnabled(has_text);
         self.csv.setEnabled(has_text);
+        self.layout_trailing();
+    }
+
+    /// Right-align the visible trailing buttons (hidden ones leave no gap).
+    /// When they would run into the leading Retry / Open AI Settings group
+    /// (narrow editor sheet, failed table task), Copy as CSV shrinks to a
+    /// short title and keeps the full one as its tooltip.
+    fn layout_trailing(&self) {
+        let w = self.view.frame().size.width;
+        let leading_end = [&self.retry, &self.stop, &self.settings]
+            .iter()
+            .filter(|b| !b.isHidden())
+            .map(|b| b.frame().origin.x + b.frame().size.width)
+            .fold(PAD, f64::max);
+        let place = |compact: bool| -> f64 {
+            set_title(&self.csv, if compact { CSV_SHORT } else { tr(Msg::TextCopyCsv) });
+            self.csv.setToolTip(compact.then(|| NSString::from_str(tr(Msg::TextCopyCsv))).as_deref());
+            let mut right = w - PAD;
+            for b in self.trailing.iter().filter(|b| !b.isHidden()) {
+                b.sizeToFit();
+                let bw = b.frame().size.width.max(if compact && std::ptr::eq::<NSButton>(&**b, &*self.csv) {
+                    44.0
+                } else {
+                    64.0
+                });
+                right -= bw;
+                b.setFrame(cg_rect(Rect::new(right, PAD, bw, BUTTON_H)));
+                right -= 8.0;
+            }
+            right + 8.0
+        };
+        let left = place(false);
+        if !self.csv.isHidden() && left < leading_end + 8.0 {
+            place(true);
+        }
     }
 
     /// Fade in with a small spring rise.

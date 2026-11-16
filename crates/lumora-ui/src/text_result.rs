@@ -31,7 +31,7 @@ use objc2_foundation::NSString;
 use crate::ai_sheet::{AiSheet, SheetEvent, SheetHandler, SheetOptions};
 use crate::events::{EventSink, TextAiRequest, TextResultAction, UiEvent};
 use crate::tokens::{size, typography};
-use crate::util::{cg_rect, make_panel, rect, screen_under_mouse, weight, ActionTarget, PanelSpec};
+use crate::util::{cg_rect, make_panel, rect, screen_under_mouse, set_on_cancel, weight, ActionTarget, PanelSpec};
 
 const WIDTH: f64 = 580.0;
 /// Height of the actions row above the sheet's header.
@@ -172,6 +172,17 @@ impl TextResultPanel {
             }
         });
         panel.setContentView(Some(&root));
+        // Esc / ⌘.: stop a streaming request first, otherwise close.
+        let w = Rc::downgrade(&state);
+        set_on_cancel(&panel, move || {
+            if let Some(s) = w.upgrade() {
+                if s.request.get() != 0 {
+                    State::sheet_event(&s, SheetEvent::Stop);
+                } else {
+                    State::close(&s);
+                }
+            }
+        });
         TextResultPanel { state }
     }
 
@@ -197,8 +208,9 @@ impl TextResultPanel {
                 s.panel.setFrameOrigin(CGPoint::new(x, y));
             }
         }
+        // Don't take key focus: the panel is non-activating and becomes key
+        // only when clicked, so the frontmost app keeps typing focus.
         s.panel.orderFrontRegardless();
-        s.panel.makeKeyWindow();
     }
 
     /// AI writing turned on or off in Settings.

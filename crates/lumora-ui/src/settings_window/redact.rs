@@ -16,7 +16,7 @@ use super::{checkbox, popup, Form, State, CONTROL_X, ROW_H};
 use crate::util::ActionTarget;
 
 /// Column offset of the second checkbox in a row.
-const COLUMN: f64 = 160.0;
+const COLUMN: f64 = 140.0;
 
 fn category_label(c: Category) -> Msg {
     match c {
@@ -64,7 +64,7 @@ pub(super) fn build_redact(form: &mut Form<'_>, state: &Rc<State>, targets: &mut
     for (row, pair) in cats.chunks(2).enumerate() {
         let label = if row == 0 { tr(Msg::RedactSectionLabel) } else { "" };
         let first = category_box(form, state, pair[0], targets);
-        form.add(label, &first, ROW_H - 4.0);
+        form.add(label, &first, ROW_H);
         if let Some(&c) = pair.get(1) {
             let second = category_box(form, state, c, targets);
             let mut f = second.frame();

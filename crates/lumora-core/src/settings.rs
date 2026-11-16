@@ -90,6 +90,9 @@ pub struct Capture {
     pub window_picking: bool,
     /// Save at the display's native (Retina) scale rather than 1×.
     pub retina: bool,
+    /// Show the floating actions panel after Capture Text copies the text.
+    /// Missing in pre-v0.5 files (defaults on).
+    pub text_actions_panel: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,7 +185,14 @@ impl Shortcuts {
 
 impl Default for Capture {
     fn default() -> Self {
-        Capture { show_magnifier: true, show_crosshair: true, window_shadow: true, window_picking: true, retina: true }
+        Capture {
+            show_magnifier: true,
+            show_crosshair: true,
+            window_shadow: true,
+            window_picking: true,
+            retina: true,
+            text_actions_panel: true,
+        }
     }
 }
 
@@ -319,6 +329,22 @@ mod tests {
         assert!(t.contains("[shortcuts]"));
         assert!(t.contains("capture_area = \"⌥⇧4\""));
         assert_eq!(Settings::from_toml(&t).unwrap(), s);
+    }
+
+    #[test]
+    fn pre_v05_capture_section_keeps_text_actions_panel_on() {
+        let s = Settings::from_toml(
+            r#"
+            [capture]
+            show_magnifier = false
+            retina = false
+            "#,
+        )
+        .unwrap();
+        assert!(!s.capture.show_magnifier);
+        assert!(s.capture.text_actions_panel);
+        let off = Settings::from_toml("[capture]\ntext_actions_panel = false\n").unwrap();
+        assert!(!off.capture.text_actions_panel);
     }
 
     #[test]

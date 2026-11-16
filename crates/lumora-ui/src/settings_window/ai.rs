@@ -26,7 +26,7 @@ use objc2_app_kit::{
 use objc2_core_foundation::CGPoint;
 use objc2_foundation::NSString;
 
-use super::{checkbox, popup, Form, State, CONTROL_X, ROW_H, W};
+use super::{checkbox, popup, wrapped_height, Form, State, CONTROL_X, NOTE_W, ROW_H};
 use crate::events::UiEvent;
 use crate::tokens::typography;
 use crate::util::{cg_rect, weight, ActionTarget};
@@ -212,7 +212,7 @@ pub(super) fn build_ai(form: &mut Form<'_>, state: &Rc<State>, targets: &mut Vec
     }
     form.add(tr(Msg::AiProviderLabel), &provider, ROW_H);
 
-    let base_url = text_field(form, tr(Msg::AiBaseUrl), &ai.base_url, W - CONTROL_X - 40.0);
+    let base_url = text_field(form, tr(Msg::AiBaseUrl), &ai.base_url, NOTE_W);
     base_url.setPlaceholderString(Some(&NSString::from_str("https://…/v1")));
     let model = text_field(form, tr(Msg::AiModel), &ai.model, 220.0);
 
@@ -222,7 +222,7 @@ pub(super) fn build_ai(form: &mut Form<'_>, state: &Rc<State>, targets: &mut Vec
     action_on_end_editing(&key);
     form.add(tr(Msg::AiApiKey), &key, ROW_H);
     form.y -= 18.0;
-    let key_note = caption(form, "", Rect::new(CONTROL_X, form.y + 4.0, W - CONTROL_X - 30.0, 16.0));
+    let key_note = caption(form, "", Rect::new(CONTROL_X, form.y + 4.0, NOTE_W, 16.0));
 
     // Temperature slider with a readout to its right.
     let st = state.clone();
@@ -283,7 +283,7 @@ pub(super) fn build_ai(form: &mut Form<'_>, state: &Rc<State>, targets: &mut Vec
     );
     form.y -= 18.0;
     let vision_hint =
-        caption(form, tr(Msg::AiVisionHint), Rect::new(CONTROL_X + 20.0, form.y + 4.0, W - CONTROL_X - 50.0, 16.0));
+        caption(form, tr(Msg::AiVisionHint), Rect::new(CONTROL_X + 20.0, form.y + 4.0, NOTE_W - 20.0, 16.0));
     vision_hint.setTextColor(Some(&NSColor::systemOrangeColor()));
 
     checkbox(
@@ -341,7 +341,7 @@ pub(super) fn build_ai(form: &mut Form<'_>, state: &Rc<State>, targets: &mut Vec
     form.y -= 32.0;
     let status = NSTextField::wrappingLabelWithString(&NSString::from_str(""), mtm);
     status.setFont(Some(&NSFont::systemFontOfSize_weight(typography::CAPTION, weight::MEDIUM)));
-    status.setFrame(cg_rect(Rect::new(CONTROL_X, form.y, W - CONTROL_X - 30.0, 30.0)));
+    status.setFrame(cg_rect(Rect::new(CONTROL_X, form.y, NOTE_W, 30.0)));
     status.setSelectable(true);
     form.view.addSubview(&status);
 
@@ -350,9 +350,10 @@ pub(super) fn build_ai(form: &mut Form<'_>, state: &Rc<State>, targets: &mut Vec
     let privacy = NSTextField::wrappingLabelWithString(&NSString::from_str(tr(Msg::AiPrivacyNote)), mtm);
     privacy.setFont(Some(&NSFont::systemFontOfSize_weight(typography::CAPTION, weight::REGULAR)));
     privacy.setTextColor(Some(&NSColor::secondaryLabelColor()));
-    privacy.setFrame(cg_rect(Rect::new(CONTROL_X, form.y - 30.0, W - CONTROL_X - 30.0, 54.0)));
+    let privacy_h = wrapped_height(&privacy, NOTE_W).max(54.0);
+    privacy.setFrame(cg_rect(Rect::new(CONTROL_X, form.y + 24.0 - privacy_h, NOTE_W, privacy_h)));
     form.view.addSubview(&privacy);
-    form.y -= 30.0;
+    form.y -= privacy_h - 24.0;
 
     let controls = Rc::new(AiControls {
         provider: provider.clone(),

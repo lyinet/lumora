@@ -32,6 +32,10 @@ const WIDTH: f64 = 760.0;
 const HEIGHT: f64 = 640.0;
 const BAR: f64 = 52.0;
 const PAD: f64 = 20.0;
+const MIN_W: f64 = 560.0;
+const MIN_H: f64 = 360.0;
+/// Narrowest the top-bar summary may get before the window stops shrinking.
+const SUMMARY_MIN_W: f64 = 200.0;
 const ROW: f64 = 176.0;
 const THUMB_W: f64 = 240.0;
 const THUMB_H: f64 = 150.0;
@@ -291,6 +295,9 @@ impl TutorialWindow {
             Some(v) => (WIDTH.min(v.width() * 0.9), HEIGHT.min(v.height() * 0.9)),
             None => (WIDTH, HEIGHT),
         };
+        // Never open smaller than the minimum size (raised below once the
+        // action buttons are measured).
+        let (w, h) = (w.max(MIN_W), h.max(MIN_H));
         let origin =
             visible.map_or(CGPoint::new(200.0, 200.0), |v| CGPoint::new(v.mid().x - w / 2.0, v.mid().y - h / 2.0));
         let style = NSWindowStyleMask::Titled
@@ -315,7 +322,7 @@ impl TutorialWindow {
             format!("{} — {}", tr(Msg::TutorialWindowTitle), tutorial.title.trim())
         };
         window.setTitle(&NSString::from_str(&title));
-        window.setContentMinSize(CGSize::new(560.0, 360.0));
+        window.setContentMinSize(CGSize::new(MIN_W, MIN_H));
 
         let content = NSView::initWithFrame(NSView::alloc(mtm), CGRect::new(CGPoint::ZERO, CGSize::new(w, h)));
 
@@ -324,7 +331,9 @@ impl TutorialWindow {
         summary.setFont(Some(&NSFont::systemFontOfSize_weight(typography::BODY, weight::MEDIUM)));
         summary.setTextColor(Some(&NSColor::secondaryLabelColor()));
         summary.setFrame(cg_rect(Rect::new(PAD, h - BAR + 16.0, 260.0, 20.0)));
-        summary.setAutoresizingMask(NSAutoresizingMaskOptions::ViewMinYMargin);
+        summary.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewMinYMargin,
+        );
         content.addSubview(&summary);
 
         let scroll = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), cg_rect(Rect::new(0.0, 0.0, w, h - BAR)));
@@ -390,11 +399,22 @@ impl TutorialWindow {
             x -= 8.0;
         }
         *state._bar_targets.borrow_mut() = bar_targets;
+        // The summary takes what the buttons leave (and shrinks/grows with
+        // the window); the window can't get narrow enough for them to meet.
+        let bar_w = (w - PAD) - (x + 8.0);
+        let summary_x = PAD;
+        let summary_w = (x + 8.0 - PAD - summary_x).max(SUMMARY_MIN_W);
+        state.summary.setFrame(cg_rect(Rect::new(summary_x, h - BAR + 16.0, summary_w, 20.0)));
+        let min_w = MIN_W.max(bar_w + SUMMARY_MIN_W + 3.0 * PAD);
+        window.setContentMinSize(CGSize::new(min_w, MIN_H));
 
         *delegate.ivars().state.borrow_mut() = Rc::downgrade(&state);
         window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         *state._delegate.borrow_mut() = Some(delegate);
         window.setContentView(Some(&content));
+        if w < min_w {
+            window.setContentSize(CGSize::new(min_w, h));
+        }
         state.rebuild();
         // Scroll to the top (flipped document: origin is the top).
         scroll.contentView().scrollToPoint(CGPoint::ZERO);
