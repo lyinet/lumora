@@ -236,10 +236,11 @@ messages! {
     IncludeShadow => "Include window shadow", "包含窗口阴影";
     ResolutionLabel => "Resolution:", "分辨率：";
     SaveRetina => "Save at Retina (native) scale", "以 Retina（原生）分辨率保存";
-    CaptureNote => "Area captures are cropped from the frozen screen at native resolution.",
+    CaptureNote => "Cropped from the frozen screen at native resolution.",
         "区域截图从冻结的屏幕画面中按原生分辨率裁剪。";
     TextRecognitionLabel => "Capture Text:", "识别文字：";
-    TextRecognitionNote => "Recognises English, Simplified & Traditional Chinese and Japanese.",
+    TextActionsPanel => "Show actions panel after Capture Text", "识别文字后显示操作面板";
+    TextRecognitionNote => "English, Chinese (Simp. & Trad.) and Japanese.",
         "支持识别英文、简体中文、繁体中文和日文。";
     FrameRate => "Frame rate:", "帧率：";
     Fps30 => "30 fps", "30 帧/秒";
@@ -399,7 +400,7 @@ messages! {
     AiSendImage => "Send screenshot image", "发送截图图片";
     AiVisionHint => "This model may not accept images.", "此模型可能不支持图片。";
     AiTutorialLabel => "Tutorials:", "教程：";
-    AiTutorialSteps => "Write tutorial steps with AI (sends text only)", "用 AI 撰写教程步骤（仅发送文字）";
+    AiTutorialSteps => "Write steps with AI (text only)", "用 AI 撰写教程步骤（仅发送文字）";
     // -- tutorials ----------------------------------------------------------------
     MakeTutorialMenu => "Make Tutorial from Recording…", "从录屏生成教程…";
     MakeTutorial => "Make Tutorial", "生成教程";
@@ -477,8 +478,8 @@ messages! {
     RedactFaces => "Faces", "人脸";
     RedactStyleLabel => "Redaction style:", "打码样式：";
     RedactAiCheck => "Also check with AI (sends text only)", "同时用 AI 检查（仅发送文字）";
-    RedactAuto => "Redact new screenshots before copy / save", "复制 / 保存新截图前自动打码";
-    RedactNote => "Detection runs on this Mac. AI check needs AI Writing enabled.", "检测在本机完成；AI 检查需先启用 AI 写作。";
+    RedactAuto => "Redact new screenshots automatically", "复制 / 保存新截图前自动打码";
+    RedactNote => "Detects on this Mac; AI check needs AI Writing on.", "检测在本机完成；AI 检查需先启用 AI 写作。";
 }
 
 #[cfg(test)]

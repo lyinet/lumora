@@ -81,9 +81,10 @@ struct Slot {
     x: f64,
 }
 
-fn as_view<T: objc2::Message>(v: &Retained<T>) -> Retained<NSView> {
-    // SAFETY: only called with NSView subclasses (buttons, segmented controls).
-    unsafe { Retained::cast_unchecked::<NSView>(v.clone()) }
+/// Upcast any view subclass (buttons, segmented controls) to `NSView`.
+fn as_view<T: AsRef<NSView> + ?Sized>(v: &T) -> Retained<NSView> {
+    use objc2::Message;
+    v.as_ref().retain()
 }
 
 pub type ToolbarHandler = Rc<dyn Fn(ToolbarAction)>;

@@ -20,7 +20,13 @@ use crate::app::{on_main, App};
 impl App {
     /// Show (or refresh) the Capture Text panel with `text` and its runs.
     pub fn show_text_result(self: &Rc<Self>, text: &str, boxes: Vec<TextBox>) {
-        let ai_enabled = self.settings.borrow().ai.enabled;
+        let (ai_enabled, panel_on) = {
+            let st = self.settings.borrow();
+            (st.ai.enabled, st.capture.text_actions_panel)
+        };
+        if !panel_on {
+            return;
+        }
         if self.text_panel.borrow().is_none() {
             *self.text_panel.borrow_mut() = Some(TextResultPanel::new(self.mtm, self.sink.clone()));
         }

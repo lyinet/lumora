@@ -380,14 +380,23 @@ impl ActionTarget {
 // Panels
 // ---------------------------------------------------------------------------
 
+/// Instance variables of [`KeyablePanel`].
+#[derive(Default)]
+pub struct KeyablePanelIvars {
+    on_cancel: RefCell<Option<Box<dyn Fn()>>>,
+}
+
 define_class!(
     /// Borderless panels return NO from `canBecomeKeyWindow` by default, so
     /// they never receive key events. This subclass opts in (but never
     /// becomes *main*), which is what overlays, pins and the countdown need
-    /// to handle Esc/Enter without activating the app.
+    /// to handle Esc/Enter without activating the app. Esc and ⌘. reach
+    /// `cancelOperation:` through the responder chain even when a text view
+    /// or button is first responder; see [`set_on_cancel`].
     #[unsafe(super(NSPanel, NSWindow, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "LumoraKeyablePanel"]
+    #[ivars = KeyablePanelIvars]
     pub struct KeyablePanel;
 
     impl KeyablePanel {
@@ -400,8 +409,31 @@ define_class!(
         fn can_become_main(&self) -> bool {
             false
         }
+
+        #[unsafe(method(cancelOperation:))]
+        fn cancel_operation(&self, sender: Option<&AnyObject>) {
+            let handled = match self.ivars().on_cancel.borrow().as_ref() {
+                Some(f) => {
+                    f();
+                    true
+                }
+                None => false,
+            };
+            if !handled {
+                // SAFETY: forwarding the standard NSResponder action to super.
+                let _: () = unsafe { msg_send![super(self), cancelOperation: sender] };
+            }
+        }
     }
 );
+
+/// Run `f` when Esc (or ⌘.) reaches `panel`. Only panels made with
+/// `PanelSpec { keyable: true, .. }` support this; others are ignored.
+pub fn set_on_cancel(panel: &NSPanel, f: impl Fn() + 'static) {
+    if let Some(p) = panel.downcast_ref::<KeyablePanel>() {
+        *p.ivars().on_cancel.borrow_mut() = Some(Box::new(f));
+    }
+}
 
 /// Options for [`make_panel`].
 #[derive(Debug, Clone, Copy)]
@@ -418,8 +450,10 @@ pub fn make_panel(mtm: MainThreadMarker, frame: CGRect, spec: PanelSpec) -> Reta
     use objc2_app_kit::{NSBackingStoreType, NSWindowCollectionBehavior, NSWindowStyleMask};
     let style = NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel;
     let panel: Retained<NSPanel> = if spec.keyable {
+        let this = KeyablePanel::alloc(mtm).set_ivars(KeyablePanelIvars::default());
+        // SAFETY: NSPanel's designated initialiser.
         let p: Retained<KeyablePanel> = unsafe {
-            msg_send![KeyablePanel::alloc(mtm), initWithContentRect: frame, styleMask: style, backing: NSBackingStoreType::Buffered, defer: false]
+            msg_send![super(this), initWithContentRect: frame, styleMask: style, backing: NSBackingStoreType::Buffered, defer: false]
         };
         Retained::into_super(p)
     } else {

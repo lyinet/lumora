@@ -38,6 +38,11 @@ const LABEL_X: f64 = 24.0;
 const LABEL_W: f64 = 170.0;
 const CONTROL_X: f64 = 206.0;
 const ROW_H: f64 = 30.0;
+/// Width of a tab item's content view: the tab view is inset 12 pt from
+/// the window and its items another 12 pt, so layout must use this, not `W`.
+const CONTENT_W: f64 = W - 48.0;
+/// Width available to notes and wide controls in the control column.
+const NOTE_W: f64 = CONTENT_W - CONTROL_X - 8.0;
 
 // ---------------------------------------------------------------------------
 // Shortcut recorder control
@@ -277,22 +282,33 @@ impl Form<'_> {
         self.label(text);
     }
 
-    /// A secondary note on the current row, in the control column.
-    fn note_inline(&mut self, text: &str) {
-        let l = NSTextField::labelWithString(&NSString::from_str(text), self.mtm);
-        l.setFont(Some(&NSFont::systemFontOfSize_weight(typography::CAPTION, weight::REGULAR)));
-        l.setTextColor(Some(&objc2_app_kit::NSColor::secondaryLabelColor()));
-        l.setFrame(cg_rect(Rect::new(CONTROL_X, self.y + 6.0, W - CONTROL_X - 24.0, 16.0)));
+    /// A secondary note below the current row, wrapped to the control
+    /// column; the row height grows to fit (long English notes take two
+    /// lines).
+    fn note(&mut self, text: &str) {
+        let l = caption_label(self.mtm, text);
+        let h = wrapped_height(&l, NOTE_W).max(16.0);
+        self.y -= h + 4.0;
+        l.setFrame(cg_rect(Rect::new(CONTROL_X, self.y + 6.0, NOTE_W, h)));
         self.view.addSubview(&l);
     }
+}
 
-    fn note(&mut self, text: &str) {
-        self.y -= 20.0;
-        let l = NSTextField::labelWithString(&NSString::from_str(text), self.mtm);
-        l.setFont(Some(&NSFont::systemFontOfSize_weight(typography::CAPTION, weight::REGULAR)));
-        l.setTextColor(Some(&objc2_app_kit::NSColor::secondaryLabelColor()));
-        l.setFrame(cg_rect(Rect::new(CONTROL_X, self.y + 6.0, W - CONTROL_X - 24.0, 16.0)));
-        self.view.addSubview(&l);
+/// A wrapping secondary-text label in the caption font.
+fn caption_label(mtm: MainThreadMarker, text: &str) -> Retained<NSTextField> {
+    let l = NSTextField::wrappingLabelWithString(&NSString::from_str(text), mtm);
+    l.setFont(Some(&NSFont::systemFontOfSize_weight(typography::CAPTION, weight::REGULAR)));
+    l.setTextColor(Some(&objc2_app_kit::NSColor::secondaryLabelColor()));
+    l
+}
+
+/// The height `label` needs to show all its text wrapped at `width`.
+fn wrapped_height(label: &NSTextField, width: f64) -> f64 {
+    match label.cell() {
+        Some(cell) => {
+            cell.cellSizeForBounds(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(width, 10_000.0))).height.ceil()
+        }
+        None => 16.0,
     }
 }
 
@@ -341,7 +357,7 @@ impl SettingsWindow {
         let mut fields = Vec::new();
 
         let tabs = NSTabView::initWithFrame(NSTabView::alloc(mtm), cg_rect(Rect::new(12.0, 12.0, W - 24.0, H - 24.0)));
-        let tab_frame = cg_rect(Rect::new(0.0, 0.0, W - 48.0, TAB_H));
+        let tab_frame = cg_rect(Rect::new(0.0, 0.0, CONTENT_W, TAB_H));
         for (title, build) in [
             (tr(Msg::TabGeneral), build_general as TabBuilder),
             (tr(Msg::TabShortcuts), build_shortcuts as TabBuilder),
@@ -774,7 +790,7 @@ fn build_shortcuts(
         fields.push(field);
     }
     form.y -= 36.0;
-    warning.setFrame(cg_rect(Rect::new(CONTROL_X, form.y + 2.0, W - CONTROL_X - 30.0, 32.0)));
+    warning.setFrame(cg_rect(Rect::new(CONTROL_X, form.y + 2.0, NOTE_W, 32.0)));
     form.view.addSubview(&warning);
     refresh_warning(&state.settings.borrow());
 
@@ -856,8 +872,16 @@ fn build_capture(
     );
     form.note(tr(Msg::CaptureNote));
     form.y -= 8.0;
-    form.label_only(tr(Msg::TextRecognitionLabel));
-    form.note_inline(tr(Msg::TextRecognitionNote));
+    checkbox(
+        form,
+        targets,
+        state,
+        tr(Msg::TextRecognitionLabel),
+        tr(Msg::TextActionsPanel),
+        |s| s.capture.text_actions_panel,
+        |s, v| s.capture.text_actions_panel = v,
+    );
+    form.note(tr(Msg::TextRecognitionNote));
     form.y -= 10.0;
     redact::build_redact(form, state, targets);
 }
