@@ -16,7 +16,11 @@
 pub mod tokens;
 
 #[cfg(target_os = "macos")]
+mod ai_sheet;
+#[cfg(target_os = "macos")]
 pub mod anim;
+#[cfg(target_os = "macos")]
+pub mod click_overlay;
 #[cfg(target_os = "macos")]
 pub mod countdown;
 #[cfg(target_os = "macos")]
@@ -40,6 +44,12 @@ pub mod settings_window;
 #[cfg(target_os = "macos")]
 pub mod shutter;
 #[cfg(target_os = "macos")]
+pub mod text_result;
+#[cfg(target_os = "macos")]
 pub mod toast;
+#[cfg(target_os = "macos")]
+pub mod transcript_window;
+#[cfg(target_os = "macos")]
+pub mod tutorial_window;
 #[cfg(target_os = "macos")]
 pub mod util;

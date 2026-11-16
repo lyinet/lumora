@@ -48,6 +48,7 @@ impl App {
             EditorAction::AiWrite(req) => self.on_ai_write(id, *req),
             EditorAction::AiCancel(request) => self.on_ai_cancel(id, request),
             EditorAction::OpenAiSettings => self.open_ai_settings(),
+            EditorAction::SmartRedact(req) => self.on_smart_redact(id, *req),
             EditorAction::Closed(img) => {
                 self.cancel_ai(id);
                 if let Some(img) = img {
@@ -123,6 +124,7 @@ impl App {
             point_size: Size::new(rec.frame.width(), rec.frame.height()),
             file: rec.file.clone(),
             video_duration: None,
+            tutorial: false,
         };
         self.captures.borrow_mut().insert(new_id, rec);
         self.quick.push(content);

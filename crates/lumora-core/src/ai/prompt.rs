@@ -26,6 +26,14 @@ pub enum WritingTask {
     /// Summarise the given text (usually the OCR text); empty means use
     /// [`AiContext::ocr_text`].
     Summarize(String),
+    /// Rebuild a table as Markdown from OCR runs listed with their x
+    /// positions ([`crate::extract::layout_listing`]); empty means use
+    /// [`AiContext::ocr_text`].
+    ExtractTable(String),
+    /// Clean up OCR'd code (indentation already estimated locally).
+    ExtractCode(String),
+    /// Turn the text into a to-do checklist.
+    Checklist(String),
 }
 
 impl WritingTask {
@@ -38,6 +46,9 @@ impl WritingTask {
             WritingTask::Polish(_) => Msg::AiTaskPolish,
             WritingTask::Translate { .. } => Msg::AiTaskTranslate,
             WritingTask::Summarize(_) => Msg::AiTaskSummarize,
+            WritingTask::ExtractTable(_) => Msg::AiTaskExtractTable,
+            WritingTask::ExtractCode(_) => Msg::AiTaskExtractCode,
+            WritingTask::Checklist(_) => Msg::AiTaskChecklist,
         })
     }
 
@@ -146,11 +157,14 @@ pub(crate) fn language_rule(cfg: &AiSettings, task: &WritingTask, ui: Language) 
     if let WritingTask::Translate { to, .. } = task {
         return format!("Write the translation in {}.", language_name(*to));
     }
+    if matches!(task, WritingTask::ExtractTable(_) | WritingTask::ExtractCode(_)) {
+        return "Keep every piece of text exactly in its original language; do not translate.".to_string();
+    }
     if let Some(l) = cfg.output_language.fixed() {
         return format!("Always write in {}.", language_name(l));
     }
     match task {
-        WritingTask::Polish(_) => "Keep the language of the input text.".to_string(),
+        WritingTask::Polish(_) | WritingTask::Checklist(_) => "Keep the language of the input text.".to_string(),
         _ => format!(
             "Write in the main language of the screenshot's text. If there is no text or the language is unclear, write in {}.",
             language_name(ui)
@@ -177,6 +191,15 @@ fn instruction(task: &WritingTask) -> &'static str {
         }
         WritingTask::Summarize(_) => {
             "Summarise the following text in a few bullet points (at most five), keeping key facts, numbers and names."
+        }
+        WritingTask::ExtractTable(_) => {
+            "Rebuild the table in this screenshot as a GitHub-flavoured Markdown table. The text runs below were recognised by OCR and grouped into rows, each run prefixed with its left x position in pixels; runs with similar x positions belong to the same column. Use the first row as the header, keep every value exactly as written (fix only obvious OCR errors), leave empty cells empty, and reply with the table only."
+        }
+        WritingTask::ExtractCode(_) => {
+            "The following is source code recognised by OCR from a screenshot, with indentation estimated from positions. Reconstruct the code: fix OCR mistakes (confused characters such as l/1/I, O/0, quotes and brackets), restore correct indentation and line breaks, and do not add, remove or explain anything. Reply with the code only."
+        }
+        WritingTask::Checklist(_) => {
+            "Turn the following text into a concise to-do checklist in Markdown, one actionable item per line, each starting with \"- [ ] \" (use \"- [x] \" for items already marked done). Merge lines that belong to one item and drop text that is not a task."
         }
     }
 }
@@ -229,7 +252,10 @@ pub fn build_request(
             }
             format!("{}\n\n<<<\n{}\n>>>", instruction(task), truncate(text.trim()))
         }
-        WritingTask::Summarize(text) => {
+        WritingTask::Summarize(text)
+        | WritingTask::ExtractTable(text)
+        | WritingTask::ExtractCode(text)
+        | WritingTask::Checklist(text) => {
             let text = if text.trim().is_empty() { ctx.ocr_text.trim() } else { text.trim() };
             if text.is_empty() {
                 return Err(AiError::EmptyInput);
@@ -326,6 +352,9 @@ mod tests {
             WritingTask::Polish("teh text".into()),
             WritingTask::Translate { text: "你好".into(), to: Language::En },
             WritingTask::Summarize(String::new()),
+            WritingTask::ExtractTable(String::new()),
+            WritingTask::ExtractCode("fn x() {}".into()),
+            WritingTask::Checklist("buy milk".into()),
         ];
         let mut seen = std::collections::HashSet::new();
         for t in &tasks {
@@ -424,6 +453,30 @@ mod tests {
         assert!(u.contains("Step 1: labelled \"Open Settings\""));
         assert!(u.contains("Step 2: no label"));
         assert!(u.contains("one list item per badge"));
+    }
+
+    #[test]
+    fn extraction_tasks_keep_original_language() {
+        let cfg = AiSettings { output_language: OutputLanguage::English, ..AiSettings::default() };
+        let sys = |t: &WritingTask| {
+            build_request(&cfg, t, &ctx(), Language::ZhHans, false).unwrap().body["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert!(sys(&WritingTask::ExtractTable("row 1: [x=0] a".into())).contains("do not translate"));
+        assert!(sys(&WritingTask::ExtractCode("x".into())).contains("do not translate"));
+        assert!(sys(&WritingTask::Checklist("x".into())).contains("Always write in English"));
+        let r =
+            build_request(&cfg, &WritingTask::ExtractTable("row 1: [x=0] Name".into()), &ctx(), Language::En, false)
+                .unwrap();
+        let u = user_text(&r);
+        assert!(u.contains("Markdown table") && u.contains("row 1: [x=0] Name") && !u.contains("Privacy"));
+        assert!(!WritingTask::ExtractTable(String::new()).uses_image());
+        assert_eq!(
+            build_request(&cfg, &WritingTask::Checklist(" ".into()), &AiContext::default(), Language::En, false),
+            Err(AiError::EmptyInput)
+        );
     }
 
     #[test]

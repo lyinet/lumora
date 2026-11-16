@@ -6,18 +6,24 @@ tested on every host; every crate above it is a thin, typed layer over Apple
 frameworks.
 
 ```
-apps/lumora        binary: NSApplication, status item, hotkeys, App state, flows
+apps/lumora        binary: NSApplication, status item, hidden main menu, hotkeys,
+   │               App state, flows (capture, record, OCR, editor, redaction,
+   │               tutorial, transcription, AI)
    │
    ├── crates/lumora-ui        AppKit + Core Animation: overlay, Quick Access, pins,
-   │      │                    shutter, countdown, recording HUD, settings, onboarding,
-   │      │                    annotation editor + beautify panel + AI sheet,
-   │      │                    settings AI tab, toast HUD
+   │      │                    shutter, countdown, recording HUD, click-ripple overlay,
+   │      │                    settings (incl. AI + redaction rows), onboarding,
+   │      │                    annotation editor + beautify panel, AI result sheet,
+   │      │                    Capture Text panel, tutorial + transcript windows, toasts
    │      │
-   ├──────┼── crates/lumora-ai        blocking OpenAI-compatible client (ureq + rustls),
-   │      │                           streaming + cancellation, Keychain key store
+   ├──────┼── crates/lumora-ai        blocking OpenAI-compatible clients (ureq + rustls):
+   │      │                           chat streaming + cancellation, /audio/transcriptions
+   │      │                           (multipart), Keychain key store
    │      │
-   ├──────┴── crates/lumora-capture   ScreenCaptureKit, ImageIO, AVFoundation, pasteboard,
-   │                 │                Vision OCR, multi-display stitching, beautify renderer
+   ├──────┴── crates/lumora-capture   ScreenCaptureKit, ImageIO, AVFoundation (writer,
+   │                 │                AVCaptureSession mic, keyframes, audio export),
+   │                 │                Vision OCR + faces, Apple Speech, pasteboard,
+   │                 │                multi-display stitching, beautify + tutorial renderers
    │                 │
    └─────────────────┴── crates/lumora-core   pure Rust: geometry, springs, selection
                                               state machine, snapping, settings, file
@@ -25,16 +31,17 @@ apps/lumora        binary: NSApplication, status item, hotkeys, App state, flows
                                               annotation document + editor FSM, i18n,
                                               OCR text assembly, stitch planning,
                                               beautify model, .lumora document format,
-                                              ai (settings, prompts, SSE parsing, errors)
+                                              ai (settings, prompts, SSE parsing, errors),
+                                              redact, extract, click_log, tutorial,
+                                              transcript, cleanup
 ```
-
 | Crate | macOS-only? | Tests | What it owns |
 |---|---|---|---|
-| `lumora-core` | no | 256 unit tests | `ai` (provider presets, `AiSettings`, prompt building per writing task, SSE/stream parsing, `AiError` with localised messages, settings-form helpers, `KeyStore` trait), `beautify` (style model, presets, layout, auto-balance), `lumora_doc` (`.lumora` container, DTO layer, schema migrations), `annotate` (paths, shapes, display list, command-pattern document, editor FSM), `i18n` (en + zh-Hans table, language resolution), `ocr` (reading-order assembly), `stitch` (multi-display plans), `geometry` (Rect/Point/Size, handles, pixel alignment, Quartz⇄AppKit flip), `spring` (closed-form damped oscillator + retargetable animator), `selection` (overlay interaction FSM), `snap` (window hit-testing, edge snapping), `settings` (serde/TOML model with validation), `filename` (templates, unique paths), `hotkey` (parse/format/Carbon codes/conflicts), `layout` (card stack, pill, loupe, fly transform), `recording` (lifecycle FSM), `color`, `format`, `action` |
-| `lumora-capture` | yes (error type is portable) | 1 (mac) | `content` (SCShareableContent → displays + z-ordered windows), `screenshot` (SCScreenshotManager), `image` (crop, stitch, pixel reads, PNG+DPI via ImageIO), `ocr` (VNRecognizeTextRequest), `beautify_render` (CoreGraphics background/shadow/frame compositing), `clipboard`, `recorder` (SCStream → AVAssetWriter), `permission` |
-| `lumora-ai` | client portable, Keychain macOS-only | 6 | `client` (blocking chat completions over `ureq`, SSE streaming with deltas, cancel flag, connection test, HTTP → `AiError`), `keychain` (`KeyStore` on the macOS Keychain, service `app.lumora.ai`); re-exports `lumora_core::ai` |
-| `lumora-ui` | yes (`tokens` is portable) | 3 (tokens) | All windows, views, layers and motion (incl. `editor`, `editor::beautify_panel`, `editor::ai_sheet`, `settings_window::ai`, `toast`); emits `UiEvent`s |
-| `lumora` (app) | yes | 1 | `App` state, `Command` dispatch, flows (capture, record, OCR, editor, `doc_flow` for `.lumora` save/open, `ai_flow` for Keychain key + Test Connection, `ai_write_flow` for editor AI writing), Carbon hotkeys, status item, OS glue |
+| `lumora-core` | no | 365 unit tests | `ai` (provider presets, `AiSettings`, prompt building per writing task incl. extract table / code / checklist, SSE/stream parsing, `AiError` with localised messages, settings-form helpers, `KeyStore` trait, local OCR-action results), `redact` (detectors for emails, phones, Chinese ID / bank cards, keys and tokens, IPv4, URL secrets; CJK-aware glyph-width mapping of hits onto OCR boxes; AI-check prompt + parser), `extract` (table / code / checklist recovery from OCR boxes; Markdown, CSV, TSV), `click_log` (`.events.json` sidecar: timing, display → video pixel mapping), `tutorial` (steps from a click log, merge / collapse rules, crop and OCR rects, local titles, AI prompt + tolerant parser, `.steps.json`, Markdown / HTML export, safe relative paths), `transcript` (segments, `.transcript.json`, CJK-aware SRT / WebVTT, chapters and summary with local fallback), `cleanup` (stale `$TMPDIR/Lumora` entries), `beautify` (style model, presets, layout, auto-balance), `lumora_doc` (`.lumora` container, DTO layer, schema migrations), `annotate` (paths, shapes, display list, command-pattern document, editor FSM), `i18n` (en + zh-Hans table, language resolution), `ocr` (reading-order assembly), `stitch` (multi-display plans), `geometry` (Rect/Point/Size, handles, pixel alignment, Quartz⇄AppKit flip), `spring` (closed-form damped oscillator + retargetable animator), `selection` (overlay interaction FSM), `snap` (window hit-testing, edge snapping), `settings` (serde/TOML model with validation), `filename` (templates, unique paths), `hotkey` (parse/format/Carbon codes/conflicts), `layout` (card stack, pill, loupe, fly transform), `recording` (lifecycle FSM), `color`, `format`, `action` |
+| `lumora-capture` | yes (error type and `words` are portable) | 6 (+1 mac) | `content` (SCShareableContent → displays + z-ordered windows), `screenshot` (SCScreenshotManager), `image` (crop, stitch, pixel reads, PNG+DPI via ImageIO), `ocr` (VNRecognizeTextRequest, boxes per run), `faces` (VNDetectFaceRectanglesRequest), `beautify_render` (CoreGraphics background/shadow/frame compositing), `clipboard`, `recorder` (SCStream → AVAssetWriter), `mic` (device list, permission, `AVCaptureSession` path on macOS 14), `tutorial` (`AVAssetImageGenerator` keyframes, ring, crop, OCR hint), `transcribe` (audio export, `SFSpeechRecognizer`), `words` (word → subtitle segment grouping), `permission` |
+| `lumora-ai` | client portable, Keychain macOS-only | 19 | `client` (blocking chat completions over `ureq`, SSE streaming with deltas, cancel flag, connection test, HTTP → `AiError`), `transcribe` (`POST /audio/transcriptions`, 25 MB limit, verbose-JSON segments), `multipart` (form-data builder), `keychain` (`KeyStore` on the macOS Keychain, service `app.lumora.ai`); re-exports `lumora_core::ai` |
+| `lumora-ui` | yes (`tokens` is portable) | 3 (tokens) | All windows, views, layers and motion (incl. `editor`, `editor::beautify_panel`, `ai_sheet`, `text_result`, `click_overlay`, `tutorial_window`, `transcript_window`, `settings_window::{ai, redact}`, `toast`); emits `UiEvent`s |
+| `lumora` (app) | yes | 1 | `App` state, `Command` dispatch, flows (capture, record, OCR, editor, `doc_flow` for `.lumora` save/open, `ai_flow` for Keychain key + Test Connection, `ai_write_flow` for editor AI writing, `redact_flow`, `text_flow` for the Capture Text panel, `tutorial_flow`, `transcribe_flow`), Carbon hotkeys, status item, hidden main menu (Edit / Window key equivalents), OS glue |
 
 ## Coordinate spaces
 
@@ -60,7 +67,11 @@ primary display's height). Overlay views are flipped (`isFlipped = YES`,
   serialised on it (plus the writer's own completion), which is what makes
   the `SendBox` wrappers sound. `stop()` hops onto the same queue so
   finalisation is ordered after in-flight samples.
-* **Background encode** — PNG encoding runs on a user-initiated global queue.
+* **Background work** — PNG encoding, `.lumora` writes, Vision OCR / face
+  detection, AI requests, Keychain reads, tutorial frame rendering, audio
+  export + transcription, HTML export and the launch-time scratch cleanup
+  run on user-initiated global queues. Results hop back with `on_main`,
+  tagged with a request id so stale or cancelled work is dropped.
 
 ## Control flow
 
@@ -113,6 +124,36 @@ background queue (Vision, accurate, en / zh-Hans / zh-Hant / ja, language
 correction) → `lumora_core::ocr::assemble` puts observations in reading
 order (CJK runs joined without spaces) → pasteboard + toast with a preview.
 
+Then, unless Settings → Capture → "Show actions panel after Capture Text"
+is off, the floating `text_result` panel opens (shown with
+`orderFrontRegardless`, never made key until clicked; Esc stops a stream,
+then closes):
+
+```
+Vision runs (text + boxes) ─▶ text_result panel (main)
+   ├─ Copy Text ─────────────▶ pasteboard
+   ├─ As Table / As Code / Checklist ─▶ lumora_core::extract (instant, on-device)
+   │        └─ AI on ─▶ apps/lumora::text_flow ─▶ background: Keychain read,
+   │                    build_request(ExtractTable/ExtractCode/Checklist) ─▶ lumora_ai::complete
+   └─ Summarize / Translate (AI only) ─▶ same path
+deltas ─▶ on_main (request id) ─▶ ai_sheet hosted by the panel (Copy, Copy as CSV, Stop, Retry)
+```
+
+A failed or stopped AI refinement keeps the on-device result. Only the task
+kind is logged, never the text.
+
+### Smart redaction
+
+Editor ⌘⇧R → `EditorAction::SmartRedact` → `apps/lumora::redact_flow` on a
+background queue: Vision OCR (boxes per run) + face detection →
+`lumora_core::redact::detect` (regex-free scanners with checksums: MOD 11-2
+for Chinese IDs, Luhn + issuer prefix + keyword / veto context for bank
+cards) → `redact::layout` maps each match to a sub-rectangle of its OCR box
+using CJK-aware glyph widths → optional AI check (recognised text lines
+only, needs AI Writing) → rectangles back on main → one undoable group of
+pixelate / blur annotations. With "Redact new screenshots automatically"
+on, the local detectors run before copy / save and the redactions stay
+editable in the `.lumora` document.
 ### Annotation editor
 
 ```
@@ -195,6 +236,44 @@ overlay (Record mode, live backdrop) → `RecordingBorder` (outside the area)
 `Recorder::start` with `SCContentFilter(display:excludingWindows: ourWindows)`
 → first complete frame starts the writer session → stop → `finishWriting` →
 poster frame via `AVAssetImageGenerator` → Quick Access card.
+
+* **Microphone** — on macOS 15 SC captures the mic; on macOS 14
+  `lumora_capture::mic` runs an `AVCaptureSession` on the recorder's sample
+  queue, retimed to the host clock with `CMSyncConvertTime`; audio before
+  the first video frame is dropped.
+* **Click ripples + click log** — `click_overlay::ClickMonitor` (global +
+  local mouse-down monitors) feeds one click-through overlay panel per
+  display; those panels are deliberately *not* excluded from the
+  `SCContentFilter`, so the rings are in the video. The raw clicks become
+  `<stem>.events.json` (`lumora_core::click_log`) when the movie finalises.
+* **Sidecars** — `.events.json`, `.steps.json`, `<stem>.tutorial/` and
+  `.transcript.json` move with the movie on Save (copy + delete across
+  volumes) and go to the Trash with it on Delete. At launch,
+  `lumora_core::cleanup` removes `$TMPDIR/Lumora` entries untouched for
+  7 days (never when that folder overlaps the save folder).
+
+### Recording → tutorial
+
+`apps/lumora::tutorial_flow`: `.events.json` → `lumora_core::tutorial`
+steps (outside clicks dropped, double / rapid clicks merged, ≤ 40 steps) →
+background: `lumora_capture::tutorial` grabs a keyframe 0.12 s after each
+click, draws a ring, crops around it, saves `<stem>.tutorial/step-NN.png`
+and reads an OCR hint → titles from AI (text only: click kind, app, window
+title, OCR hint) or local templates → `<stem>.steps.json` →
+`tutorial_window` (edit, Export Markdown / HTML, Copy Markdown). Loaded
+steps are sanitised to safe relative image paths.
+
+### Subtitles, summary and chapters
+
+`apps/lumora::transcribe_flow` on a background queue, cancellable at every
+stage: Speech permission (asked on main first) → export the chosen audio
+track(s) to a temp `.m4a` → recognise with `SFSpeechRecognizer` (on-device,
+strict mode optional; `words::group_words` makes segments) or the AI
+provider's `/audio/transcriptions` (≤ 25 MB) → normalise → summary and
+chapters (AI text-only when on, else local from pauses and clicks) →
+`<stem>.transcript.json` → `transcript_window` (edit lines, Export SRT /
+VTT, Copy Chapters / Summary; edits saved on close). The temp audio is
+always deleted.
 
 ## Motion
 

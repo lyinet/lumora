@@ -99,6 +99,8 @@ pub enum Mode {
         _border: Option<RecordingBorder>,
         stop: StopControl,
         timer: Retained<NSTimer>,
+        /// Click ripples + click-event log for this recording.
+        clicks: Box<crate::record_flow::ClickSession>,
     },
     /// The writer is finalising the file.
     Finishing,
@@ -192,8 +194,22 @@ pub struct App {
     permission_poll: RefCell<Option<Retained<NSTimer>>>,
     next_id: Cell<u64>,
     pub session: RefCell<RecordingSession>,
+    /// Click log of the recording being finalised (written next to the movie).
+    pub pending_click_log: RefCell<Option<crate::record_flow::ClickLogData>>,
     /// Running AI writing requests, by editor (capture) id.
     pub ai_jobs: RefCell<HashMap<u64, crate::ai_write_flow::AiJob>>,
+    /// The Capture Text result panel (created on first use).
+    pub text_panel: RefCell<Option<lumora_ui::text_result::TextResultPanel>>,
+    /// Its running AI request.
+    pub text_job: RefCell<Option<crate::ai_write_flow::AiJob>>,
+    /// Open tutorial windows, by id.
+    pub tutorials: RefCell<HashMap<u64, crate::tutorial_flow::OpenTutorial>>,
+    /// Movies whose tutorial is being made.
+    pub tutorial_busy: RefCell<std::collections::HashSet<PathBuf>>,
+    /// Open transcript windows, by id.
+    pub transcripts: RefCell<HashMap<u64, crate::transcribe_flow::OpenTranscript>>,
+    /// Running transcriptions: movie → cancel flag.
+    pub transcribe_jobs: RefCell<HashMap<PathBuf, std::sync::Arc<std::sync::atomic::AtomicBool>>>,
 }
 
 impl App {
@@ -239,11 +255,19 @@ impl App {
                 permission_poll: RefCell::new(None),
                 next_id: Cell::new(1),
                 session: RefCell::new(RecordingSession::default()),
+                pending_click_log: RefCell::new(None),
                 ai_jobs: RefCell::new(HashMap::new()),
+                text_panel: RefCell::new(None),
+                text_job: RefCell::new(None),
+                tutorials: RefCell::new(HashMap::new()),
+                tutorial_busy: RefCell::new(std::collections::HashSet::new()),
+                transcripts: RefCell::new(HashMap::new()),
+                transcribe_jobs: RefCell::new(HashMap::new()),
             }
         });
         APP.with(|a| *a.borrow_mut() = Rc::downgrade(&app));
         app.apply_hotkeys();
+        system::clean_temp_dir(app.settings.borrow().save_folder(&app.home));
 
         if !permission::has_screen_recording() {
             app.dispatch(Command::ShowOnboarding);
@@ -260,6 +284,12 @@ impl App {
         };
         log::info!("toast: {}{}", tr(msg), detail.as_deref().map(|d| format!(" — {d}")).unwrap_or_default());
         self.toasts.show(kind, tr(msg), detail.as_deref());
+    }
+
+    /// A toast with a ready-made (formatted) title.
+    pub fn notify_text(&self, kind: ToastKind, title: &str, detail: Option<&str>) {
+        log::info!("toast: {title}");
+        self.toasts.show(kind, title, detail);
     }
 
     pub fn shutdown(&self) {
@@ -298,6 +328,8 @@ impl App {
                 system::open_folder(&folder);
             }
             Command::OpenDocument => self.open_document_panel(),
+            Command::MakeTutorial => self.choose_recording_for_tutorial(),
+            Command::Transcribe => self.choose_recording_for_transcript(),
             Command::ShowSettings => self.show_settings(),
             Command::ShowOnboarding => self.show_onboarding(),
             Command::Quit => NSApplication::sharedApplication(self.mtm).terminate(None),
@@ -356,6 +388,9 @@ impl App {
             UiEvent::BeautifyChanged { from, style } => self.on_beautify_changed(from, *style),
             UiEvent::ShortcutRecording(on) => self.hotkeys.borrow_mut().suspend(on),
             UiEvent::Onboarding(action) => self.on_onboarding(action),
+            UiEvent::TextResult(action) => self.on_text_result(action),
+            UiEvent::Tutorial { id, action } => self.on_tutorial(id, action),
+            UiEvent::Transcript { id, action } => self.on_transcript(id, action),
             UiEvent::AiKeyRequested(provider) => self.on_ai_key_requested(provider),
             UiEvent::AiKeySave { provider, key } => self.on_ai_key_save(provider, key),
             UiEvent::AiTestConnection { id, settings, key } => self.on_ai_test_connection(id, *settings, key),
@@ -371,9 +406,19 @@ impl App {
                             // The record holds the plain capture; the file
                             // (and so the clipboard) gets the beautified one.
                             let style = self.settings.borrow().beautify.clone();
-                            let out =
-                                lumora_capture::beautify_render::beautify_for_export(img.clone(), &style, rec.scale);
-                            lumora_capture::clipboard::copy_image(&out, rec.scale, Some(&rec.file));
+                            if style.enabled {
+                                // Render off the main thread, then copy.
+                                let (img, scale, file) = (img.clone(), rec.scale, rec.file.clone());
+                                DispatchQueue::global_queue(dispatch2::GlobalQueueIdentifier::QualityOfService(
+                                    dispatch2::DispatchQoS::UserInitiated,
+                                ))
+                                .exec_async(move || {
+                                    let out = lumora_capture::beautify_render::beautify_for_export(img, &style, scale);
+                                    on_main(move |_| lumora_capture::clipboard::copy_image(&out, scale, Some(&file)));
+                                });
+                            } else {
+                                lumora_capture::clipboard::copy_image(img, rec.scale, Some(&rec.file));
+                            }
                         }
                         _ => lumora_capture::clipboard::copy_file(&rec.file),
                     }
@@ -394,6 +439,16 @@ impl App {
                             .or_else(|_| std::fs::copy(&rec.file, &dest).map(|_| ()))
                             .is_ok()
                         {
+                            // Sidecars (click log, tutorial) follow the movie.
+                            if rec.video {
+                                move_sidecars(&rec.file, &dest);
+                                for o in self.tutorials.borrow_mut().values_mut().filter(|o| o.movie == rec.file) {
+                                    o.movie = dest.clone();
+                                }
+                                for o in self.transcripts.borrow_mut().values_mut().filter(|o| o.movie == rec.file) {
+                                    o.movie = dest.clone();
+                                }
+                            }
                             rec.file = dest;
                             rec.temp = false;
                         }
@@ -421,6 +476,13 @@ impl App {
                     if rec.editable.is_some() && doc.exists() {
                         system::trash(&doc);
                     }
+                    if rec.video {
+                        for side in recording_sidecars(&rec.file) {
+                            if side.exists() {
+                                system::trash(&side);
+                            }
+                        }
+                    }
                 }
                 self.quick.dismiss(id);
             }
@@ -430,6 +492,20 @@ impl App {
                 }
             }
             CardAction::DraggedOut => self.quick.dismiss(id),
+            CardAction::Tutorial => {
+                let movie = self.captures.borrow().get(&id).map(|rec| rec.file.clone());
+                if let Some(movie) = movie {
+                    self.make_tutorial(movie);
+                }
+                self.quick.dismiss(id);
+            }
+            CardAction::Subtitles => {
+                let movie = self.captures.borrow().get(&id).map(|rec| rec.file.clone());
+                if let Some(movie) = movie {
+                    self.open_or_transcribe(movie);
+                }
+                self.quick.dismiss(id);
+            }
             CardAction::Annotate => {
                 self.open_editor(id);
                 self.quick.dismiss(id);
@@ -474,6 +550,9 @@ impl App {
         for editor in self.editors.borrow().values() {
             editor.set_beautify(beautify.clone());
             editor.set_ai_enabled(ai_enabled);
+        }
+        if let Some(p) = self.text_panel.borrow().as_ref() {
+            p.set_ai_enabled(ai_enabled);
         }
         self.apply_hotkeys();
         if language_changed {
@@ -588,6 +667,62 @@ impl App {
                 let o = self.onboarding.borrow_mut().take();
                 drop(o);
             }
+        }
+    }
+}
+
+/// Everything Lumora keeps next to a recording: click log, tutorial steps,
+/// tutorial images folder and transcript.
+fn recording_sidecars(movie: &std::path::Path) -> [PathBuf; 4] {
+    [
+        lumora_core::click_log::sidecar_path(movie),
+        lumora_core::tutorial::sidecar_path(movie),
+        lumora_core::tutorial::image_dir(movie),
+        lumora_core::transcript::sidecar_path(movie),
+    ]
+}
+
+/// Rename `a` to `b`, falling back to copy-then-delete across volumes
+/// (folders copied recursively). Best effort.
+fn move_path(a: &std::path::Path, b: &std::path::Path) -> std::io::Result<()> {
+    fn copy_all(a: &std::path::Path, b: &std::path::Path) -> std::io::Result<()> {
+        if std::fs::symlink_metadata(a)?.is_dir() {
+            std::fs::create_dir_all(b)?;
+            for e in std::fs::read_dir(a)? {
+                let e = e?;
+                copy_all(&e.path(), &b.join(e.file_name()))?;
+            }
+            Ok(())
+        } else {
+            std::fs::copy(a, b).map(|_| ())
+        }
+    }
+    if std::fs::rename(a, b).is_ok() {
+        return Ok(());
+    }
+    copy_all(a, b)?;
+    // The copy is complete; a leftover original is only scratch-folder litter.
+    let _ = if a.is_dir() { std::fs::remove_dir_all(a) } else { std::fs::remove_file(a) };
+    Ok(())
+}
+
+/// Move a recording's sidecars (click log, tutorial steps + images,
+/// transcript) along with it when Save takes it out of the scratch folder.
+/// The movie may get a new unique name, so `steps.json` is rewritten to point
+/// at the renamed `<stem>.tutorial/` folder.
+fn move_sidecars(from: &std::path::Path, to: &std::path::Path) {
+    for (a, b) in recording_sidecars(from).into_iter().zip(recording_sidecars(to)) {
+        if a.exists() && !b.exists() && move_path(&a, &b).is_err() {
+            log::warn!("could not move {}", a.display());
+        }
+    }
+    let steps = lumora_core::tutorial::sidecar_path(to);
+    if let Ok(mut t) = std::fs::read_to_string(&steps)
+        .map_err(|_| ())
+        .and_then(|j| lumora_core::tutorial::Tutorial::from_json(&j).map_err(|_| ()))
+    {
+        if t.relocate(from, to) && std::fs::write(&steps, t.to_json()).is_err() {
+            log::warn!("could not update {}", steps.display());
         }
     }
 }

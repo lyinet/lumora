@@ -32,16 +32,6 @@ impl App {
         if !cfg.enabled {
             return self.ai_done(editor, request, Err(AiError::BadConfig));
         }
-        let key = match Keychain.get(cfg.provider) {
-            Ok(k) => k,
-            Err(e) => {
-                log::warn!("reading the {} API key failed: {e:?}", cfg.provider.id());
-                return self.ai_done(editor, request, Err(e));
-            }
-        };
-        if let Err(e) = cfg.check_ready(key.as_deref()) {
-            return self.ai_done(editor, request, Err(e));
-        }
         // The rendered (annotated) image goes along only when the user
         // opted in and the task can use it. Flattening is main-thread work.
         let image = if cfg.send_image && req.kind.uses_image() {
@@ -58,14 +48,21 @@ impl App {
         DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
             move || {
                 let run = || -> Result<String, AiError> {
-                    let ocr = if kind.needs_ocr(source_text.is_some()) {
-                        lumora_capture::ocr::recognize_sync(&base).unwrap_or_else(|e| {
+                    // Off the main thread: an ad-hoc-signed build may show a
+                    // Keychain prompt, which would block the run loop.
+                    let key = Keychain.get(cfg.provider).inspect_err(|e| {
+                        log::warn!("reading the {} API key failed: {e:?}", cfg.provider.id());
+                    })?;
+                    cfg.check_ready(key.as_deref())?;
+                    let boxes = if kind.needs_ocr(source_text.is_some()) {
+                        lumora_capture::ocr::recognize_boxes_sync(&base).unwrap_or_else(|e| {
                             log::warn!("OCR for AI writing failed: {e}");
-                            String::new()
+                            Vec::new()
                         })
                     } else {
-                        String::new()
+                        Vec::new()
                     };
+                    let ocr = lumora_core::ocr::assemble(&boxes);
                     if cancel.load(Ordering::Relaxed) {
                         return Err(AiError::Cancelled);
                     }
@@ -76,8 +73,15 @@ impl App {
                             Err(e) => log::warn!("encoding the screenshot for AI failed: {e}"),
                         }
                     }
-                    let task =
-                        kind.task(source_text.unwrap_or(if kind.uses_selection() { ocr } else { String::new() }));
+                    let task = kind.task(source_text.unwrap_or_else(|| {
+                        if kind.uses_selection() {
+                            ocr
+                        } else if kind.needs_boxes() {
+                            lumora_core::ai::ai_input(kind, &boxes, &ocr)
+                        } else {
+                            String::new()
+                        }
+                    }));
                     let body = build_request(&cfg, &task, &ctx, ui, true)?;
                     lumora_ai::complete(&cfg, key.as_deref(), &body, &cancel, |delta| {
                         let delta = delta.to_string();

@@ -10,7 +10,8 @@ use super::path::{
 use super::style::Style;
 
 /// How a redaction hides what's under it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RedactMode {
     #[default]
     Pixelate,

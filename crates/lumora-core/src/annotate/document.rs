@@ -331,6 +331,23 @@ impl Document {
         id
     }
 
+    /// Add several annotations on top as **one** undo step. Returns their
+    /// ids (empty, and no history entry, when `shapes` is empty).
+    pub fn add_many(&mut self, shapes: Vec<Shape>, style: Style) -> Vec<AnnotationId> {
+        let mut ids = Vec::with_capacity(shapes.len());
+        let mut cmds = Vec::with_capacity(shapes.len());
+        let base = self.items.len();
+        for (i, shape) in shapes.into_iter().enumerate() {
+            let id = self.new_id();
+            ids.push(id);
+            cmds.push(Command::Insert { index: base + i, item: Annotation { id, shape, style } });
+        }
+        if !cmds.is_empty() {
+            self.execute(Command::Batch(cmds));
+        }
+        ids
+    }
+
     pub fn remove(&mut self, id: AnnotationId) -> bool {
         match (self.index_of(id), self.get(id).cloned()) {
             (Some(index), Some(item)) => self.execute(Command::Delete { index, item }),

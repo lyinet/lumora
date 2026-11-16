@@ -35,7 +35,7 @@
 <br>
 
 > [!NOTE]
-> **Lumora is in early alpha (v0.4).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested — but it **has not been run on real hardware yet**, so expect rough edges. Hardware bring-up is the next milestone. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
+> **Lumora is in early alpha (v0.5).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested — but it **has not been run on real hardware yet**, so expect rough edges. Hardware bring-up is the next milestone. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
 
 ## Features
 
@@ -61,7 +61,7 @@
     <td width="50%" valign="top">
       <img src="assets/readme/feature-recording.svg" width="100%" alt="Screen recording: a red marching-ants border, a 3-2-1 countdown ring and a red timer in the menu bar">
       <h3>Screen recording</h3>
-      <p>Record an area or the full screen to H.264 or HEVC MP4 at 30 or 60 fps, with cursor on or off, system audio and microphone (macOS 15+). A 3-2-1 countdown ring, a red timer in the menu bar, a floating stop button, and a marching-ants border that never appears in the video.</p>
+      <p>Record an area or the full screen to H.264 or HEVC MP4 at 30 or 60 fps, with cursor on or off, system audio and microphone (macOS 14+), and optional click ripples. A 3-2-1 countdown ring, a red timer in the menu bar, a floating stop button, and a marching-ants border that never appears in the video.</p>
     </td>
   </tr>
 </table>
@@ -75,6 +75,13 @@
 - **Beautify** — frame a capture on a gradient, colour or image background with padding, rounded corners, a soft shadow, an optional macOS window frame and fixed aspect ratios (16:9, 1:1, …), edited live from the ✨ panel in the annotation editor.
 - **Editable `.lumora` documents** — every saved screenshot keeps a `.lumora` file beside its PNG with the original capture, annotations and beautify style; double-click it in Finder (or use Open…) and every arrow, label and crop is still editable.
 - **AI Writing (optional, off by default)** — press ✨ / <kbd>⌘</kbd><kbd>J</kbd> in the editor to write a caption, a step guide, alt text, or to polish, translate (English / 简体中文) or summarize, streamed into a sheet you can insert as a text annotation. Bring your own provider: OpenAI, DeepSeek, Qwen, Kimi (Moonshot), a local Ollama or any OpenAI-compatible endpoint. Your API key stays in the macOS Keychain; by default only the on-device recognised text and your annotation text are sent — the screenshot itself only if you opt in.
+- **Smart Redaction** — one click (or <kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd>) in the editor pixelates or blurs emails, phone numbers, Chinese ID and bank card numbers (checksum-verified), API keys and tokens, IP addresses, secrets in links and faces — detected on your Mac with Vision, added as one undoable group. Choose categories in Settings → Capture, optionally redact every new screenshot before it's copied or saved, or add an AI check that sends recognised text only, never the image.
+- **OCR actions** — after Capture Text (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>2</kbd>) copies the text, a small floating panel offers Copy, Summarize, Translate (English / 简体中文), As Table, As Code and Checklist, streamed into a result sheet with Copy, Stop and Retry. Summarize and Translate use AI Writing; the rest work without it.
+- **Screenshot → table / code** — rebuild a table from a screenshot on your Mac (rows and columns recovered from the text positions) and copy it as Markdown or CSV, or turn a screenshot of code back into code with its indentation restored. With AI Writing on, AI refines the on-device result; the editor's AI menu has Extract table and Extract code too.
+- **Click ripples** — while recording, every click draws a springy ring (blue for left, orange for right) that appears in the video, while the border, stop button and toasts stay out of it. Toggle it in Settings → Recording. Each click is also logged with its time, position and app to a `<movie>.events.json` file next to the video, ready for step-by-step tutorials.
+- **Recording → tutorial** — click **Make Tutorial** on a recording's Quick Access card (or **Make Tutorial from Recording…** in the menu bar) and Lumora turns the clicks into a step-by-step guide: a frame just after each click with a highlight ring, cropped around the pointer, titled from the text next to it (read on your Mac). With AI on, the steps are written by your provider from text only — app, window title and nearby words, never the frames. Edit or delete steps, then export Markdown, a single self-contained HTML page (light and dark), or copy Markdown.
+- **Subtitles, summary and chapters** — click **Subtitles** on a recording's Quick Access card (or **Transcribe Recording…** in the menu bar). Speech is recognised on your Mac with Apple Speech by default (strictly on-device unless you allow Apple's servers), or by your AI provider's Whisper-compatible endpoint (audio up to 25 MB). Choose the spoken language (Chinese, English or the app's language) and the audio source (microphone, system audio or both) in Settings → Recording. Lumora then writes a short summary and chapters — by AI when it's on (text only), otherwise locally from pauses and clicks. Edit the lines, then export SRT or WebVTT, or copy the chapters (YouTube-style) and the summary. Everything is kept in `<movie>.transcript.json` and reopens with your edits.
+- **Microphone recording on macOS 14+** — record your voice with the screen on macOS 14 as well as 15, from the system default or a microphone you pick in Settings → Recording. Lumora asks for microphone access the first time.
 
 ## Keyboard shortcuts
 
@@ -140,6 +147,19 @@ NOTARY_PROFILE=lumora-notary scripts/bundle.sh
 > [!TIP]
 > Screen Recording permission is tied to the app's code signature. Ad-hoc builds get a new identity each time, so macOS asks again after every rebuild — use a stable signing identity for day-to-day development.
 
+### Permissions
+
+Lumora asks for each permission only when a feature first needs it:
+
+| Permission | Needed for |
+|---|---|
+| **Screen Recording** | Every screenshot and recording (required) |
+| **Microphone** | Recording your voice, only when the microphone is turned on in Settings → Recording |
+| **Speech Recognition** | On-device subtitles with Apple Speech, only when you transcribe a recording |
+| **Keychain** | Storing and reading your AI provider's API key (`app.lumora.ai`), only if you use AI features |
+
+No Accessibility or Input Monitoring access is needed. Network requests go only to the AI provider you configure, and only when you use an AI feature or cloud transcription.
+
 <details>
 <summary><b>Developing on Linux or in CI</b></summary>
 
@@ -173,18 +193,18 @@ Settings are stored as TOML at `~/Library/Application Support/Lumora/settings.to
 ## Architecture
 
 <p align="center">
-  <img src="assets/readme/architecture.svg" width="720" alt="Four crates, dependencies pointing down: apps/lumora, lumora-ui, lumora-capture, lumora-core">
+  <img src="assets/readme/architecture.svg" width="720" alt="Five crates, dependencies pointing down: apps/lumora on top, then lumora-ui, lumora-ai and lumora-capture, all resting on lumora-core">
 </p>
 
 A Cargo workspace of five crates with a strict dependency direction. Logic that doesn't need the OS lives in the bottom crate and is tested on every host; every crate above it is a thin, typed layer over Apple frameworks.
 
 | Crate | What it owns |
 |---|---|
-| [`apps/lumora`](apps/lumora) | The binary: `NSApplication`, status item, Carbon hotkeys, app state and capture/record flows |
-| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation: overlay, Quick Access, pins, shutter, countdown, recording HUD, settings, onboarding, annotation editor + beautify panel + AI sheet |
-| [`lumora-ai`](crates/lumora-ai) | OpenAI-compatible streaming client and Keychain key storage for AI Writing |
-| [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit, ImageIO, AVFoundation, pasteboard, beautify renderer |
-| [`lumora-core`](crates/lumora-core) | Pure Rust: geometry, springs, selection state machine, snapping, settings, file names, hotkey parsing, layout, recording state machine, beautify model, `.lumora` document format, AI settings / prompts / stream parsing |
+| [`apps/lumora`](apps/lumora) | The binary: `NSApplication`, status item, hidden main menu, Carbon hotkeys, app state and the capture / record / OCR / redaction / tutorial / transcription flows |
+| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation: overlay, Quick Access, pins, shutter, countdown, recording HUD, settings, onboarding, annotation editor + beautify panel + AI sheet, Capture Text actions panel, click-ripple overlay, tutorial and transcript windows |
+| [`lumora-ai`](crates/lumora-ai) | OpenAI-compatible streaming chat and `/audio/transcriptions` clients, Keychain key storage |
+| [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit, ImageIO, AVFoundation (incl. `AVCaptureSession` mic on macOS 14), pasteboard, beautify renderer, Vision OCR + face detection, tutorial frame rendering, Apple Speech transcription |
+| [`lumora-core`](crates/lumora-core) | Pure Rust: geometry, springs, selection state machine, snapping, settings, file names, hotkey parsing, layout, recording state machine, beautify model, `.lumora` document format, AI settings / prompts / stream parsing, redaction detectors, table / code extraction, click log, tutorial model + export, transcript (SRT / VTT, chapters, summary), temp-folder cleanup |
 
 Deep dives: [ARCHITECTURE.md](ARCHITECTURE.md) (threading, data flow, coordinate spaces) · [DESIGN.md](DESIGN.md) (colour, shape, type and motion tokens).
 
@@ -196,18 +216,20 @@ Everything below is written, type-checked and unit-tested, but **not yet run on 
 - [x] **v0.2 — annotate:** annotation editor, OCR (Capture Text), toast HUD, zh-Hans localisation, app icon, window-only mode, multi-display areas
 - [x] **v0.3 — beautify:** backgrounds, padding, shadow, window frame, aspect ratios; editable `.lumora` documents
 - [x] **v0.4 — AI Writing:** captions, step guides, alt text, polish, translate, summarize with your own provider
+- [x] **v0.5 — AI combo:** Smart Redaction (on-device detection, one-click pixelate / blur, optional AI check); OCR actions panel and screenshot → table / code, local-first; click ripples, click-event log and microphone on macOS 14; recording → step-by-step tutorial; subtitles, summary and chapters (on-device or cloud, SRT / VTT)
 
-**v0.5 — next**
+**v0.6 — next**
 
 - [ ] Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
+- [ ] Developer ID signing + notarization in CI
 - [ ] Capture history window (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>)
-- [ ] Recording extras: click ripples, keystroke HUD, microphone on macOS 14, GIF export + trim
+- [ ] Recording extras: keystroke HUD, GIF export + trim, burn-in subtitles
 - [ ] Scrolling capture
-- [ ] AI actions on the OCR toast
+- [ ] OCR result cache in the editor
 
 **Later**
 
-- [ ] Developer ID signing + notarization, Sparkle updates, Homebrew cask
+- [ ] Sparkle updates, Homebrew cask
 - [ ] Editor polish, recording pause/resume and webcam bubble, cloud links, Shortcuts automation
 - [ ] Mac App Store variant, more localisations (ja, zh-Hant, de, fr, es)
 

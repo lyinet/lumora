@@ -38,7 +38,7 @@ pub fn is_cjk(c: char) -> bool {
     )
 }
 
-fn joiner(left: &str, right: &str) -> &'static str {
+pub(crate) fn joiner(left: &str, right: &str) -> &'static str {
     match (left.chars().last(), right.chars().next()) {
         (Some(a), Some(b)) if is_cjk(a) && is_cjk(b) => "",
         (Some(a), Some(b)) if is_cjk(a) && b.is_ascii_punctuation() => "",
@@ -57,13 +57,13 @@ fn vertical_overlap(a: &Rect, b: &Rect) -> f64 {
     ((bottom - top) / shorter).max(0.0)
 }
 
-struct Line<'a> {
-    rect: Rect,
-    boxes: Vec<&'a TextBox>,
+pub(crate) struct Line<'a> {
+    pub(crate) rect: Rect,
+    pub(crate) boxes: Vec<&'a TextBox>,
 }
 
 /// Group observations into lines in reading order.
-fn lines(boxes: &[TextBox]) -> Vec<Line<'_>> {
+pub(crate) fn lines(boxes: &[TextBox]) -> Vec<Line<'_>> {
     let mut sorted: Vec<&TextBox> = boxes.iter().filter(|b| !b.text.trim().is_empty()).collect();
     sorted.sort_by(|a, b| a.rect.mid().y.total_cmp(&b.rect.mid().y));
     let mut out: Vec<Line> = Vec::new();

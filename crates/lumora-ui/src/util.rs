@@ -380,14 +380,23 @@ impl ActionTarget {
 // Panels
 // ---------------------------------------------------------------------------
 
+/// Instance variables of [`KeyablePanel`].
+#[derive(Default)]
+pub struct KeyablePanelIvars {
+    on_cancel: RefCell<Option<Box<dyn Fn()>>>,
+}
+
 define_class!(
     /// Borderless panels return NO from `canBecomeKeyWindow` by default, so
     /// they never receive key events. This subclass opts in (but never
     /// becomes *main*), which is what overlays, pins and the countdown need
-    /// to handle Esc/Enter without activating the app.
+    /// to handle Esc/Enter without activating the app. Esc and ⌘. reach
+    /// `cancelOperation:` through the responder chain even when a text view
+    /// or button is first responder; see [`set_on_cancel`].
     #[unsafe(super(NSPanel, NSWindow, NSResponder, NSObject))]
     #[thread_kind = MainThreadOnly]
     #[name = "LumoraKeyablePanel"]
+    #[ivars = KeyablePanelIvars]
     pub struct KeyablePanel;
 
     impl KeyablePanel {
@@ -400,8 +409,31 @@ define_class!(
         fn can_become_main(&self) -> bool {
             false
         }
+
+        #[unsafe(method(cancelOperation:))]
+        fn cancel_operation(&self, sender: Option<&AnyObject>) {
+            let handled = match self.ivars().on_cancel.borrow().as_ref() {
+                Some(f) => {
+                    f();
+                    true
+                }
+                None => false,
+            };
+            if !handled {
+                // SAFETY: forwarding the standard NSResponder action to super.
+                let _: () = unsafe { msg_send![super(self), cancelOperation: sender] };
+            }
+        }
     }
 );
+
+/// Run `f` when Esc (or ⌘.) reaches `panel`. Only panels made with
+/// `PanelSpec { keyable: true, .. }` support this; others are ignored.
+pub fn set_on_cancel(panel: &NSPanel, f: impl Fn() + 'static) {
+    if let Some(p) = panel.downcast_ref::<KeyablePanel>() {
+        *p.ivars().on_cancel.borrow_mut() = Some(Box::new(f));
+    }
+}
 
 /// Options for [`make_panel`].
 #[derive(Debug, Clone, Copy)]
@@ -418,8 +450,10 @@ pub fn make_panel(mtm: MainThreadMarker, frame: CGRect, spec: PanelSpec) -> Reta
     use objc2_app_kit::{NSBackingStoreType, NSWindowCollectionBehavior, NSWindowStyleMask};
     let style = NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel;
     let panel: Retained<NSPanel> = if spec.keyable {
+        let this = KeyablePanel::alloc(mtm).set_ivars(KeyablePanelIvars::default());
+        // SAFETY: NSPanel's designated initialiser.
         let p: Retained<KeyablePanel> = unsafe {
-            msg_send![KeyablePanel::alloc(mtm), initWithContentRect: frame, styleMask: style, backing: NSBackingStoreType::Buffered, defer: false]
+            msg_send![super(this), initWithContentRect: frame, styleMask: style, backing: NSBackingStoreType::Buffered, defer: false]
         };
         Retained::into_super(p)
     } else {
@@ -560,6 +594,50 @@ pub fn choose_files_with_extension(mtm: MainThreadMarker, extension: &str) -> Ve
         return Vec::new();
     }
     panel.URLs().iter().filter_map(|u| u.path()).map(|p| std::path::PathBuf::from(p.to_string())).collect()
+}
+
+/// Run a modal open panel for one file whose extension is one of
+/// `extensions`. Returns `None` when cancelled.
+pub fn choose_file_with_extensions(mtm: MainThreadMarker, extensions: &[&str]) -> Option<std::path::PathBuf> {
+    use objc2_uniform_type_identifiers::UTType;
+    objc2_app_kit::NSApplication::sharedApplication(mtm).activate();
+    let panel = objc2_app_kit::NSOpenPanel::openPanel(mtm);
+    panel.setCanChooseDirectories(false);
+    panel.setCanChooseFiles(true);
+    panel.setAllowsMultipleSelection(false);
+    let types: Vec<_> =
+        extensions.iter().filter_map(|e| UTType::typeWithFilenameExtension(&NSString::from_str(e))).collect();
+    if !types.is_empty() {
+        panel.setAllowedContentTypes(&objc2_foundation::NSArray::from_retained_slice(&types));
+    }
+    if panel.runModal() != objc2_app_kit::NSModalResponseOK {
+        return None;
+    }
+    panel.URL().and_then(|u| u.path()).map(|p| std::path::PathBuf::from(p.to_string()))
+}
+
+/// Run a modal save panel starting in `dir` with `name`, restricted to
+/// `extension`. Returns the chosen path, or `None` when cancelled.
+pub fn choose_save_path(
+    mtm: MainThreadMarker,
+    dir: &std::path::Path,
+    name: &str,
+    extension: &str,
+) -> Option<std::path::PathBuf> {
+    use objc2_uniform_type_identifiers::UTType;
+    objc2_app_kit::NSApplication::sharedApplication(mtm).activate();
+    let panel = objc2_app_kit::NSSavePanel::savePanel(mtm);
+    panel.setNameFieldStringValue(&NSString::from_str(name));
+    panel.setCanCreateDirectories(true);
+    let url = objc2_foundation::NSURL::fileURLWithPath(&NSString::from_str(&dir.to_string_lossy()));
+    panel.setDirectoryURL(Some(&url));
+    if let Some(t) = UTType::typeWithFilenameExtension(&NSString::from_str(extension)) {
+        panel.setAllowedContentTypes(&objc2_foundation::NSArray::from_retained_slice(&[t]));
+    }
+    if panel.runModal() != objc2_app_kit::NSModalResponseOK {
+        return None;
+    }
+    panel.URL().and_then(|u| u.path()).map(|p| std::path::PathBuf::from(p.to_string()))
 }
 
 /// Show a modal warning alert with a title and detail text.

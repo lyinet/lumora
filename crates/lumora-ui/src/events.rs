@@ -50,6 +50,33 @@ pub enum CardAction {
     Annotate,
     /// Dropped into another app; the card dismisses itself.
     DraggedOut,
+    /// "Make Tutorial" (recordings with a click log).
+    Tutorial,
+    /// "Subtitles" (recordings): transcribe, or reopen the transcript.
+    Subtitles,
+}
+
+/// What the transcript window tells the app. Each carries the transcript
+/// with the window's current edits.
+#[derive(Debug)]
+pub enum TranscriptAction {
+    ExportSrt(Box<lumora_core::transcript::Transcript>),
+    ExportVtt(Box<lumora_core::transcript::Transcript>),
+    CopyChapters(Box<lumora_core::transcript::Transcript>),
+    CopySummary(Box<lumora_core::transcript::Transcript>),
+    /// The window closed (the app saves `.transcript.json` and drops it).
+    Closed(Box<lumora_core::transcript::Transcript>),
+}
+
+/// What the tutorial window tells the app. Each carries the tutorial with
+/// the window's current edits.
+#[derive(Debug)]
+pub enum TutorialAction {
+    ExportMarkdown(Box<lumora_core::tutorial::Tutorial>),
+    ExportHtml(Box<lumora_core::tutorial::Tutorial>),
+    CopyMarkdown(Box<lumora_core::tutorial::Tutorial>),
+    /// The window closed (the app saves `.steps.json` and drops it).
+    Closed(Box<lumora_core::tutorial::Tutorial>),
 }
 
 /// A flattened editor export, plus the editable state it came from (for
@@ -88,6 +115,26 @@ pub enum EditorAction {
     AiCancel(u64),
     /// "Open AI Settings" in the result sheet.
     OpenAiSettings,
+    /// Smart Redact: find sensitive info in the capture and answer with
+    /// `EditorWindow::smart_redact_finished` under `request.request`.
+    SmartRedact(Box<SmartRedactRequest>),
+}
+
+/// A smart-redaction request from the editor. The app runs OCR, face
+/// detection and (when enabled) the AI check off the main thread.
+pub struct SmartRedactRequest {
+    /// Per-editor request id; replies with another id are stale.
+    pub request: u64,
+    /// The unannotated capture (detection runs on this).
+    pub base: CFRetained<CGImage>,
+    /// Pixels per point of `base`.
+    pub scale: f64,
+}
+
+impl std::fmt::Debug for SmartRedactRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmartRedactRequest").field("request", &self.request).finish_non_exhaustive()
+    }
 }
 
 /// An AI writing request from the editor. The app reads the key, runs OCR
@@ -112,6 +159,39 @@ impl std::fmt::Debug for AiWriteRequest {
             .field("request", &self.request)
             .field("kind", &self.kind)
             .field("has_source", &self.source_text.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// What the Capture Text result panel tells the app.
+#[derive(Debug)]
+pub enum TextResultAction {
+    /// Run an AI task on the recognised text; stream the answer back with
+    /// `TextResultPanel::ai_delta` / `ai_finished` under `request`.
+    Run(TextAiRequest),
+    /// Stop request `id` (Stop, Close, or a newer request).
+    Cancel(u64),
+    /// "Open AI Settings" in the result sheet.
+    OpenAiSettings,
+    /// The panel closed.
+    Closed,
+}
+
+/// An AI request from the Capture Text panel. `input` is already prepared
+/// ([`lumora_core::ai::ai_input`]): the text, the positioned listing for
+/// tables, or the locally indented code.
+pub struct TextAiRequest {
+    pub request: u64,
+    pub kind: lumora_core::ai::AiTaskKind,
+    pub input: String,
+}
+
+impl std::fmt::Debug for TextAiRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never log the recognised text.
+        f.debug_struct("TextAiRequest")
+            .field("request", &self.request)
+            .field("kind", &self.kind)
             .finish_non_exhaustive()
     }
 }
@@ -161,6 +241,18 @@ pub enum UiEvent {
     /// suspends global hotkeys meanwhile so the combo reaches the field.
     ShortcutRecording(bool),
     Onboarding(OnboardingAction),
+    /// The Capture Text result panel.
+    TextResult(TextResultAction),
+    /// A tutorial window (`id` from `TutorialWindow::show`).
+    Tutorial {
+        id: u64,
+        action: TutorialAction,
+    },
+    /// A transcript window (`id` from `TranscriptWindow::show`).
+    Transcript {
+        id: u64,
+        action: TranscriptAction,
+    },
     /// The AI tab needs the stored API key for `provider`; the app reads
     /// the Keychain and answers with `SettingsWindow::set_ai_key`.
     AiKeyRequested(lumora_core::ai::AiProvider),

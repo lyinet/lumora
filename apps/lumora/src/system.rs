@@ -46,9 +46,30 @@ pub fn home_dir() -> PathBuf {
 }
 
 /// Where captures go when "Save to disk" is off (they still need a file for
-/// drag-and-drop). Cleared by macOS periodically.
+/// drag-and-drop). Pruned at launch by [`clean_temp_dir`].
 pub fn temp_dir() -> PathBuf {
     std::env::temp_dir().join("Lumora")
+}
+
+/// On a background thread, delete scratch-folder entries untouched for
+/// [`lumora_core::cleanup::TEMP_MAX_AGE`] (7 days). Only [`temp_dir`] is
+/// touched, and nothing at all if it overlaps the user's save folder.
+pub fn clean_temp_dir(save_folder: PathBuf) {
+    let dir = temp_dir();
+    let spawned = std::thread::Builder::new().name("lumora-temp-cleanup".into()).spawn(move || {
+        let n = lumora_core::cleanup::remove_stale(
+            &dir,
+            std::time::SystemTime::now(),
+            lumora_core::cleanup::TEMP_MAX_AGE,
+            &[save_folder],
+        );
+        if n > 0 {
+            log::info!("removed {n} old item(s) from {}", dir.display());
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!("temp cleanup not started: {e}");
+    }
 }
 
 const SHUTTER: &str =
@@ -105,7 +126,7 @@ pub fn trash(path: &Path) {
             return;
         }
     }
-    let _ = std::fs::remove_file(path);
+    let _ = if path.is_dir() { std::fs::remove_dir_all(path) } else { std::fs::remove_file(path) };
 }
 
 /// Start a fresh instance of the bundle and quit this one (needed after a

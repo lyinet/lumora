@@ -28,8 +28,8 @@ pub use form::{
 pub use prompt::{build_request, ping_body, AiContext, ChatRequest, StepHint, WritingTask, MAX_INPUT_CHARS};
 pub use stream::{model_ids, parse_completion, SseEvent, SseParser};
 pub use write::{
-    clean_output, error_opens_settings, language_name, plan_insert, text_of, wrap, AiTaskKind, InsertPlan,
-    INSERT_MARGIN,
+    ai_input, clean_output, error_opens_settings, language_name, local_result, plan_insert, table_csv, text_of, wrap,
+    AiTaskKind, InsertPlan, INSERT_MARGIN,
 };
 
 /// Keychain generic-password service under which API keys are stored; the
@@ -188,6 +188,9 @@ pub struct AiSettings {
     pub send_image: bool,
     /// Connect/read timeout in seconds, clamped to 5…600.
     pub timeout_secs: u32,
+    /// Write tutorial step titles with AI (when AI is enabled). Only the
+    /// app, window title and text next to each click are sent.
+    pub tutorial_steps: bool,
 }
 
 impl Default for AiSettings {
@@ -208,6 +211,7 @@ impl AiSettings {
             output_language: OutputLanguage::Auto,
             send_image: false,
             timeout_secs: 60,
+            tutorial_steps: true,
         }
     }
 
@@ -250,6 +254,11 @@ impl AiSettings {
     /// `GET` target used by "Test connection".
     pub fn models_url(&self) -> String {
         self.endpoint("models")
+    }
+
+    /// Whether tutorials should be written by AI.
+    pub fn writes_tutorials(&self) -> bool {
+        self.enabled && self.tutorial_steps
     }
 
     /// Whether the settings are complete enough to send a request with

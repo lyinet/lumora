@@ -4,6 +4,7 @@
 //! [`UiEvent::SettingsChanged`]; the app persists and re-applies it.
 
 mod ai;
+mod redact;
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -18,9 +19,9 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
 use objc2::{define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSBackingStoreType, NSButton, NSControlStateValueOff, NSControlStateValueOn, NSEvent,
-    NSEventModifierFlags, NSFont, NSOpenPanel, NSPopUpButton, NSResponder, NSTabView, NSTabViewDelegate, NSTabViewItem,
-    NSTextAlignment, NSTextField, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
+    NSApplication, NSBackingStoreType, NSBox, NSBoxType, NSButton, NSControlStateValueOff, NSControlStateValueOn,
+    NSEvent, NSEventModifierFlags, NSFont, NSOpenPanel, NSPopUpButton, NSResponder, NSTabView, NSTabViewDelegate,
+    NSTabViewItem, NSTextAlignment, NSTextField, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSNotification, NSObject, NSString};
@@ -37,6 +38,11 @@ const LABEL_X: f64 = 24.0;
 const LABEL_W: f64 = 170.0;
 const CONTROL_X: f64 = 206.0;
 const ROW_H: f64 = 30.0;
+/// Width of a tab item's content view: the tab view is inset 12 pt from
+/// the window and its items another 12 pt, so layout must use this, not `W`.
+const CONTENT_W: f64 = W - 48.0;
+/// Width available to notes and wide controls in the control column.
+const NOTE_W: f64 = CONTENT_W - CONTROL_X - 8.0;
 
 // ---------------------------------------------------------------------------
 // Shortcut recorder control
@@ -276,22 +282,33 @@ impl Form<'_> {
         self.label(text);
     }
 
-    /// A secondary note on the current row, in the control column.
-    fn note_inline(&mut self, text: &str) {
-        let l = NSTextField::labelWithString(&NSString::from_str(text), self.mtm);
-        l.setFont(Some(&NSFont::systemFontOfSize_weight(typography::CAPTION, weight::REGULAR)));
-        l.setTextColor(Some(&objc2_app_kit::NSColor::secondaryLabelColor()));
-        l.setFrame(cg_rect(Rect::new(CONTROL_X, self.y + 6.0, W - CONTROL_X - 24.0, 16.0)));
+    /// A secondary note below the current row, wrapped to the control
+    /// column; the row height grows to fit (long English notes take two
+    /// lines).
+    fn note(&mut self, text: &str) {
+        let l = caption_label(self.mtm, text);
+        let h = wrapped_height(&l, NOTE_W).max(16.0);
+        self.y -= h + 4.0;
+        l.setFrame(cg_rect(Rect::new(CONTROL_X, self.y + 6.0, NOTE_W, h)));
         self.view.addSubview(&l);
     }
+}
 
-    fn note(&mut self, text: &str) {
-        self.y -= 20.0;
-        let l = NSTextField::labelWithString(&NSString::from_str(text), self.mtm);
-        l.setFont(Some(&NSFont::systemFontOfSize_weight(typography::CAPTION, weight::REGULAR)));
-        l.setTextColor(Some(&objc2_app_kit::NSColor::secondaryLabelColor()));
-        l.setFrame(cg_rect(Rect::new(CONTROL_X, self.y + 6.0, W - CONTROL_X - 24.0, 16.0)));
-        self.view.addSubview(&l);
+/// A wrapping secondary-text label in the caption font.
+fn caption_label(mtm: MainThreadMarker, text: &str) -> Retained<NSTextField> {
+    let l = NSTextField::wrappingLabelWithString(&NSString::from_str(text), mtm);
+    l.setFont(Some(&NSFont::systemFontOfSize_weight(typography::CAPTION, weight::REGULAR)));
+    l.setTextColor(Some(&objc2_app_kit::NSColor::secondaryLabelColor()));
+    l
+}
+
+/// The height `label` needs to show all its text wrapped at `width`.
+fn wrapped_height(label: &NSTextField, width: f64) -> f64 {
+    match label.cell() {
+        Some(cell) => {
+            cell.cellSizeForBounds(CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(width, 10_000.0))).height.ceil()
+        }
+        None => 16.0,
     }
 }
 
@@ -340,7 +357,7 @@ impl SettingsWindow {
         let mut fields = Vec::new();
 
         let tabs = NSTabView::initWithFrame(NSTabView::alloc(mtm), cg_rect(Rect::new(12.0, 12.0, W - 24.0, H - 24.0)));
-        let tab_frame = cg_rect(Rect::new(0.0, 0.0, W - 48.0, TAB_H));
+        let tab_frame = cg_rect(Rect::new(0.0, 0.0, CONTENT_W, TAB_H));
         for (title, build) in [
             (tr(Msg::TabGeneral), build_general as TabBuilder),
             (tr(Msg::TabShortcuts), build_shortcuts as TabBuilder),
@@ -773,7 +790,7 @@ fn build_shortcuts(
         fields.push(field);
     }
     form.y -= 36.0;
-    warning.setFrame(cg_rect(Rect::new(CONTROL_X, form.y + 2.0, W - CONTROL_X - 30.0, 32.0)));
+    warning.setFrame(cg_rect(Rect::new(CONTROL_X, form.y + 2.0, NOTE_W, 32.0)));
     form.view.addSubview(&warning);
     refresh_warning(&state.settings.borrow());
 
@@ -855,8 +872,18 @@ fn build_capture(
     );
     form.note(tr(Msg::CaptureNote));
     form.y -= 8.0;
-    form.label_only(tr(Msg::TextRecognitionLabel));
-    form.note_inline(tr(Msg::TextRecognitionNote));
+    checkbox(
+        form,
+        targets,
+        state,
+        tr(Msg::TextRecognitionLabel),
+        tr(Msg::TextActionsPanel),
+        |s| s.capture.text_actions_panel,
+        |s, v| s.capture.text_actions_panel = v,
+    );
+    form.note(tr(Msg::TextRecognitionNote));
+    form.y -= 10.0;
+    redact::build_redact(form, state, targets);
 }
 
 fn build_ai(
@@ -933,5 +960,152 @@ fn build_recording(
         |s| s.recording.microphone,
         |s, v| s.recording.microphone = v,
     );
+    mic_device_popup(form, targets, state);
     form.note(tr(Msg::MicrophoneNote));
+    checkbox(
+        form,
+        targets,
+        state,
+        tr(Msg::Visualize),
+        tr(Msg::ShowClicks),
+        |s| s.recording.show_clicks,
+        |s, v| s.recording.show_clicks = v,
+    );
+    build_subtitles(form, state, targets);
+}
+
+/// Subtitles (v0.5): engine, spoken language, audio source, cloud model and
+/// strict on-device mode, under the recording options.
+fn build_subtitles(form: &mut Form<'_>, state: &Rc<State>, targets: &mut Vec<Retained<ActionTarget>>) {
+    use lumora_core::settings::{TranscribeAudio, TranscribeEngine, TranscribeLanguage};
+    form.y -= 10.0;
+    form.view.addSubview(&separator_line(form.mtm, form.y + 4.0));
+    popup(
+        form,
+        targets,
+        state,
+        tr(Msg::TranscribeEngineLabel),
+        &[tr(Msg::TranscribeOnDevice), tr(Msg::TranscribeCloud)],
+        |s| usize::from(s.transcribe.engine == TranscribeEngine::Cloud),
+        |s, i| s.transcribe.engine = if i == 1 { TranscribeEngine::Cloud } else { TranscribeEngine::OnDevice },
+    );
+    popup(
+        form,
+        targets,
+        state,
+        tr(Msg::TranscribeLanguageLabel),
+        &[tr(Msg::TranscribeLanguageAuto), tr(Msg::TranscribeLanguageZh), tr(Msg::TranscribeLanguageEn)],
+        |s| match s.transcribe.language {
+            TranscribeLanguage::Auto => 0,
+            TranscribeLanguage::ZhCn => 1,
+            TranscribeLanguage::EnUs => 2,
+        },
+        |s, i| {
+            s.transcribe.language = match i {
+                1 => TranscribeLanguage::ZhCn,
+                2 => TranscribeLanguage::EnUs,
+                _ => TranscribeLanguage::Auto,
+            }
+        },
+    );
+    popup(
+        form,
+        targets,
+        state,
+        tr(Msg::TranscribeAudioLabel),
+        &[tr(Msg::TranscribeAudioMixed), tr(Msg::TranscribeAudioMic), tr(Msg::TranscribeAudioSystem)],
+        |s| match s.transcribe.audio_source {
+            TranscribeAudio::Mixed => 0,
+            TranscribeAudio::Mic => 1,
+            TranscribeAudio::System => 2,
+        },
+        |s, i| {
+            s.transcribe.audio_source = match i {
+                1 => TranscribeAudio::Mic,
+                2 => TranscribeAudio::System,
+                _ => TranscribeAudio::Mixed,
+            }
+        },
+    );
+    checkbox(
+        form,
+        targets,
+        state,
+        "",
+        tr(Msg::TranscribeStrict),
+        |s| s.transcribe.strict_on_device,
+        |s, v| s.transcribe.strict_on_device = v,
+    );
+
+    // Cloud model: a short text field, committed on Return / end editing.
+    let current = state.settings.borrow().transcribe.cloud_model.clone();
+    let field = NSTextField::textFieldWithString(&NSString::from_str(&current), form.mtm);
+    field.setFrame(cg_rect(Rect::new(0.0, 0.0, 160.0, 22.0)));
+    if let Some(cell) = field.cell() {
+        // SAFETY: NSCell responds to setSendsActionOnEndEditing:.
+        let _: () = unsafe { objc2::msg_send![&*cell, setSendsActionOnEndEditing: true] };
+    }
+    let st = state.clone();
+    let t = ActionTarget::new(form.mtm, move |sender: &AnyObject| {
+        let Some(tf) = sender.downcast_ref::<NSTextField>() else { return };
+        let mut v = tf.stringValue().to_string().trim().to_string();
+        if v.is_empty() {
+            v = lumora_core::settings::DEFAULT_CLOUD_MODEL.to_string();
+            tf.setStringValue(&NSString::from_str(&v));
+        }
+        if st.settings.borrow().transcribe.cloud_model != v {
+            st.update(|s| s.transcribe.cloud_model = v);
+        }
+    });
+    // SAFETY: target kept alive by the window controller.
+    unsafe {
+        field.setTarget(Some(&t));
+        field.setAction(Some(ActionTarget::action()));
+    }
+    form.add(tr(Msg::TranscribeCloudModel), &field, ROW_H);
+    targets.push(t);
+}
+
+fn separator_line(mtm: MainThreadMarker, y: f64) -> Retained<NSBox> {
+    let line = NSBox::initWithFrame(NSBox::alloc(mtm), cg_rect(Rect::new(LABEL_X, y, CONTENT_W - 2.0 * LABEL_X, 1.0)));
+    line.setBoxType(NSBoxType::Separator);
+    line
+}
+
+/// Microphone device picker: "System default" + connected devices. A saved
+/// device that is currently unplugged stays selected (shown by its id).
+fn mic_device_popup(form: &mut Form<'_>, targets: &mut Vec<Retained<ActionTarget>>, state: &Rc<State>) {
+    let mut devices: Vec<(Option<String>, String)> = vec![(None, tr(Msg::MicrophoneDefault).to_string())];
+    devices.extend(lumora_capture::mic::devices().into_iter().map(|d| (Some(d.id), d.name)));
+    let current = state.settings.borrow().recording.microphone_device.clone();
+    if let Some(id) = &current {
+        if !devices.iter().any(|(d, _)| d.as_ref() == Some(id)) {
+            devices.push((Some(id.clone()), id.clone()));
+        }
+    }
+    let p = NSPopUpButton::initWithFrame_pullsDown(
+        NSPopUpButton::alloc(form.mtm),
+        cg_rect(Rect::new(0.0, 0.0, 240.0, 26.0)),
+        false,
+    );
+    for (_, name) in &devices {
+        p.addItemWithTitle(&NSString::from_str(name));
+    }
+    let selected = devices.iter().position(|(d, _)| *d == current).unwrap_or(0);
+    p.selectItemAtIndex(selected as isize);
+    let st = state.clone();
+    let t = ActionTarget::new(form.mtm, move |sender: &AnyObject| {
+        if let Some(p) = sender.downcast_ref::<NSPopUpButton>() {
+            let i = p.indexOfSelectedItem().max(0) as usize;
+            let id = devices.get(i).and_then(|(d, _)| d.clone());
+            st.update(|s| s.recording.microphone_device = id);
+        }
+    });
+    // SAFETY: target kept alive by the window controller.
+    unsafe {
+        p.setTarget(Some(&t));
+        p.setAction(Some(ActionTarget::action()));
+    }
+    form.add(tr(Msg::MicrophoneDevice), &p, ROW_H);
+    targets.push(t);
 }

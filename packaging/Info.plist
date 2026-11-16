@@ -38,6 +38,8 @@
 	<string>Lumora captures your screen only when you take a screenshot or start a recording.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Lumora records your microphone only when you enable it for a screen recording.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Lumora transcribes your recordings into subtitles on this Mac.</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>

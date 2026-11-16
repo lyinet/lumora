@@ -28,7 +28,6 @@
 //! [`render::flatten`] at the capture's native scale and go to the app as
 //! [`EditorAction`]s; the editor never writes the capture file itself.
 
-mod ai_sheet;
 mod beautify_panel;
 mod render;
 mod toolbar;
@@ -44,7 +43,7 @@ use lumora_core::ai::{
 use lumora_core::annotate::document::{Annotation, AnnotationId};
 use lumora_core::annotate::editor::{Editor, Effect, Input, Key, Tool};
 use lumora_core::annotate::render::{ops_bounds, render as render_ops};
-use lumora_core::annotate::shape::Shape;
+use lumora_core::annotate::shape::{RedactMode, Shape};
 use lumora_core::beautify::{preview_geometry, Adjust, Background, BeautifyStyle, Preset, Rgba};
 use lumora_core::geometry::{Point, Rect, Size};
 use lumora_core::i18n::{tr, trf, Msg};
@@ -61,14 +60,14 @@ use objc2_core_graphics::CGImage;
 use objc2_foundation::{NSArray, NSString};
 use objc2_quartz_core::{CAGradientLayer, CALayer, CAShapeLayer, CATransaction, CATransform3D};
 
-use self::ai_sheet::{AiSheet, Phase, SheetEvent, SheetHandler};
 use self::beautify_panel::{cg_rgba, choose_background_image, set_gradient, BeautifyPanel, PanelEvent, PanelHandler};
+use crate::ai_sheet::{AiSheet, Phase, SheetEvent, SheetHandler};
 
 use self::render::{annotation_font, build_layer, flatten, LayerContext, RedactionCache};
 pub use self::toolbar::ToolbarAction;
 use self::toolbar::{Toolbar, ToolbarHandler};
 use self::views::{CanvasView, DragTile, EditorWindowDelegate, Pointer};
-use crate::events::{AiWriteRequest, EditorAction, EditorImage, EventSink, UiEvent};
+use crate::events::{AiWriteRequest, EditorAction, EditorImage, EventSink, SmartRedactRequest, UiEvent};
 use crate::tokens::{color, motion, radius, size};
 use crate::util::{
     cf_as_object, cg_color, cg_path, cg_rect, ease_scalar, rect, rgb8_of, spring_scalar, text_size, without_actions,
@@ -142,6 +141,9 @@ pub(crate) struct State {
     ai_job: RefCell<Option<AiJob>>,
     /// Targets of the AI menu's items (rebuilt each time it opens).
     ai_menu_targets: RefCell<Vec<Retained<ActionTarget>>>,
+    /// Id of the running smart-redaction request (0 = none).
+    redact_request: Cell<u64>,
+    redact_next: Cell<u64>,
 }
 
 /// An open editor. Keep it alive while the window is open; the app drops it
@@ -392,6 +394,8 @@ impl EditorWindow {
                 ai_next: Cell::new(1),
                 ai_job: RefCell::new(None),
                 ai_menu_targets: RefCell::new(Vec::new()),
+                redact_request: Cell::new(0),
+                redact_next: Cell::new(1),
             }
         });
         *canvas.ivars().state.borrow_mut() = Rc::downgrade(&state);
@@ -449,6 +453,23 @@ impl EditorWindow {
         }
     }
 
+    /// Smart redaction `request` finished: cover `rects` (document points)
+    /// with `mode` redactions as one undo step. Returns how many were
+    /// added, or `None` for a stale request (or a closed editor).
+    pub fn smart_redact_finished(&self, request: u64, rects: &[Rect], mode: RedactMode) -> Option<usize> {
+        let s = &self.state;
+        if s.closed.get() || request == 0 || request != s.redact_request.get() {
+            return None;
+        }
+        s.redact_request.set(0);
+        s.toolbar.set_smart_redact_busy(false);
+        State::end_text_edit(s);
+        let (n, effect) = s.editor.borrow_mut().add_redactions(rects, mode);
+        State::apply(s, effect);
+        s.sync(None);
+        Some(n)
+    }
+
     /// Close the window (emits [`EditorAction::Closed`]).
     pub fn close(&self) {
         self.state.window.close();
@@ -491,6 +512,7 @@ impl State {
     fn layout_with(&self, animate: bool) {
         let b = rect(self.canvas.bounds());
         self.ai_sheet.fit(b.width());
+        self.toolbar.fit(rect(self.toolbar.view.frame()).width());
         let shown = self.wanted_shown();
         if shown.is_empty() {
             return;
@@ -721,6 +743,7 @@ impl State {
             "c" => State::toolbar_action(this, ToolbarAction::Copy),
             "s" => State::toolbar_action(this, ToolbarAction::Save),
             "j" if !shift => State::toolbar_action(this, ToolbarAction::Ai),
+            "r" if shift => State::toolbar_action(this, ToolbarAction::SmartRedact),
             "w" => this.window.performClose(None),
             "]" => {
                 let e = this.editor.borrow_mut().bring_to_front();
@@ -792,11 +815,36 @@ impl State {
                     State::show_ai_menu(this);
                     Effect::None
                 }
+                ToolbarAction::SmartRedact => {
+                    drop(ed);
+                    State::smart_redact(this);
+                    Effect::None
+                }
+                ToolbarAction::More => {
+                    drop(ed);
+                    this.toolbar.show_overflow_menu();
+                    Effect::None
+                }
             }
         };
         State::apply(this, effect);
         // Tool/option changes with nothing selected still need the toolbar.
         this.sync(None);
+    }
+
+    // -- smart redaction ---------------------------------------------------------
+
+    /// Ask the app to find sensitive info; ignored while one is running.
+    fn smart_redact(this: &Rc<State>) {
+        if this.closed.get() || this.redact_request.get() != 0 {
+            return;
+        }
+        let request = this.redact_next.get();
+        this.redact_next.set(request + 1);
+        this.redact_request.set(request);
+        this.toolbar.set_smart_redact_busy(true);
+        let req = SmartRedactRequest { request, base: this.base.clone(), scale: this.scale };
+        (this.sink)(UiEvent::Editor { id: this.id, action: EditorAction::SmartRedact(Box::new(req)) });
     }
 
     // -- AI writing -------------------------------------------------------------
@@ -851,7 +899,7 @@ impl State {
                     menu.addItem(&parent);
                 }
                 k => {
-                    if k == AiTaskKind::Polish {
+                    if k == AiTaskKind::Polish || k == AiTaskKind::ExtractTable {
                         menu.addItem(&NSMenuItem::separatorItem(mtm));
                     }
                     menu.addItem(&item(k, &k.title(), &mut targets));
@@ -888,6 +936,8 @@ impl State {
         *this.ai_job.borrow_mut() = Some(AiJob { kind, source: source.as_ref().map(|(id, _)| *id) });
         let status = if kind.needs_ocr(source.is_some()) { Msg::AiReadingText } else { Msg::AiWriting };
         this.ai_sheet.begin(&kind.title(), status, kind.replaces_source() && source.is_some());
+        this.ai_sheet.set_csv_visible(kind.is_table());
+        this.ai_sheet.set_monospace(kind.needs_boxes());
         let req = AiWriteRequest {
             request,
             kind,
@@ -927,6 +977,13 @@ impl State {
                 let text = this.ai_sheet.text();
                 if !text.trim().is_empty() {
                     lumora_capture::clipboard::copy_text(&text);
+                    this.ai_sheet.note(tr(Msg::AiCopied));
+                }
+            }
+            SheetEvent::CopyCsv => {
+                let text = this.ai_sheet.text();
+                if !text.trim().is_empty() {
+                    lumora_capture::clipboard::copy_text(&lumora_core::ai::table_csv(&text));
                     this.ai_sheet.note(tr(Msg::AiCopied));
                 }
             }

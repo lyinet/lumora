@@ -15,6 +15,7 @@ use lumora_capture::content::ShareableContent;
 use lumora_capture::image::StitchPart;
 use lumora_capture::screenshot::{self, Shot, ShotOptions, ShotTarget};
 use lumora_capture::CaptureError;
+use lumora_core::annotate::{Document, Shape, Style};
 use lumora_core::filename::{render, unique_path, CaptureKind};
 use lumora_core::geometry::{Rect, Size};
 use lumora_core::selection::Target;
@@ -23,6 +24,7 @@ use lumora_core::stitch::{self, Source};
 use lumora_ui::events::{FrozenDisplay, OverlayMode};
 use lumora_ui::overlay::{OverlayConfig, OverlayController};
 use lumora_ui::quick_access::CardContent;
+use lumora_ui::toast::ToastKind;
 use lumora_ui::{shutter, util};
 use objc2_core_foundation::CFRetained;
 use objc2_core_graphics::CGImage;
@@ -31,6 +33,22 @@ use lumora_core::i18n::{tr, trf, Msg};
 
 use crate::app::{on_main, App, CaptureRecord, Editable, Mode, Notice};
 use crate::system;
+
+/// Encode `image` to PNG once, write it to `path` and return the bytes (for
+/// the `.lumora` document that embeds the same PNG).
+fn write_png_shared(
+    image: &CGImage,
+    path: &std::path::Path,
+    scale: f64,
+) -> Result<std::sync::Arc<Vec<u8>>, CaptureError> {
+    let err = |reason: String| CaptureError::Write { path: path.display().to_string(), reason };
+    let png = lumora_capture::image::png_bytes(image, scale).map_err(|e| err(e.to_string()))?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| err(e.to_string()))?;
+    }
+    std::fs::write(path, &png).map_err(|e| err(e.to_string()))?;
+    Ok(std::sync::Arc::new(png))
+}
 
 fn background() -> dispatch2::DispatchRetained<DispatchQueue> {
     DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated))
@@ -164,14 +182,17 @@ impl App {
         }
     }
 
-    /// OCR an image and put the text on the clipboard, with a toast.
+    /// OCR an image and put the text on the clipboard, with a toast and
+    /// the Capture Text panel (Summarize, Translate, As Table, …).
     pub fn recognize(self: &Rc<Self>, image: CFRetained<CGImage>) {
-        lumora_capture::ocr::recognize_text(image, |res| {
+        lumora_capture::ocr::recognize_text_boxes(image, |res| {
+            let res = res.map(|boxes| (lumora_core::ocr::assemble(&boxes), boxes));
             on_main(move |app| match res {
-                Ok(text) if !text.trim().is_empty() => {
+                Ok((text, boxes)) if !text.trim().is_empty() => {
                     lumora_capture::clipboard::copy_text(&text);
                     let preview = lumora_core::ocr::preview(&text, 60);
                     app.notify(Notice::Success(Msg::ToastTextCopied), Some(preview));
+                    app.show_text_result(&text, boxes);
                 }
                 Ok(_) => app.notify(Notice::Warning(Msg::ToastNoText), Some(tr(Msg::ToastNoTextDetail).to_string())),
                 Err(e) => app.fail_with(Msg::ToastTextFailed, e),
@@ -204,11 +225,53 @@ impl App {
         });
     }
 
-    /// Common tail of every screenshot: name, shutter, Quick Access card,
-    /// background PNG encode, then clipboard.
+    /// Common tail of every screenshot. With "redact before copy / save"
+    /// on, local smart-redaction detectors run first (off the main thread;
+    /// never the AI check) and their redactions are applied as editable
+    /// annotations.
     pub fn finish_capture(self: &Rc<Self>, image: CFRetained<CGImage>, scale: f64, frame: Rect) {
+        let redact = self.settings.borrow().redact.clone();
+        if !redact.auto_redact {
+            return self.finish_capture_with(image, scale, frame, Vec::new());
+        }
+        background().exec_async(move || {
+            let rects = match crate::redact_flow::detect_sync(&image, scale, &redact, None) {
+                Ok(d) => d.rects,
+                Err(e) => {
+                    log::warn!("auto-redaction failed: {e}");
+                    Vec::new()
+                }
+            };
+            on_main(move |app| app.finish_capture_with(image, scale, frame, rects));
+        });
+    }
+
+    /// Name, shutter, Quick Access card, background PNG encode, then
+    /// clipboard. `redactions` (points) are flattened into what is shown,
+    /// saved and copied, and kept as annotations for re-editing.
+    fn finish_capture_with(
+        self: &Rc<Self>,
+        original: CFRetained<CGImage>,
+        scale: f64,
+        frame: Rect,
+        redactions: Vec<Rect>,
+    ) {
         let id = self.next_id();
         let s = self.settings.borrow().clone();
+        let mut document = None;
+        let mut image = original.clone();
+        if !redactions.is_empty() {
+            let (pw, ph) = lumora_capture::image::pixel_size(&original);
+            let mut doc = Document::new(Size::new(pw as f64 / scale, ph as f64 / scale));
+            let mode = s.redact.mode;
+            let shapes = redactions.iter().map(|&rect| Shape::Redact { rect, mode }).collect();
+            let n = doc.add_many(shapes, Style::default()).len();
+            if let Some(flat) = lumora_ui::editor::flatten_document(&original, scale, &doc) {
+                image = flat;
+                document = Some(doc);
+                self.notify_text(ToastKind::Success, &trf(Msg::ToastAutoRedacted, &[&n]), None);
+            }
+        }
         let stem = render(&s.general.filename_template, &system::now_parts(), CaptureKind::Screenshot);
         let (dir, temp) =
             if s.general.save_to_disk { (s.save_folder(&self.home), false) } else { (system::temp_dir(), true) };
@@ -233,10 +296,13 @@ impl App {
                 point_size,
                 file: file.clone(),
                 video_duration: None,
+                tutorial: false,
             });
         } else {
             shutter::play(self.mtm, &image, appkit_frame, None, || {});
         }
+        // No auto-redaction: the saved image is the original capture.
+        let unredacted = document.is_none();
         let rec = CaptureRecord {
             image: Some(image.clone()),
             scale,
@@ -244,36 +310,54 @@ impl App {
             file: file.clone(),
             temp,
             video: false,
-            editable: Some(Editable::new(image.clone(), scale)),
+            editable: Some(Editable { document, ..Editable::new(original, scale) }),
         };
         // The editable document keeps the original capture (not the
         // beautified export) plus the beautify style, when enabled.
         let job = self.doc_job(&rec);
         self.captures.borrow_mut().insert(id, rec);
-        if let Some(job) = job {
-            self.spawn_doc_write(job);
-        }
-        if edit_now {
-            self.open_editor(id);
-        }
-
         let copy = s.general.copy_to_clipboard;
         // The record, card and editor keep the plain capture; the saved file
         // and the clipboard get the beautified one (when enabled).
         let style = s.beautify;
+        // Plain capture and a `.lumora` to write: both files hold the same
+        // PNG, so encode it once (below) and hand the bytes to the doc job.
+        let shared_job = match job {
+            Some(job) if !style.enabled && unredacted => Some(job),
+            Some(job) => {
+                self.spawn_doc_write(job);
+                None
+            }
+            None => None,
+        };
+        if edit_now {
+            self.open_editor(id);
+        }
+        // Nothing to render: fill the clipboard now rather than after the
+        // encode + write. The file URL resolves once the PNG lands.
+        if copy && !style.enabled {
+            lumora_capture::clipboard::copy_image(&image, scale, Some(&file));
+        }
+
         background().exec_async(move || {
             let image = lumora_capture::beautify_render::beautify_for_export(image, &style, scale);
-            let result = lumora_capture::image::write_png(&image, &file, scale);
+            if copy && style.enabled {
+                // Rendered: hop to main for the clipboard before encoding.
+                let (img, f) = (image.clone(), file.clone());
+                on_main(move |_| lumora_capture::clipboard::copy_image(&img, scale, Some(&f)));
+            }
+            let result = match shared_job {
+                Some(job) => write_png_shared(&image, &file, scale).map(|png| {
+                    on_main(move |app| app.spawn_doc_write(job.with_png(png)));
+                }),
+                None => lumora_capture::image::write_png(&image, &file, scale),
+            };
             on_main(move |_app| match result {
-                Ok(()) => {
-                    log::info!("saved {}", file.display());
-                    if copy {
-                        lumora_capture::clipboard::copy_image(&image, scale, Some(&file));
-                    }
-                }
+                Ok(()) => log::info!("saved {}", file.display()),
                 Err(e) => {
                     log::error!("{e}");
                     if copy {
+                        // Drop the dangling file URL.
                         lumora_capture::clipboard::copy_image(&image, scale, None);
                     }
                     _app.notify(Notice::Error(Msg::ToastSaveFailed), Some(error_text(&e)));
@@ -304,6 +388,7 @@ impl App {
 pub fn error_text(e: &CaptureError) -> String {
     match e {
         CaptureError::PermissionDenied => tr(Msg::ErrPermission).to_string(),
+        CaptureError::MicrophoneDenied => tr(Msg::ErrMicPermission).to_string(),
         CaptureError::TargetGone(what) => {
             let what = if *what == "window" { tr(Msg::TargetWindow) } else { tr(Msg::TargetDisplay) };
             trf(Msg::ErrTargetGone, &[&what])
@@ -314,6 +399,14 @@ pub fn error_text(e: &CaptureError) -> String {
             trf(Msg::ErrWrite, &[&name.unwrap_or_else(|| path.clone())])
         }
         CaptureError::Empty => tr(Msg::ErrNothing).to_string(),
+        CaptureError::SpeechDenied => tr(Msg::ErrSpeechPermission).to_string(),
+        CaptureError::SpeechUnavailable(why) if why.starts_with(lumora_capture::transcribe::STRICT_UNAVAILABLE) => {
+            tr(Msg::ErrSpeechUnavailableStrict).to_string()
+        }
+        CaptureError::SpeechUnavailable(why) => trf(Msg::ErrSpeechUnavailable, &[why]),
+        CaptureError::Speech(why) => trf(Msg::ErrSpeech, &[why]),
+        CaptureError::NoAudio => tr(Msg::ErrNoAudio).to_string(),
+        CaptureError::Cancelled => tr(Msg::ErrCancelled).to_string(),
     }
 }
 

@@ -23,8 +23,24 @@ pub fn recognize_text(image: CFRetained<CGImage>, done: impl FnOnce(Result<Strin
         .exec_async(move || done(recognize_sync(&image)));
 }
 
+/// Like [`recognize_text`], but hands back every observation with its box
+/// (pixels of `image`, y down) for table / code reconstruction.
+pub fn recognize_text_boxes(
+    image: CFRetained<CGImage>,
+    done: impl FnOnce(Result<Vec<TextBox>, CaptureError>) + Send + 'static,
+) {
+    DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated))
+        .exec_async(move || done(recognize_boxes_sync(&image)));
+}
+
 /// Synchronous recognition (call off the main thread; it takes a while).
 pub fn recognize_sync(image: &CGImage) -> Result<String, CaptureError> {
+    Ok(assemble(&recognize_boxes_sync(image)?))
+}
+
+/// Synchronous recognition returning every observation with its box, in
+/// **pixels** of `image` (y down). Smart redaction maps matches onto these.
+pub fn recognize_boxes_sync(image: &CGImage) -> Result<Vec<TextBox>, CaptureError> {
     let (w, h) = crate::image::pixel_size(image);
     if w == 0 || h == 0 {
         return Err(CaptureError::Empty);
@@ -42,7 +58,7 @@ pub fn recognize_sync(image: &CGImage) -> Result<String, CaptureError> {
     handler
         .performRequests_error(&NSArray::from_slice(&[as_request]))
         .map_err(|e| CaptureError::Framework(e.localizedDescription().to_string()))?;
-    let Some(results) = request.results() else { return Ok(String::new()) };
+    let Some(results) = request.results() else { return Ok(Vec::new()) };
     let (wf, hf) = (w as f64, h as f64);
     let boxes: Vec<TextBox> = results
         .iter()
@@ -60,5 +76,5 @@ pub fn recognize_sync(image: &CGImage) -> Result<String, CaptureError> {
             Some(TextBox::new(text, rect))
         })
         .collect();
-    Ok(assemble(&boxes))
+    Ok(boxes)
 }

@@ -50,6 +50,18 @@ fn draw_mark(r: CGRect, stroke_color: &NSColor, dot_color: &NSColor) {
     dot.fill();
 }
 
+/// A filled colour dot of `size` points (menu items for palette colours).
+pub fn swatch_image(c: lumora_core::color::Rgb8, size: f64) -> Retained<NSImage> {
+    draw_image(size, false, move |r| {
+        let inset = CGRect::new(
+            CGPoint::new(r.origin.x + 1.0, r.origin.y + 1.0),
+            CGSize::new(r.size.width - 2.0, r.size.height - 2.0),
+        );
+        crate::util::ns_rgb8(c).setFill();
+        NSBezierPath::bezierPathWithOvalInRect(inset).fill();
+    })
+}
+
 /// 18 pt template image for the status item (adapts to light/dark menu bars).
 pub fn status_icon() -> Retained<NSImage> {
     draw_image(18.0, true, |r| {

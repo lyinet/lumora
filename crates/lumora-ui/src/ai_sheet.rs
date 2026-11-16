@@ -1,5 +1,6 @@
-//! The AI writing result sheet: a dark glass card docked to the bottom of
-//! the editor canvas. It shows the task title, a spinner while the app reads
+//! The AI writing result sheet: a dark glass card, docked to the bottom of
+//! the editor canvas or hosted by the Capture Text panel
+//! ([`crate::text_result`]). It shows the task title, a spinner while the app reads
 //! the screenshot's text and the model streams its answer, the (read-only,
 //! selectable) text as it arrives, errors in red, and the actions Stop,
 //! Retry, Copy, Insert as Text / Replace Text, Open AI Settings and Close.
@@ -35,20 +36,22 @@ const BOTTOM: f64 = 18.0;
 
 /// A button press in the sheet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum SheetEvent {
+pub(crate) enum SheetEvent {
     Stop,
     Retry,
     Copy,
+    /// "Copy as CSV" (table results).
+    CopyCsv,
     Insert,
     OpenSettings,
     Close,
 }
 
-pub(super) type SheetHandler = Rc<dyn Fn(SheetEvent)>;
+pub(crate) type SheetHandler = Rc<dyn Fn(SheetEvent)>;
 
 /// What the sheet is showing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Phase {
+pub(crate) enum Phase {
     Hidden,
     /// Waiting for the first words (OCR, connecting).
     Working,
@@ -57,7 +60,15 @@ pub(super) enum Phase {
     Failed,
 }
 
-pub(super) struct AiSheet {
+/// Compact title for Copy as CSV when the button row is crowded ("CSV" is
+/// the same in every language; the full title stays as the tooltip).
+const CSV_SHORT: &str = "CSV";
+
+fn set_title(b: &NSButton, title: &str) {
+    b.setTitle(&NSString::from_str(title));
+}
+
+pub(crate) struct AiSheet {
     pub view: Retained<NSVisualEffectView>,
     title: Retained<NSTextField>,
     status: Retained<NSTextField>,
@@ -67,11 +78,27 @@ pub(super) struct AiSheet {
     retry: Retained<NSButton>,
     copy: Retained<NSButton>,
     insert: Retained<NSButton>,
+    csv: Retained<NSButton>,
     settings: Retained<NSButton>,
-    _close: Retained<NSButton>,
+    /// Trailing buttons, right to left: Close, Copy, [Insert], CSV. Laid
+    /// out by [`AiSheet::layout_trailing`] so hidden ones leave no gap.
+    trailing: Vec<Retained<NSButton>>,
     _targets: Vec<Retained<ActionTarget>>,
     buffer: RefCell<String>,
     phase: Cell<Phase>,
+    /// The on-device result shown while AI refines it; restored when the
+    /// request fails or is stopped before any text arrived.
+    fallback: RefCell<Option<String>>,
+    mono: Cell<bool>,
+}
+
+/// How a sheet is built.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SheetOptions {
+    /// Show "Insert as Text" (editor only).
+    pub insert: bool,
+    /// Space reserved at the top for the host's own controls (points).
+    pub top_inset: f64,
 }
 
 impl std::fmt::Debug for AiSheet {
@@ -119,18 +146,29 @@ impl AiSheet {
     pub fn new(mtm: objc2::MainThreadMarker, width: f64, on: SheetHandler) -> Self {
         let w = WIDTH.min(width - 2.0 * PAD).max(320.0);
         let frame = Rect::new(((width - w) / 2.0).max(0.0), BOTTOM, w, HEIGHT);
-        let view = glass_view(mtm, cg_rect(frame), radius::HUD);
-        view.setAutoresizingMask(
+        let sheet = AiSheet::build(mtm, frame, SheetOptions { insert: true, top_inset: 0.0 }, on);
+        sheet.view.setAutoresizingMask(
             NSAutoresizingMaskOptions::ViewMinXMargin
                 | NSAutoresizingMaskOptions::ViewMaxXMargin
                 | NSAutoresizingMaskOptions::ViewMaxYMargin,
         );
+        sheet
+    }
+
+    /// The default sheet height (points), without a top inset.
+    pub const HEIGHT: f64 = HEIGHT;
+
+    /// A hidden sheet filling `frame` of its host view.
+    pub fn build(mtm: objc2::MainThreadMarker, frame: Rect, opts: SheetOptions, on: SheetHandler) -> Self {
+        let w = frame.width();
+        let height = frame.height();
+        let view = glass_view(mtm, cg_rect(frame), radius::HUD);
         view.setHidden(true);
         view.setAlphaValue(0.0);
 
         let mut targets = Vec::new();
         // Header: spinner, title, status (right).
-        let top = HEIGHT - PAD - 18.0;
+        let top = height - opts.top_inset - PAD - 18.0;
         let spinner = NSProgressIndicator::initWithFrame(
             NSProgressIndicator::alloc(mtm),
             cg_rect(Rect::new(PAD, top, 16.0, 16.0)),
@@ -185,6 +223,9 @@ impl AiSheet {
         let close = button(mtm, tr(Msg::AiClose), &on, SheetEvent::Close, &mut targets);
         let copy = button(mtm, tr(Msg::Copy), &on, SheetEvent::Copy, &mut targets);
         let insert = button(mtm, tr(Msg::AiInsert), &on, SheetEvent::Insert, &mut targets);
+        let csv = button(mtm, tr(Msg::TextCopyCsv), &on, SheetEvent::CopyCsv, &mut targets);
+        insert.setHidden(!opts.insert);
+        csv.setHidden(true);
         let mut x = PAD;
         for b in [&retry, &stop] {
             let f = b.frame();
@@ -196,18 +237,18 @@ impl AiSheet {
         let f = settings.frame();
         settings.setFrame(cg_rect(Rect::new(x, PAD, f.size.width, BUTTON_H)));
         view.addSubview(&settings);
-        // Trailing, left to right: [Insert] [Copy] [Close].
-        let mut right = w - PAD;
-        for b in [&close, &copy, &insert] {
-            let bw = b.frame().size.width.max(64.0);
-            right -= bw;
-            b.setFrame(cg_rect(Rect::new(right, PAD, bw, BUTTON_H)));
+        // Trailing, left to right: [CSV] [Insert] [Copy] [Close].
+        let trailing: Vec<Retained<NSButton>> = if opts.insert {
+            vec![close.clone(), copy.clone(), insert.clone(), csv.clone()]
+        } else {
+            vec![close.clone(), copy.clone(), csv.clone()]
+        };
+        for b in &trailing {
             b.setAutoresizingMask(NSAutoresizingMaskOptions::ViewMinXMargin);
             view.addSubview(b);
-            right -= 8.0;
         }
 
-        AiSheet {
+        let sheet = AiSheet {
             view,
             title,
             status,
@@ -217,12 +258,17 @@ impl AiSheet {
             retry,
             copy,
             insert,
+            csv,
             settings,
-            _close: close,
+            trailing,
             _targets: targets,
             buffer: RefCell::new(String::new()),
             phase: Cell::new(Phase::Hidden),
-        }
+            fallback: RefCell::new(None),
+            mono: Cell::new(false),
+        };
+        sheet.layout_trailing();
+        sheet
     }
 
     pub fn phase(&self) -> Phase {
@@ -244,11 +290,46 @@ impl AiSheet {
         self.title.setStringValue(&NSString::from_str(title));
         self.insert.setTitle(&NSString::from_str(tr(if replace { Msg::AiReplace } else { Msg::AiInsert })));
         self.buffer.borrow_mut().clear();
+        *self.fallback.borrow_mut() = None;
         self.show_text();
         self.set_status(tr(status), false);
         self.phase.set(Phase::Working);
         self.sync_controls();
         self.reveal();
+    }
+
+    /// Show `local` (an on-device result) while AI refines it: the first
+    /// streamed words replace it; a failure or an early stop restores it.
+    pub fn begin_refine(&self, title: &str, local: &str) {
+        self.title.setStringValue(&NSString::from_str(title));
+        *self.buffer.borrow_mut() = local.to_string();
+        *self.fallback.borrow_mut() = Some(local.to_string());
+        self.show_text();
+        self.set_status(tr(Msg::TextRefining), false);
+        self.phase.set(Phase::Working);
+        self.sync_controls();
+        self.reveal();
+    }
+
+    /// Show a finished result straight away (OCR text, on-device result).
+    pub fn show_result(&self, title: &str, text: &str, status: &str) {
+        self.title.setStringValue(&NSString::from_str(title));
+        *self.fallback.borrow_mut() = None;
+        self.finish(text);
+        self.set_status(status, false);
+        self.reveal();
+    }
+
+    /// Show "Copy as CSV" (table results).
+    pub fn set_csv_visible(&self, visible: bool) {
+        self.csv.setHidden(!visible);
+        self.layout_trailing();
+    }
+
+    /// Monospaced body text (code and tables).
+    pub fn set_monospace(&self, mono: bool) {
+        self.mono.set(mono);
+        self.show_text();
     }
 
     /// Append streamed text.
@@ -257,6 +338,9 @@ impl AiSheet {
             return;
         }
         if self.phase.get() == Phase::Working {
+            if self.fallback.borrow().is_some() {
+                self.buffer.borrow_mut().clear();
+            }
             self.phase.set(Phase::Streaming);
             self.set_status(tr(Msg::AiWriting), false);
             self.sync_controls();
@@ -267,7 +351,10 @@ impl AiSheet {
 
     /// Show the final (cleaned) text.
     pub fn finish(&self, text: &str) {
-        *self.buffer.borrow_mut() = text.to_string();
+        let text =
+            if text.trim().is_empty() { self.fallback.borrow().clone().unwrap_or_default() } else { text.into() };
+        *self.fallback.borrow_mut() = None;
+        *self.buffer.borrow_mut() = text;
         self.show_text();
         self.set_status("", false);
         self.phase.set(Phase::Done);
@@ -277,10 +364,22 @@ impl AiSheet {
     /// Show an error in red. Keeps any partial text. `settings` shows the
     /// "Open AI Settings" button.
     pub fn fail(&self, message: &str, settings: bool) {
+        if let Some(local) = self.fallback.borrow_mut().take() {
+            // Keep the on-device result usable; say why AI didn't help.
+            *self.buffer.borrow_mut() = local;
+            self.show_text();
+            self.phase.set(Phase::Done);
+            self.sync_controls();
+            self.set_status(&lumora_core::i18n::trf(Msg::TextAiKeptLocal, &[&message]), true);
+            self.settings.setHidden(!settings);
+            self.layout_trailing();
+            return;
+        }
         self.set_status(message, true);
         self.phase.set(Phase::Failed);
         self.sync_controls();
         self.settings.setHidden(!settings);
+        self.layout_trailing();
         // The status line truncates; long errors also go in the body when
         // there is no partial text to keep.
         if self.buffer.borrow().is_empty() {
@@ -292,7 +391,13 @@ impl AiSheet {
     /// The user stopped the request: keep what arrived (it can still be
     /// copied or inserted) and say so.
     pub fn stopped(&self, text: &str) {
-        *self.buffer.borrow_mut() = text.to_string();
+        let streamed = self.phase.get() == Phase::Streaming;
+        let fallback = self.fallback.borrow_mut().take();
+        let text = match fallback {
+            Some(local) if !streamed || text.trim().is_empty() => local,
+            _ => text.to_string(),
+        };
+        *self.buffer.borrow_mut() = text;
         self.show_text();
         self.phase.set(Phase::Done);
         self.sync_controls();
@@ -321,7 +426,12 @@ impl AiSheet {
     fn show_text(&self) {
         let buf = self.buffer.borrow();
         self.text.setString(&NSString::from_str(&buf));
-        self.text.setFont(Some(&NSFont::systemFontOfSize_weight(typography::BODY, weight::REGULAR)));
+        let font = if self.mono.get() {
+            NSFont::monospacedSystemFontOfSize_weight(typography::BODY - 1.0, weight::REGULAR)
+        } else {
+            NSFont::systemFontOfSize_weight(typography::BODY, weight::REGULAR)
+        };
+        self.text.setFont(Some(&font));
         self.text.setTextColor(Some(&NSColor::labelColor()));
         let len = buf.encode_utf16().count();
         self.text.scrollRangeToVisible(NSRange::new(len, 0));
@@ -344,6 +454,42 @@ impl AiSheet {
         let has_text = phase == Phase::Done && !self.buffer.borrow().trim().is_empty();
         self.copy.setEnabled(has_text);
         self.insert.setEnabled(has_text);
+        self.csv.setEnabled(has_text);
+        self.layout_trailing();
+    }
+
+    /// Right-align the visible trailing buttons (hidden ones leave no gap).
+    /// When they would run into the leading Retry / Open AI Settings group
+    /// (narrow editor sheet, failed table task), Copy as CSV shrinks to a
+    /// short title and keeps the full one as its tooltip.
+    fn layout_trailing(&self) {
+        let w = self.view.frame().size.width;
+        let leading_end = [&self.retry, &self.stop, &self.settings]
+            .iter()
+            .filter(|b| !b.isHidden())
+            .map(|b| b.frame().origin.x + b.frame().size.width)
+            .fold(PAD, f64::max);
+        let place = |compact: bool| -> f64 {
+            set_title(&self.csv, if compact { CSV_SHORT } else { tr(Msg::TextCopyCsv) });
+            self.csv.setToolTip(compact.then(|| NSString::from_str(tr(Msg::TextCopyCsv))).as_deref());
+            let mut right = w - PAD;
+            for b in self.trailing.iter().filter(|b| !b.isHidden()) {
+                b.sizeToFit();
+                let bw = b.frame().size.width.max(if compact && std::ptr::eq::<NSButton>(&**b, &*self.csv) {
+                    44.0
+                } else {
+                    64.0
+                });
+                right -= bw;
+                b.setFrame(cg_rect(Rect::new(right, PAD, bw, BUTTON_H)));
+                right -= 8.0;
+            }
+            right + 8.0
+        };
+        let left = place(false);
+        if !self.csv.isHidden() && left < leading_end + 8.0 {
+            place(true);
+        }
     }
 
     /// Fade in with a small spring rise.
@@ -360,6 +506,12 @@ impl AiSheet {
         if let Some(l) = self.view.layer() {
             spring_scalar(&l, "transform.translation.y", -14.0, 0.0, motion::TOAST);
         }
+    }
+
+    /// Show at once (standalone hosts are never docked or faded).
+    pub fn show_now(&self) {
+        self.view.setHidden(false);
+        self.view.setAlphaValue(1.0);
     }
 
     /// Keep the sheet inside a container that got narrower than it.

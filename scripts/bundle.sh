@@ -18,11 +18,15 @@ ROOT="$(pwd)"
 DIST="$ROOT/dist"
 APP="$DIST/Lumora.app"
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+# CFBundleShortVersionString must be 1–3 dot-separated integers, so drop any
+# semver pre-release / build suffix ("0.5.0-beta.1" → "0.5.0") for the plist;
+# DMG / zip names keep the full $VERSION.
+SHORT_VERSION="${VERSION%%[-+]*}"
 BUILD="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 TARGETS=(aarch64-apple-darwin x86_64-apple-darwin)
 
-echo "==> Lumora $VERSION ($BUILD)"
+echo "==> Lumora $VERSION (CFBundleShortVersionString $SHORT_VERSION, build $BUILD)"
 for t in "${TARGETS[@]}"; do
   rustup target add "$t" >/dev/null 2>&1 || true
   echo "==> cargo build --release --target $t"
@@ -36,7 +40,7 @@ lipo -create -output "$APP/Contents/MacOS/lumora" \
   "target/aarch64-apple-darwin/release/lumora" \
   "target/x86_64-apple-darwin/release/lumora"
 lipo -info "$APP/Contents/MacOS/lumora"
-sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" packaging/Info.plist > "$APP/Contents/Info.plist"
+sed -e "s/__VERSION__/$SHORT_VERSION/" -e "s/__BUILD__/$BUILD/" packaging/Info.plist > "$APP/Contents/Info.plist"
 # App icon: packaging/AppIcon.icns is generated (and committed) by
 # scripts/make_icon.py from the SVG. With ICONUTIL=1 on a Mac, rebuild it
 # here through Apple's iconutil from the same PNGs instead.
