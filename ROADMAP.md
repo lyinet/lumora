@@ -5,7 +5,8 @@
 - Run on Apple Silicon + Intel, macOS 14 and 15; fix whatever the type
   checker couldn't catch (event routing across displays, layer geometry,
   window levels over full-screen apps, TCC flows).
-- Microphone on macOS 14 via `AVCaptureSession` (SC microphone is 15+).
+- ✅ Microphone on macOS 14 via `AVCaptureSession` (SC microphone is 15+) —
+  done in v0.5.
 - Replace the 120 Hz `NSTimer` with `NSScreen.displayLink` (macOS 14) for
   ProMotion-synchronised window springs.
 - Crash/diagnostics: os_log subsystem, opt-in crash reports.
@@ -44,26 +45,48 @@
 - ✅ Privacy default: only on-device OCR text and annotation text are sent;
   the screenshot image only with "Send screenshot image" turned on.
 
-## v0.5 — real-Mac bring-up, history, recording extras
+## v0.5 — AI combo (built 2026-11-17, awaiting hardware QA)
+
+- ✅ Smart Redaction (chunk 1): on-device detectors for emails, phone
+  numbers, Chinese ID and bank cards (checksums + context), API keys and
+  tokens, IPv4 addresses, URL secrets and faces; one-click pixelate / blur
+  as one undo step (⌘⇧R); optional text-only AI check; optional automatic
+  redaction of new screenshots.
+- ✅ OCR actions (chunk 2): a Capture Text result panel with Copy,
+  Summarize, Translate, As Table, As Code and Checklist; on-device table /
+  code / checklist reconstruction that AI refines when enabled; editor AI
+  menu gains Extract table / Extract code.
+- ✅ Click ripples, click-event log (`.events.json`) and microphone on
+  macOS 14 via `AVCaptureSession` (chunk 3).
+- ✅ Recording → step-by-step tutorial with Markdown / HTML export and
+  optional text-only AI write-up (chunk 4).
+- ✅ Subtitles, summary and chapters for recordings: Apple Speech on-device
+  or OpenAI-compatible cloud transcription, SRT / WebVTT export (chunk 5).
+- ✅ Audit fixes: text panel focus / Esc, settings layout, hidden main menu
+  (⌘Z / ⌘C / ⌘W …), bank-card false positives, sidecars moving with
+  recordings, scratch-folder cleanup, background Keychain reads.
+
+## v0.6 — real-Mac bring-up, signing, history, recording extras
 
 - Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
-  for everything v0.1–v0.4 that has only been type-checked (editor,
+  for everything v0.1–v0.5 that has only been type-checked (editor,
   beautify orientation / shadow sign, colour panel, `.lumora` ImageIO /
-  `openURLs` / LaunchServices registration, recording, AI sheet and
-  Keychain access).
+  `openURLs` / LaunchServices registration, recording incl. the macOS 14
+  mic path and click overlay, AI sheet and Keychain access, Capture Text
+  panel focus, tutorial keyframes, Speech permission and transcription).
+- Developer ID signing + notarization in CI (stable code identity, so
+  Screen Recording and Keychain trust survive updates).
 - Capture history window (⌥⇧H): browse, reopen, copy and delete past
   captures and their `.lumora` documents.
-- Recording extras: click ripples, keystroke HUD, microphone on macOS 14
-  (`AVCaptureSession`), GIF export and trim on the card.
+- Recording extras: keystroke HUD (needs Input Monitoring / Accessibility
+  permission — opt-in), GIF export and trim on the card, burn-in subtitles.
 - Scrolling capture.
-- ✅ OCR actions: a Capture Text result panel with Copy, Summarize,
-  Translate, As Table, As Code and Checklist; on-device table / code /
-  checklist reconstruction that AI refines when enabled (chunk 2).
-- ✅ Smart Redaction (chunk 1).
+- OCR result cache in the editor (reuse Vision results across Smart Redact,
+  AI Writing and Extract); PNG pasteboard type instead of TIFF.
 
 ## Later
 
-- Developer ID signing + notarization in CI, Sparkle updates, Homebrew cask.
+- Sparkle updates, Homebrew cask.
 - Editor polish: arrowhead styles, opacity, multiply-blend highlighter,
   magnifier tool, shape fill, emoji stamps; self-timer; capture previous
   area.

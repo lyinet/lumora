@@ -35,7 +35,7 @@
 <br>
 
 > [!NOTE]
-> **Lumora 目前处于早期 alpha 阶段（v0.4）。** 整个应用已能针对 Apple Silicon 和 Intel 通过类型检查与 clippy，与平台无关的核心逻辑也有单元测试覆盖——但它**还没有在真机上运行过**，难免会有粗糙之处。下一个里程碑就是真机调试。⭐ **点个 Star 关注进展**；哪些已验证、哪些尚未验证，请看 [STATUS.md](STATUS.md)。
+> **Lumora 目前处于早期 alpha 阶段（v0.5）。** 整个应用已能针对 Apple Silicon 和 Intel 通过类型检查与 clippy，与平台无关的核心逻辑也有单元测试覆盖——但它**还没有在真机上运行过**，难免会有粗糙之处。下一个里程碑就是真机调试。⭐ **点个 Star 关注进展**；哪些已验证、哪些尚未验证，请看 [STATUS.md](STATUS.md)。
 
 ## 功能
 
@@ -147,6 +147,19 @@ NOTARY_PROFILE=lumora-notary scripts/bundle.sh
 > [!TIP]
 > “屏幕录制”权限与应用的代码签名绑定。ad-hoc 构建每次都会得到新的签名身份，所以每次重新构建后 macOS 都会再次请求授权——日常开发请使用固定的签名身份。
 
+### 权限
+
+Lumora 只在某项功能第一次需要时才请求对应权限：
+
+| 权限 | 用途 |
+|---|---|
+| **屏幕录制** | 所有截图与录屏（必需） |
+| **麦克风** | 录下你的声音，仅在“设置 → 录屏”中开启麦克风时 |
+| **语音识别** | 用 Apple 语音在本机生成字幕，仅在你转写录屏时 |
+| **钥匙串** | 保存和读取 AI 服务商的 API 密钥（`app.lumora.ai`），仅在使用 AI 功能时 |
+
+无需“辅助功能”或“输入监控”权限。网络请求只会发往你配置的 AI 服务商，且仅在你使用 AI 功能或云端转写时发生。
+
 <details>
 <summary><b>在 Linux 或 CI 中开发</b></summary>
 
@@ -180,18 +193,18 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
 ## 架构
 
 <p align="center">
-  <img src="assets/readme/architecture.svg" width="720" alt="四个 crate，依赖方向自上而下：apps/lumora、lumora-ui、lumora-capture、lumora-core">
+  <img src="assets/readme/architecture.svg" width="720" alt="五个 crate，依赖方向自上而下：最上层是 apps/lumora，其下是 lumora-ui、lumora-ai 与 lumora-capture，它们都依赖 lumora-core">
 </p>
 
 项目是一个由五个 crate 组成的 Cargo 工作区，依赖方向严格单向。不依赖操作系统的逻辑都放在最底层的 crate 中，在任何主机上都能测试；其上的每一层都是对 Apple 框架的一层轻薄、类型化的封装。
 
 | Crate | 职责 |
 |---|---|
-| [`apps/lumora`](apps/lumora) | 可执行程序：`NSApplication`、状态栏图标、Carbon 全局快捷键、应用状态以及截图/录屏流程 |
-| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation：截图界面、快速访问、钉图、快门、倒计时、录屏控件、设置、引导、标注编辑器 + 美化面板 + AI 结果面板 |
-| [`lumora-ai`](crates/lumora-ai) | AI 写作所用的 OpenAI 兼容流式客户端与钥匙串密钥存储 |
-| [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit、ImageIO、AVFoundation、剪贴板、美化渲染 |
-| [`lumora-core`](crates/lumora-core) | 纯 Rust：几何、弹簧、选区状态机、吸附、设置、文件名、快捷键解析、布局、录屏状态机、美化模型、`.lumora` 文档格式、AI 设置/提示词/流式解析 |
+| [`apps/lumora`](apps/lumora) | 可执行程序：`NSApplication`、状态栏图标、隐藏的主菜单、Carbon 全局快捷键、应用状态，以及截图 / 录屏 / 文字识别 / 打码 / 教程 / 转写流程 |
+| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation：截图界面、快速访问、钉图、快门、倒计时、录屏控件、设置、引导、标注编辑器 + 美化面板 + AI 结果面板、识别文字操作面板、点击涟漪浮层、教程与字幕窗口 |
+| [`lumora-ai`](crates/lumora-ai) | OpenAI 兼容的流式对话与 `/audio/transcriptions` 客户端、钥匙串密钥存储 |
+| [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit、ImageIO、AVFoundation（含 macOS 14 上的 `AVCaptureSession` 麦克风）、剪贴板、美化渲染、Vision 文字识别与人脸检测、教程帧渲染、Apple 语音转写 |
+| [`lumora-core`](crates/lumora-core) | 纯 Rust：几何、弹簧、选区状态机、吸附、设置、文件名、快捷键解析、布局、录屏状态机、美化模型、`.lumora` 文档格式、AI 设置/提示词/流式解析、打码检测器、表格 / 代码提取、点击记录、教程模型与导出、字幕（SRT / VTT、章节、摘要）、临时文件夹清理 |
 
 深入了解：[ARCHITECTURE.md](ARCHITECTURE.md)（线程模型、数据流、坐标空间）· [DESIGN.md](DESIGN.md)（颜色、形状、字体与动效令牌）。
 
@@ -203,22 +216,20 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
 - [x] **v0.2 —— 标注：** 标注编辑器、OCR（截取文字）、提示浮窗、简体中文本地化、应用图标、仅窗口模式、跨显示器选区
 - [x] **v0.3 —— 美化：** 背景、留白、阴影、窗口边框、固定比例；可再编辑的 `.lumora` 文档
 - [x] **v0.4 —— AI 写作：** 使用你自己的服务商生成说明、步骤指南、替代文本，以及润色、翻译、总结
+- [x] **v0.5 —— AI 组合：** 智能打码（本机检测、一键马赛克 / 模糊、可选 AI 检查）；文字识别操作面板与截图转表格 / 代码，本地优先；点击涟漪、点击事件记录与 macOS 14 麦克风录制；录屏转分步教程；字幕、摘要与章节（本机或云端识别，导出 SRT / VTT）
 
-**v0.5 —— 下一步**
+**v0.6 —— 下一步**
 
-- [x] 智能打码：在本机检测个人与敏感信息，一键马赛克 / 模糊，可选 AI 检查
 - [ ] 在 Apple Silicon 与 Intel（macOS 14 和 15）上真机调试并修复问题
+- [ ] 在 CI 中进行 Developer ID 签名与公证
 - [ ] 截图历史窗口（<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>）
-- [x] 点击涟漪、点击事件记录（`.events.json`）与 macOS 14 麦克风录制
-- [x] 录屏转分步教程（导出 Markdown / HTML，可选 AI 撰写）
-- [x] 录屏字幕、摘要与章节（本机或云端识别，导出 SRT / VTT）
-- [ ] 录屏增强：按键提示、导出 GIF 与剪辑
+- [ ] 录屏增强：按键提示、导出 GIF 与剪辑、字幕烧录
 - [ ] 滚动截图
-- [x] 文字识别操作（总结、翻译、待办清单）与截图转表格 / 代码，本地优先
+- [ ] 编辑器内的文字识别结果缓存
 
 **以后**
 
-- [ ] Developer ID 签名与公证、Sparkle 自动更新、Homebrew cask
+- [ ] Sparkle 自动更新、Homebrew cask
 - [ ] 编辑器打磨、录屏暂停/继续与摄像头气泡、云端链接、快捷指令自动化
 - [ ] Mac App Store 版本、更多语言（日、繁中、德、法、西）
 

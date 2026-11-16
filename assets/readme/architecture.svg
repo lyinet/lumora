@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 440" width="800" height="440" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', Inter, 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif">
-<title>Lumora architecture: four crates, dependencies point down</title>
+<title>Lumora architecture: five crates, dependencies point down</title>
 <defs>
   <linearGradient id="card" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#14151B"/><stop offset="1" stop-color="#0C0D12"/></linearGradient>
   <radialGradient id="glow" cx="400" cy="440" r="460" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0A84FF" stop-opacity=".22"/><stop offset="1" stop-color="#0A84FF" stop-opacity="0"/></radialGradient>
@@ -17,31 +17,45 @@
   <text x="134" y="94" font-size="13.5" fill="#A1A3AD">Binary · NSApplication, status item, hotkeys, flows</text>
   <rect x="648" y="63" width="74" height="26" rx="13" fill="#8E8E93" fill-opacity=".16"/>
   <text x="685.0" y="80.5" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8E8E93">macOS</text>
-</g><path d="M98 117.0V130.0M93 125.0L98 130.0L103 125.0" fill="none" stroke="#6B6E7A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<path d="M98 117V130M93 125L98 130L103 125" fill="none" stroke="#6B6E7A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M538 117V130M533 125L538 130L543 125" fill="none" stroke="#6B6E7A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 <g>
-  <rect x="60" y="136" width="680" height="72" rx="16" fill="#1A1B22"/>
-  <rect x="60.5" y="136.5" width="679" height="71" rx="15.5" fill="none" stroke="#fff" stroke-opacity=".12" stroke-width="1"/>
+  <rect x="60" y="136" width="420" height="72" rx="16" fill="#1A1B22"/>
+  <rect x="60.5" y="136.5" width="419" height="71" rx="15.5" fill="none" stroke="#fff" stroke-opacity=".12" stroke-width="1"/>
   <g transform="translate(80 154)"><path d="M13.8 3.8H3.8V13.8M22.2 3.8H32.2V13.8M22.2 32.2H32.2V22.2M13.8 32.2H3.8V22.2" fill="none" stroke="#C7C9D1" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="18.0" cy="18.0" r="5.4" fill="#5C6070"/></g>
   <text x="134" y="168" font-family="'SF Mono', ui-monospace, Menlo, 'JetBrains Mono', Consolas, monospace" font-size="17" font-weight="600" fill="#fff">lumora-ui</text>
-  <text x="134" y="190" font-size="13.5" fill="#A1A3AD">AppKit + Core Animation · overlay, cards, pins, HUD</text>
-  <rect x="648" y="159" width="74" height="26" rx="13" fill="#8E8E93" fill-opacity=".16"/>
-  <text x="685.0" y="176.5" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8E8E93">macOS</text>
-</g><path d="M98 213.0V226.0M93 221.0L98 226.0L103 221.0" fill="none" stroke="#6B6E7A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="134" y="190" font-size="13.5" fill="#A1A3AD">AppKit + Core Animation · windows, editor</text>
+  <rect x="388" y="150" width="74" height="26" rx="13" fill="#8E8E93" fill-opacity=".16"/>
+  <text x="425.0" y="167.5" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8E8E93">macOS</text>
+</g>
+<path d="M98 213V226M93 221L98 226L103 221" fill="none" stroke="#6B6E7A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 <g>
-  <rect x="60" y="232" width="680" height="72" rx="16" fill="#1A1B22"/>
-  <rect x="60.5" y="232.5" width="679" height="71" rx="15.5" fill="none" stroke="#fff" stroke-opacity=".12" stroke-width="1"/>
+  <rect x="60" y="232" width="420" height="72" rx="16" fill="#1A1B22"/>
+  <rect x="60.5" y="232.5" width="419" height="71" rx="15.5" fill="none" stroke="#fff" stroke-opacity=".12" stroke-width="1"/>
   <g transform="translate(80 250)"><path d="M13.8 3.8H3.8V13.8M22.2 3.8H32.2V13.8M22.2 32.2H32.2V22.2M13.8 32.2H3.8V22.2" fill="none" stroke="#C7C9D1" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="18.0" cy="18.0" r="5.4" fill="#5C6070"/></g>
   <text x="134" y="264" font-family="'SF Mono', ui-monospace, Menlo, 'JetBrains Mono', Consolas, monospace" font-size="17" font-weight="600" fill="#fff">lumora-capture</text>
-  <text x="134" y="286" font-size="13.5" fill="#A1A3AD">ScreenCaptureKit · ImageIO · AVFoundation · pasteboard</text>
-  <rect x="648" y="255" width="74" height="26" rx="13" fill="#8E8E93" fill-opacity=".16"/>
-  <text x="685.0" y="272.5" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8E8E93">macOS</text>
-</g><path d="M98 309.0V322.0M93 317.0L98 322.0L103 317.0" fill="none" stroke="#6B6E7A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="134" y="286" font-size="13.5" fill="#A1A3AD">ScreenCaptureKit · AVFoundation · Vision</text>
+  <rect x="388" y="246" width="74" height="26" rx="13" fill="#8E8E93" fill-opacity=".16"/>
+  <text x="425.0" y="263.5" text-anchor="middle" font-size="12.5" font-weight="600" fill="#8E8E93">macOS</text>
+</g>
+<g>
+  <rect x="500" y="136" width="240" height="168" rx="16" fill="#1A1B22"/>
+  <rect x="500.5" y="136.5" width="239" height="167" rx="15.5" fill="none" stroke="#fff" stroke-opacity=".12" stroke-width="1"/>
+  <g transform="translate(520 154)"><path d="M13.8 3.8H3.8V13.8M22.2 3.8H32.2V13.8M22.2 32.2H32.2V22.2M13.8 32.2H3.8V22.2" fill="none" stroke="#C7C9D1" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="18.0" cy="18.0" r="5.4" fill="#5C6070"/></g>
+  <text x="574" y="168" font-family="'SF Mono', ui-monospace, Menlo, 'JetBrains Mono', Consolas, monospace" font-size="17" font-weight="600" fill="#fff">lumora-ai</text>
+  <text x="574" y="190" font-size="13.5" fill="#A1A3AD">OpenAI-compatible</text>
+  <text x="574" y="209" font-size="13.5" fill="#A1A3AD">chat + transcription</text>
+  <text x="574" y="228" font-size="13.5" fill="#A1A3AD">Keychain API keys</text>
+</g>
+<path d="M98 309V322M93 317L98 322L103 317" fill="none" stroke="#6B6E7A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M538 309V322M533 317L538 322L543 317" fill="none" stroke="#6B6E7A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
 <g>
   <rect x="60" y="328" width="680" height="72" rx="16" fill="url(#coreFill)"/>
   <rect x="60.5" y="328.5" width="679" height="71" rx="15.5" fill="none" stroke="url(#coreStroke)" stroke-opacity="1" stroke-width="1.5"/>
   <g transform="translate(80 346)"><path d="M13.8 3.8H3.8V13.8M22.2 3.8H32.2V13.8M22.2 32.2H32.2V22.2M13.8 32.2H3.8V22.2" fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="18.0" cy="18.0" r="5.4" fill="#0A84FF"/></g>
   <text x="134" y="360" font-family="'SF Mono', ui-monospace, Menlo, 'JetBrains Mono', Consolas, monospace" font-size="17" font-weight="600" fill="#fff">lumora-core</text>
-  <text x="134" y="382" font-size="13.5" fill="#A1A3AD">Pure Rust · geometry, springs, selection, snapping</text>
+  <text x="134" y="382" font-size="13.5" fill="#A1A3AD">Pure Rust · geometry, springs, redaction, transcripts, AI prompts</text>
   <rect x="636" y="351" width="86" height="26" rx="13" fill="#30D158" fill-opacity=".16"/>
   <text x="679.0" y="368.5" text-anchor="middle" font-size="12.5" font-weight="600" fill="#30D158">portable</text>
 </g>

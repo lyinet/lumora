@@ -6,12 +6,24 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-11-17 (prerelease, not yet hardware-tested)
+
 ### Added
-- Transcript core: SRT/WebVTT export with CJK-aware line wrapping.
-- Transcript chapters and summary (AI with local fallback).
-- Cloud transcription via OpenAI-compatible /audio/transcriptions (25 MB limit).
-- On-device transcription with Apple Speech; speech permission string.
-- Subtitles UI: "Subtitles" on a recording's Quick Access card and "Transcribe Recording…" in the menu bar (becomes "Cancel Transcription" while running; an existing `.transcript.json` reopens); Settings → Recording rows for engine (on-device / cloud), spoken language, audio source, cloud model and strict on-device mode (`[transcribe]` settings section); progress toasts, localised speech errors; a transcript window (Esc / ⌘W) with editable lines, summary and chapters, Export SRT / VTT, Copy Chapters, Copy Summary; edits saved back on close.
+- **Subtitles, summary and chapters** — "Subtitles" on a recording's Quick
+  Access card and "Transcribe Recording…" in the menu bar (it becomes
+  "Cancel Transcription" while running; a recording with a
+  `.transcript.json` reopens it with its edits). Speech is recognised on
+  your Mac with Apple Speech (`SFSpeechRecognizer`, strict on-device mode
+  optional) or by the AI provider's OpenAI-compatible
+  `/audio/transcriptions` endpoint (audio up to 25 MB). A summary and
+  chapters follow — by AI when it is on (text only), otherwise locally from
+  pauses and clicks. The transcript window (Esc / ⌘W) has editable lines,
+  summary and chapters, Export SRT / WebVTT (CJK-aware line wrapping), Copy
+  Chapters and Copy Summary; edits are saved back on close. Settings →
+  Recording gains engine (on-device / cloud), spoken language, audio source
+  (microphone / system audio / both), cloud model and strict on-device rows
+  (`[transcribe]` settings section); progress toasts and localised speech
+  errors. `NSSpeechRecognitionUsageDescription` added to `Info.plist`.
 - **Recording → step-by-step tutorial** — "Make Tutorial" on a recording's
   Quick Access card (shown when it has a click log) and "Make Tutorial from
   Recording…" in the menu bar (open panel for `.mp4` / `.mov`; a recording
@@ -56,8 +68,6 @@ All notable changes to Lumora are documented here. The format follows
   Settings → Recording gains a microphone device popup; mic permission is
   requested before the first mic recording, and a denied permission shows a
   toast and records without the mic.
-- `recording.show_clicks` and `recording.microphone_device` settings (older
-  settings files load unchanged).
 - **Smart Redaction (智能打码)** — the editor's new Smart Redact button
   (<kbd>⌘</kbd><kbd>⇧</kbd><kbd>R</kbd>) finds personal and secret data and
   covers every hit with a pixelate (or blur) redaction, all as one undo step,
@@ -74,7 +84,6 @@ All notable changes to Lumora are documented here. The format follows
   recognised text lines only, never the image, and needs AI Writing on) and
   **redact new screenshots before copy / save** (off by default; local
   detectors only, redactions stay editable in the `.lumora` document).
-- `[redact]` settings section (older settings files load unchanged).
 - **OCR actions** — Capture Text (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>2</kbd>) still
   copies the text and shows its toast, and now also opens a small floating
   "Recognised Text" panel with Copy Text, Summarize, Translate (English /
@@ -93,6 +102,32 @@ All notable changes to Lumora are documented here. The format follows
   the on-device result.
 - Editor AI menu: **Extract table** and **Extract code** (with Copy as CSV
   for tables).
+- Hidden main menu: Edit (Undo ⌘Z, Redo ⇧⌘Z, Cut, Copy, Paste, Select All)
+  and Window (Close ⌘W, Minimize ⌘M) key equivalents now work in Settings,
+  the editor and the tutorial / transcript windows. ⌘Q is deliberately not
+  bound, so a focused window can't quit the app and lose an unsaved edit.
+- Lumora's scratch folder (`$TMPDIR/Lumora`) is cleaned at launch: entries
+  untouched for more than 7 days are removed (never when the folder
+  overlaps your save folder; symlinks are not followed).
+
+### Changed
+- Capture Text (⌥⇧2) now opens the Recognised Text actions panel after
+  copying; turn it off with Settings → Capture → "Show actions panel after
+  Capture Text" (`capture.text_actions_panel`, on by default).
+- Settings → Capture gains the Smart Redaction rows; Settings → AI gains
+  "Write tutorial steps with AI"; Settings → Recording gains click ripples,
+  microphone device and the transcription rows.
+- New settings keys with defaults — `recording.show_clicks = true`,
+  `recording.microphone_device` (system default), `capture.text_actions_panel
+  = true`, `[redact]`, `[transcribe]`; older settings files load unchanged.
+- Shorter English Settings strings (capture, text recognition and redaction
+  notes, "Write steps with AI (text only)", "Redact new screenshots
+  automatically"); Chinese strings unchanged.
+- `scripts/bundle.sh` strips any pre-release / build suffix from the version
+  for `CFBundleShortVersionString` (DMG names keep the full version).
+- Copying with beautify off now fills the clipboard immediately; with
+  beautify on, right after rendering and before the PNG is encoded and
+  written. Quick Access Copy with beautify on renders in the background.
 
 ### Fixed
 - Saving a temporary recording from its Quick Access card now moves its
@@ -102,6 +137,34 @@ All notable changes to Lumora are documented here. The format follows
   a pure `layout::toolbar_overflow` decides on every resize which trailing
   items of the tool strip (options, stroke widths, colours, then tools from
   the end) move into a "…" menu, which mirrors their state and actions.
+- The Capture Text panel no longer steals keyboard focus when it appears;
+  it becomes key only when clicked. Esc / ⌘. first stops a streaming AI
+  request, then closes the panel.
+- Settings notes, the shortcut warning, the AI base URL, key note, vision
+  hint, status and privacy note now wrap within the window instead of
+  overflowing; the redaction rows' second column is aligned.
+- The tutorial window's summary takes the width the button bar leaves and
+  the window can no longer be made too narrow for its buttons.
+- The AI result sheet's trailing buttons leave no gap when some are hidden;
+  "Copy as CSV" shortens to "CSV" (full title as tooltip) when space is
+  tight.
+- Hex colours with non-ASCII characters (e.g. in a hand-edited settings
+  file) no longer crash; a stray `+` is rejected too.
+- Smart Redaction no longer redacts order, tracking, invoice or transaction
+  numbers as bank cards: ungrouped digit runs need a matching card network
+  prefix and length plus a nearby card keyword, and words like 订单 / 单号 /
+  快递 / order / tracking / invoice veto a match.
+- Deleting a recording now trashes all its sidecars (`.events.json`,
+  `.steps.json`, the `.tutorial/` folder, `.transcript.json`); saving moves
+  them with the movie (copy + delete across volumes), rewrites
+  `.steps.json` when the name changes, and an open tutorial window follows
+  the move.
+- Tutorial files with absolute or `..` image paths are sanitised on load
+  and on HTML export.
+- A plain capture that also writes a `.lumora` document is PNG-encoded only
+  once; if writing the file fails, the image is still on the clipboard.
+- Tutorial HTML export and Keychain reads for Capture Text, AI Writing and
+  tutorials moved off the main thread.
 
 ## [0.4.0] — 2026-11-16 (not yet hardware-tested)
 
@@ -210,3 +273,8 @@ All notable changes to Lumora are documented here. The format follows
   launch at login via `SMAppService`.
 - Screen Recording onboarding with live permission polling and relaunch.
 - Universal bundle script (lipo, codesign, notarytool, create-dmg) and CI.
+
+[Unreleased]: https://github.com/lyinet/lumora/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/lyinet/lumora/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/lyinet/lumora/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/lyinet/lumora/releases/tag/v0.3.0
