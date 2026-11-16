@@ -37,6 +37,13 @@ pub fn sidecar_path(movie: &Path) -> PathBuf {
     movie.with_file_name(format!("{}.steps.json", stem_of(movie)))
 }
 
+/// Whether `p` is a non-empty relative path made only of normal components
+/// (no `..`, `.`, root or prefix), so `base.join(p)` stays under `base`.
+pub fn is_safe_relative(p: &str) -> bool {
+    use std::path::Component;
+    !p.is_empty() && !p.contains('\\') && Path::new(p).components().all(|c| matches!(c, Component::Normal(_)))
+}
+
 /// Folder for the step images: `/dir/Rec 1.mp4` → `/dir/Rec 1.tutorial`.
 pub fn image_dir(movie: &Path) -> PathBuf {
     movie.with_file_name(format!("{}.tutorial", stem_of(movie)))
@@ -143,8 +150,22 @@ impl Tutorial {
         serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into())
     }
 
+    /// Parse a `steps.json`. Step images that would escape the file's folder
+    /// (absolute, `..`, a drive/root prefix) are dropped, since export reads
+    /// and embeds whatever they point at.
     pub fn from_json(s: &str) -> Result<Tutorial, serde_json::Error> {
-        serde_json::from_str(s)
+        let mut t: Tutorial = serde_json::from_str(s)?;
+        t.sanitize();
+        Ok(t)
+    }
+
+    /// Drop every step image path that is not a plain relative path.
+    pub fn sanitize(&mut self) {
+        for step in &mut self.steps {
+            if step.image.as_deref().is_some_and(|p| !is_safe_relative(p)) {
+                step.image = None;
+            }
+        }
     }
 
     /// The movie moved from `from` to `to` (e.g. Save out of the scratch
@@ -533,6 +554,21 @@ mod tests {
         let t = Tutorial::from_json(min).unwrap();
         assert_eq!(t.scale, 1.0);
         assert_eq!(t.steps[0].detail, "");
+    }
+
+    #[test]
+    fn image_paths_cannot_escape_the_folder() {
+        assert!(is_safe_relative("Rec 1.tutorial/step-01.png"));
+        for bad in ["", "/etc/passwd", "../secret.png", "Rec.tutorial/../../x.png", "./x.png", "a\\..\\b.png"] {
+            assert!(!is_safe_relative(bad), "{bad:?}");
+        }
+        let json = r#"{"schema_version":1,"movie":"a.mp4","video_width":10,"video_height":10,"steps":[
+            {"index":1,"t":0,"frame_time":0,"click":[1,2],"button":"left","title":"x","image":"a.tutorial/step-01.png"},
+            {"index":2,"t":0,"frame_time":0,"click":[1,2],"button":"left","title":"y","image":"../../.ssh/id_rsa"},
+            {"index":3,"t":0,"frame_time":0,"click":[1,2],"button":"left","title":"z","image":"/Users/a/x.png"}]}"#;
+        let t = Tutorial::from_json(json).unwrap();
+        let imgs: Vec<_> = t.steps.iter().map(|s| s.image.as_deref()).collect();
+        assert_eq!(imgs, vec![Some("a.tutorial/step-01.png"), None, None]);
     }
 
     #[test]
