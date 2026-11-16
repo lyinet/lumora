@@ -261,6 +261,7 @@ impl App {
         });
         APP.with(|a| *a.borrow_mut() = Rc::downgrade(&app));
         app.apply_hotkeys();
+        system::clean_temp_dir(app.settings.borrow().save_folder(&app.home));
 
         if !permission::has_screen_recording() {
             app.dispatch(Command::ShowOnboarding);
@@ -423,6 +424,9 @@ impl App {
                             // Sidecars (click log, tutorial) follow the movie.
                             if rec.video {
                                 move_sidecars(&rec.file, &dest);
+                                for o in self.tutorials.borrow_mut().values_mut().filter(|o| o.movie == rec.file) {
+                                    o.movie = dest.clone();
+                                }
                             }
                             rec.file = dest;
                             rec.temp = false;
@@ -452,9 +456,10 @@ impl App {
                         system::trash(&doc);
                     }
                     if rec.video {
-                        let log = lumora_core::click_log::sidecar_path(&rec.file);
-                        if log.exists() {
-                            system::trash(&log);
+                        for side in recording_sidecars(&rec.file) {
+                            if side.exists() {
+                                system::trash(&side);
+                            }
                         }
                     }
                 }
@@ -638,11 +643,58 @@ impl App {
     }
 }
 
-/// Move a recording's `.events.json` along with it (best effort). The
-/// tutorial is only made later, so there is nothing else to move yet.
+/// Everything Lumora keeps next to a recording: click log, tutorial steps,
+/// tutorial images folder and transcript.
+fn recording_sidecars(movie: &std::path::Path) -> [PathBuf; 4] {
+    [
+        lumora_core::click_log::sidecar_path(movie),
+        lumora_core::tutorial::sidecar_path(movie),
+        lumora_core::tutorial::image_dir(movie),
+        lumora_core::transcript::sidecar_path(movie),
+    ]
+}
+
+/// Rename `a` to `b`, falling back to copy-then-delete across volumes
+/// (folders copied recursively). Best effort.
+fn move_path(a: &std::path::Path, b: &std::path::Path) -> std::io::Result<()> {
+    fn copy_all(a: &std::path::Path, b: &std::path::Path) -> std::io::Result<()> {
+        if std::fs::symlink_metadata(a)?.is_dir() {
+            std::fs::create_dir_all(b)?;
+            for e in std::fs::read_dir(a)? {
+                let e = e?;
+                copy_all(&e.path(), &b.join(e.file_name()))?;
+            }
+            Ok(())
+        } else {
+            std::fs::copy(a, b).map(|_| ())
+        }
+    }
+    if std::fs::rename(a, b).is_ok() {
+        return Ok(());
+    }
+    copy_all(a, b)?;
+    // The copy is complete; a leftover original is only scratch-folder litter.
+    let _ = if a.is_dir() { std::fs::remove_dir_all(a) } else { std::fs::remove_file(a) };
+    Ok(())
+}
+
+/// Move a recording's sidecars (click log, tutorial steps + images,
+/// transcript) along with it when Save takes it out of the scratch folder.
+/// The movie may get a new unique name, so `steps.json` is rewritten to point
+/// at the renamed `<stem>.tutorial/` folder.
 fn move_sidecars(from: &std::path::Path, to: &std::path::Path) {
-    let (a, b) = (lumora_core::click_log::sidecar_path(from), lumora_core::click_log::sidecar_path(to));
-    if a.exists() && std::fs::rename(&a, &b).or_else(|_| std::fs::copy(&a, &b).map(|_| ())).is_err() {
-        log::warn!("could not move {}", a.display());
+    for (a, b) in recording_sidecars(from).into_iter().zip(recording_sidecars(to)) {
+        if a.exists() && !b.exists() && move_path(&a, &b).is_err() {
+            log::warn!("could not move {}", a.display());
+        }
+    }
+    let steps = lumora_core::tutorial::sidecar_path(to);
+    if let Ok(mut t) = std::fs::read_to_string(&steps)
+        .map_err(|_| ())
+        .and_then(|j| lumora_core::tutorial::Tutorial::from_json(&j).map_err(|_| ()))
+    {
+        if t.relocate(from, to) && std::fs::write(&steps, t.to_json()).is_err() {
+            log::warn!("could not update {}", steps.display());
+        }
     }
 }

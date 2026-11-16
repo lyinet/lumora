@@ -29,7 +29,12 @@ use crate::app::{on_main, App};
 /// An open tutorial window and the movie it belongs to.
 pub struct OpenTutorial {
     pub window: TutorialWindow,
+    /// Where the movie is now (updated when Save moves it out of the
+    /// scratch folder while the window is open).
     pub movie: PathBuf,
+    /// Where it was when the window opened; the window's step image paths
+    /// are relative to this.
+    pub origin: PathBuf,
 }
 
 /// How the background run ended.
@@ -195,13 +200,25 @@ impl App {
         }
         let id = self.next_id();
         let window = TutorialWindow::show(self.mtm, id, t, base_dir(&movie), self.sink.clone());
-        self.tutorials.borrow_mut().insert(id, OpenTutorial { window, movie });
+        let origin = movie.clone();
+        self.tutorials.borrow_mut().insert(id, OpenTutorial { window, movie, origin });
     }
 
     pub fn on_tutorial(self: &Rc<Self>, id: u64, action: TutorialAction) {
-        let Some(movie) = self.tutorials.borrow().get(&id).map(|o| o.movie.clone()) else { return };
+        let Some((movie, origin)) = self.tutorials.borrow().get(&id).map(|o| (o.movie.clone(), o.origin.clone()))
+        else {
+            return;
+        };
         let base = base_dir(&movie);
         let ui = language();
+        // If the movie was saved elsewhere meanwhile, re-point the window's
+        // copy at the moved `<stem>.tutorial/` folder.
+        let action = match action {
+            TutorialAction::ExportMarkdown(t) => TutorialAction::ExportMarkdown(relocated(t, &origin, &movie)),
+            TutorialAction::ExportHtml(t) => TutorialAction::ExportHtml(relocated(t, &origin, &movie)),
+            TutorialAction::CopyMarkdown(t) => TutorialAction::CopyMarkdown(relocated(t, &origin, &movie)),
+            TutorialAction::Closed(t) => TutorialAction::Closed(relocated(t, &origin, &movie)),
+        };
         match action {
             TutorialAction::ExportMarkdown(t) => {
                 save_steps(&movie, &t);
@@ -252,4 +269,11 @@ impl App {
             }
         }
     }
+}
+
+fn relocated(mut t: Box<tutorial::Tutorial>, origin: &Path, movie: &Path) -> Box<tutorial::Tutorial> {
+    if origin != movie {
+        t.relocate(origin, movie);
+    }
+    t
 }

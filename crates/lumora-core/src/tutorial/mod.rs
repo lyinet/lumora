@@ -147,6 +147,28 @@ impl Tutorial {
         serde_json::from_str(s)
     }
 
+    /// The movie moved from `from` to `to` (e.g. Save out of the scratch
+    /// folder, possibly with a new unique name): point `movie` at the new file
+    /// name and step images under the old `<stem>.tutorial/` folder at the
+    /// new one. Returns whether anything changed.
+    pub fn relocate(&mut self, from: &Path, to: &Path) -> bool {
+        let dir_name =
+            |m: &Path| image_dir(m).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let (old, new) = (format!("{}/", dir_name(from)), format!("{}/", dir_name(to)));
+        let movie = to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut changed = self.movie != movie;
+        self.movie = movie;
+        if old != new {
+            for img in self.steps.iter_mut().filter_map(|s| s.image.as_mut()) {
+                if let Some(rest) = img.strip_prefix(&old) {
+                    *img = format!("{new}{rest}");
+                    changed = true;
+                }
+            }
+        }
+        changed
+    }
+
     /// Remove step `index` (1-based) and renumber.
     pub fn remove_step(&mut self, index: usize) {
         self.steps.retain(|s| s.index != index);
@@ -511,5 +533,27 @@ mod tests {
         let t = Tutorial::from_json(min).unwrap();
         assert_eq!(t.scale, 1.0);
         assert_eq!(t.steps[0].detail, "");
+    }
+
+    #[test]
+    fn relocate_follows_a_renamed_movie() {
+        let (mut t, _) = tutorial_from_log(
+            &log(vec![click(1.0, 10.0, 10.0, 1), click(3.0, 900.0, 10.0, 1)]),
+            &BuildOptions::default(),
+            Language::En,
+        );
+        t.steps[0].image = Some("Rec 1.tutorial/step-01.png".into());
+        t.steps[1].image = Some("elsewhere/step-02.png".into());
+        // Same name, new folder: only `movie` may change.
+        assert!(
+            !t.relocate(Path::new("/tmp/Lumora/Rec 1.mov"), Path::new("/Users/a/Desktop/Rec 1.mov"))
+                || t.movie == "Rec 1.mov"
+        );
+        assert_eq!(t.steps[0].image.as_deref(), Some("Rec 1.tutorial/step-01.png"));
+        // Renamed on Save (unique name).
+        assert!(t.relocate(Path::new("/tmp/Lumora/Rec 1.mov"), Path::new("/Users/a/Desktop/Rec 1 2.mov")));
+        assert_eq!(t.movie, "Rec 1 2.mov");
+        assert_eq!(t.steps[0].image.as_deref(), Some("Rec 1 2.tutorial/step-01.png"));
+        assert_eq!(t.steps[1].image.as_deref(), Some("elsewhere/step-02.png"));
     }
 }
