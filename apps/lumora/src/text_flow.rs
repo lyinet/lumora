@@ -56,16 +56,6 @@ impl App {
         if !cfg.enabled {
             return self.text_ai_done(request, Err(AiError::BadConfig));
         }
-        let key = match Keychain.get(cfg.provider) {
-            Ok(k) => k,
-            Err(e) => {
-                log::warn!("reading the {} API key failed: {e:?}", cfg.provider.id());
-                return self.text_ai_done(request, Err(e));
-            }
-        };
-        if let Err(e) = cfg.check_ready(key.as_deref()) {
-            return self.text_ai_done(request, Err(e));
-        }
         if let Some(j) = self.text_job.borrow_mut().take() {
             j.cancel.store(true, Ordering::Relaxed);
         }
@@ -76,6 +66,12 @@ impl App {
         DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
             move || {
                 let run = || -> Result<String, AiError> {
+                    // Off the main thread: an ad-hoc-signed build may show a
+                    // Keychain prompt, which would block the run loop.
+                    let key = Keychain.get(cfg.provider).inspect_err(|e| {
+                        log::warn!("reading the {} API key failed: {e:?}", cfg.provider.id());
+                    })?;
+                    cfg.check_ready(key.as_deref())?;
                     let ctx = AiContext { ocr_text: input.clone(), ..AiContext::default() };
                     let body = build_request(&cfg, &kind.task(input), &ctx, ui, true)?;
                     lumora_ai::complete(&cfg, key.as_deref(), &body, &cancel, |delta| {

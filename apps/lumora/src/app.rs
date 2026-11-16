@@ -398,9 +398,19 @@ impl App {
                             // The record holds the plain capture; the file
                             // (and so the clipboard) gets the beautified one.
                             let style = self.settings.borrow().beautify.clone();
-                            let out =
-                                lumora_capture::beautify_render::beautify_for_export(img.clone(), &style, rec.scale);
-                            lumora_capture::clipboard::copy_image(&out, rec.scale, Some(&rec.file));
+                            if style.enabled {
+                                // Render off the main thread, then copy.
+                                let (img, scale, file) = (img.clone(), rec.scale, rec.file.clone());
+                                DispatchQueue::global_queue(dispatch2::GlobalQueueIdentifier::QualityOfService(
+                                    dispatch2::DispatchQoS::UserInitiated,
+                                ))
+                                .exec_async(move || {
+                                    let out = lumora_capture::beautify_render::beautify_for_export(img, &style, scale);
+                                    on_main(move |_| lumora_capture::clipboard::copy_image(&out, scale, Some(&file)));
+                                });
+                            } else {
+                                lumora_capture::clipboard::copy_image(img, rec.scale, Some(&rec.file));
+                            }
                         }
                         _ => lumora_capture::clipboard::copy_file(&rec.file),
                     }

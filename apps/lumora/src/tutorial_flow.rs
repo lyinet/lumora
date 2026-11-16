@@ -113,23 +113,13 @@ impl App {
             );
         }
 
-        // AI: settings and key are read here (Keychain on the main thread).
+        // AI: settings here; the key is read on the background queue (a
+        // Keychain prompt must not block the main run loop).
         let mut cfg = self.settings.borrow().ai.clone();
         cfg.validate();
-        let ai = if cfg.writes_tutorials() {
-            match Keychain.get(cfg.provider) {
-                Ok(key) if cfg.check_ready(key.as_deref()).is_ok() => Some((cfg, key)),
-                Ok(_) => None,
-                Err(e) => {
-                    log::warn!("reading the {} API key failed: {e:?}", cfg.provider.id());
-                    None
-                }
-            }
-        } else {
-            None
-        };
+        let ai_cfg = cfg.writes_tutorials().then_some(cfg);
         let ai_wanted = self.settings.borrow().ai.writes_tutorials();
-        log::info!("making tutorial: {} steps (AI: {})", tutorial.steps.len(), ai.is_some());
+        log::info!("making tutorial: {} steps (AI: {})", tutorial.steps.len(), ai_cfg.is_some());
         self.notify_text(
             ToastKind::Success,
             tr(Msg::ToastTutorialWorking),
@@ -145,6 +135,14 @@ impl App {
                     Ok(()) => {
                         // OCR hints are in now: better local titles first.
                         t.apply_local_titles(ui);
+                        let ai = ai_cfg.and_then(|cfg| match Keychain.get(cfg.provider) {
+                            Ok(key) if cfg.check_ready(key.as_deref()).is_ok() => Some((cfg, key)),
+                            Ok(_) => None,
+                            Err(e) => {
+                                log::warn!("reading the {} API key failed: {e:?}", cfg.provider.id());
+                                None
+                            }
+                        });
                         let mut ai_failed = ai_wanted && ai.is_none();
                         if let Some((cfg, key)) = ai {
                             on_main(|app| app.notify_text(ToastKind::Success, tr(Msg::ToastTutorialWriting), None));
@@ -234,9 +232,19 @@ impl App {
                 save_steps(&movie, &t);
                 let name = format!("{}.html", stem(&movie));
                 let Some(path) = util::choose_save_path(self.mtm, &base, &name, "html") else { return };
-                let html =
-                    export::to_html(&t, ui, |s| s.image.as_deref().and_then(|rel| std::fs::read(base.join(rel)).ok()));
-                self.finish_export(&path, html.as_bytes());
+                // Reading + base64-encoding every step image is slow: build
+                // and write off the main thread, toast back on it.
+                DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated))
+                    .exec_async(move || {
+                        let html = export::to_html(&t, ui, |s| {
+                            s.image
+                                .as_deref()
+                                .filter(|rel| tutorial::is_safe_relative(rel))
+                                .and_then(|rel| std::fs::read(base.join(rel)).ok())
+                        });
+                        let result = std::fs::write(&path, html.as_bytes());
+                        on_main(move |app| app.report_export(&path, result));
+                    });
             }
             TutorialAction::CopyMarkdown(t) => {
                 save_steps(&movie, &t);
@@ -256,7 +264,11 @@ impl App {
     }
 
     fn finish_export(self: &Rc<Self>, path: &Path, bytes: &[u8]) {
-        match std::fs::write(path, bytes) {
+        self.report_export(path, std::fs::write(path, bytes));
+    }
+
+    fn report_export(self: &Rc<Self>, path: &Path, result: std::io::Result<()>) {
+        match result {
             Ok(()) => {
                 log::info!("exported tutorial to {}", path.display());
                 let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
