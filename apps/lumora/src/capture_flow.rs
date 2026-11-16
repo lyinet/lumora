@@ -363,6 +363,12 @@ pub fn error_text(e: &CaptureError) -> String {
             trf(Msg::ErrWrite, &[&name.unwrap_or_else(|| path.clone())])
         }
         CaptureError::Empty => tr(Msg::ErrNothing).to_string(),
+        // Transcription errors (v0.5 chunk 5d); localised with the subtitle UI.
+        CaptureError::SpeechDenied
+        | CaptureError::SpeechUnavailable(_)
+        | CaptureError::Speech(_)
+        | CaptureError::NoAudio
+        | CaptureError::Cancelled => e.to_string(),
     }
 }
 

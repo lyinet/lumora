@@ -22,4 +22,20 @@ pub enum CaptureError {
     /// The selection was empty after clipping.
     #[error("nothing to capture")]
     Empty,
+    /// The user has not granted Speech Recognition permission.
+    #[error("Lumora needs Speech Recognition permission")]
+    SpeechDenied,
+    /// Speech recognition is not available (unsupported locale, Siri &
+    /// Dictation disabled, or the recognizer is temporarily unavailable).
+    #[error("speech recognition is unavailable: {0}")]
+    SpeechUnavailable(String),
+    /// The recognizer failed; carries `NSError.localizedDescription`.
+    #[error("speech recognition failed: {0}")]
+    Speech(String),
+    /// The movie has no audio track to export or transcribe.
+    #[error("the recording has no audio")]
+    NoAudio,
+    /// The operation was cancelled by the caller.
+    #[error("cancelled")]
+    Cancelled,
 }

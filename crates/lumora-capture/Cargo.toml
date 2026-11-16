@@ -10,9 +10,9 @@ authors.workspace = true
 
 [dependencies]
 thiserror.workspace = true
+lumora-core.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-lumora-core.workspace = true
 log.workspace = true
 objc2.workspace = true
 block2.workspace = true

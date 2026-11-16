@@ -16,6 +16,9 @@
 //! * [`ocr`] — on-device text recognition (Vision).
 //! * [`faces`] — on-device face detection (Vision), for smart redaction.
 //! * [`permission`] — Screen Recording (TCC) preflight / request.
+//! * [`transcribe`] — audio export (`AVAssetExportSession`) and on-device
+//!   speech recognition (Apple Speech); [`words`] groups recognized words
+//!   into subtitle segments (platform independent).
 //!
 //! All asynchronous APIs take `Send + 'static` completion closures which are
 //! invoked on an arbitrary queue; callers hop to the main thread themselves.
@@ -23,6 +26,8 @@
 
 mod error;
 pub use error::CaptureError;
+
+pub mod words;
 
 #[cfg(target_os = "macos")]
 mod send;
@@ -49,5 +54,7 @@ pub mod permission;
 pub mod recorder;
 #[cfg(target_os = "macos")]
 pub mod screenshot;
+#[cfg(target_os = "macos")]
+pub mod transcribe;
 #[cfg(target_os = "macos")]
 pub mod tutorial;

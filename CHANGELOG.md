@@ -10,6 +10,7 @@ All notable changes to Lumora are documented here. The format follows
 - Transcript core: SRT/WebVTT export with CJK-aware line wrapping.
 - Transcript chapters and summary (AI with local fallback).
 - Cloud transcription via OpenAI-compatible /audio/transcriptions (25 MB limit).
+- On-device transcription with Apple Speech; speech permission string.
 - **Recording → step-by-step tutorial** — "Make Tutorial" on a recording's
   Quick Access card (shown when it has a click log) and "Make Tutorial from
   Recording…" in the menu bar (open panel for `.mp4` / `.mov`; a recording
