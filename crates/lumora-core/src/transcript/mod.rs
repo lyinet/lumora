@@ -11,8 +11,10 @@
 //! charge each character its share of the line (a CJK character costs
 //! `1 / MAX_CJK` of a line, anything else `1 / MAX_LATIN`).
 
+pub mod chapters;
 mod srt;
 
+pub use chapters::{Chapter, Summary};
 pub use srt::{format_srt_time, format_vtt_time, parse_srt, parse_timestamp, to_srt, to_vtt};
 
 use std::path::{Path, PathBuf};
@@ -76,12 +78,21 @@ pub struct Transcript {
     pub engine: String,
     /// Timed segments in playback order.
     pub segments: Vec<Segment>,
+    /// Summary and chapters, when generated. Optional within schema 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<Summary>,
 }
 
 impl Transcript {
     /// New transcript at the current schema version.
     pub fn new(language: impl Into<String>, engine: impl Into<String>, segments: Vec<Segment>) -> Self {
-        Self { schema_version: SCHEMA_VERSION, language: language.into(), engine: engine.into(), segments }
+        Self {
+            schema_version: SCHEMA_VERSION,
+            language: language.into(),
+            engine: engine.into(),
+            segments,
+            summary: None,
+        }
     }
 
     /// Serialize to pretty-printed JSON.
@@ -497,5 +508,15 @@ mod tests {
         let json = r#"{"schema_version":2,"language":"en","engine":"x","segments":[]}"#;
         assert!(matches!(Transcript::from_json(json), Err(TranscriptError::UnsupportedVersion(2))));
         assert!(Transcript::from_json("not json").is_err());
+    }
+
+    #[test]
+    fn json_summary_is_optional() {
+        let mut t = Transcript::new("en", "x", vec![Segment::new(0.0, 1.0, "hi")]);
+        assert!(!t.to_json().unwrap().contains("summary"));
+        t.summary = Some(Summary { summary: "S".into(), chapters: vec![Chapter::new(0.0, "Intro")] });
+        let json = t.to_json().unwrap();
+        assert!(json.contains("\"schema_version\": 1") && json.contains("\"chapters\""));
+        assert_eq!(Transcript::from_json(&json).unwrap(), t);
     }
 }
