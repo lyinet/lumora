@@ -49,6 +49,8 @@ All notable changes to Lumora are documented here. The format follows
 - The tutorial window and the welcome / permission window now close on Esc
   like the transcript window (⌘W already worked); in the tutorial window
   the first Esc finishes editing a step's title or detail instead.
+- Menu bar: the screenshot items are greyed out while a recording runs
+  (they were silently ignored before).
 - Smart Redact's AI check and the Settings → AI tab read the API key from
   the Keychain off the main thread, so a Keychain prompt no longer freezes
   the app.

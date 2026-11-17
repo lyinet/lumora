@@ -188,13 +188,29 @@ impl StatusBar {
                 button.setFont(Some(&mono_digits(12.0, weight::MEDIUM)));
                 button.setTitle(&NSString::from_str(&format!(" {}", lumora_core::format::elapsed(secs))));
                 self.record_item.setTitle(&NSString::from_str(tr(Msg::StopRecording)));
-                self.recording.set(true);
+                if !self.recording.replace(true) {
+                    self.set_captures_enabled(false);
+                }
             }
             None => {
                 button.setImage(Some(&self.idle_icon));
                 button.setTitle(&NSString::from_str(""));
                 self.record_item.setTitle(&NSString::from_str(tr(Msg::RecordScreen)));
                 self.recording.set(false);
+                self.set_captures_enabled(true);
+            }
+        }
+    }
+
+    /// Screenshots can't start while recording (the app ignores them), so
+    /// grey their items out rather than let a click do nothing.
+    fn set_captures_enabled(&self, enabled: bool) {
+        for (action, item) in &self.action_items {
+            if matches!(
+                action,
+                Action::CaptureArea | Action::CaptureFullscreen | Action::CaptureWindow | Action::CaptureText
+            ) {
+                item.setEnabled(enabled);
             }
         }
     }
