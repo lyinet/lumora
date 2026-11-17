@@ -217,6 +217,7 @@ Everything below is written, type-checked and unit-tested, but **not yet run on 
 - [x] **v0.3 — beautify:** backgrounds, padding, shadow, window frame, aspect ratios; editable `.lumora` documents
 - [x] **v0.4 — AI Writing:** captions, step guides, alt text, polish, translate, summarize with your own provider
 - [x] **v0.5 — AI combo:** Smart Redaction (on-device detection, one-click pixelate / blur, optional AI check); OCR actions panel and screenshot → table / code, local-first; click ripples, click-event log and microphone on macOS 14; recording → step-by-step tutorial; subtitles, summary and chapters (on-device or cloud, SRT / VTT)
+- [x] **v0.5.1 — polish:** PNG clipboard, one OCR pass per capture (AI Writing skips cropped / redacted text), no Keychain prompts on the main thread, sturdier transcript window, clearer subtitle errors, scrollable Settings tabs
 
 **v0.6 — next**
 

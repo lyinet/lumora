@@ -6,6 +6,8 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-11-17 (prerelease, polish only, not yet hardware-tested)
+
 ### Changed
 - **Clipboard copies PNG, not TIFF** — screenshots and Quick Access "Copy"
   put the PNG (with its Retina DPI) on the pasteboard as `public.png` plus
@@ -326,7 +328,8 @@ All notable changes to Lumora are documented here. The format follows
 - Screen Recording onboarding with live permission polling and relaunch.
 - Universal bundle script (lipo, codesign, notarytool, create-dmg) and CI.
 
-[Unreleased]: https://github.com/lyinet/lumora/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/lyinet/lumora/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/lyinet/lumora/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lyinet/lumora/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lyinet/lumora/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/lyinet/lumora/releases/tag/v0.3.0
