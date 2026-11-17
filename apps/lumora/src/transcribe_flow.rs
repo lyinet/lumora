@@ -154,9 +154,12 @@ fn recognise(job: &Job, audio: &Path) -> Result<Vec<Segment>, Outcome> {
             if !ai.enabled {
                 return Err(Outcome::Failed { title: tr(Msg::ToastTranscribeCloudOff).to_string(), detail: None });
             }
-            let bytes = std::fs::read(audio).map_err(|e| Outcome::Failed {
-                title: tr(Msg::ToastTranscribeFailed).to_string(),
-                detail: Some(e.to_string()),
+            let bytes = std::fs::read(audio).map_err(|e| {
+                log::warn!("reading the exported audio failed: {e}");
+                Outcome::Failed {
+                    title: tr(Msg::ToastTranscribeFailed).to_string(),
+                    detail: Some(tr(Msg::ErrReadAudio).to_string()),
+                }
             })?;
             if bytes.len() > MAX_UPLOAD_BYTES {
                 return Err(too_large(bytes.len()));

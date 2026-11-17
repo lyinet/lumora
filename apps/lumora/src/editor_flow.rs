@@ -101,7 +101,7 @@ impl App {
                     }
                     Err(e) => {
                         log::error!("{e}");
-                        app.notify(Notice::Error(Msg::ToastSaveFailed), Some(e.to_string()));
+                        app.notify(Notice::Error(Msg::ToastSaveFailed), Some(crate::capture_flow::error_text(&e)));
                     }
                 });
             },

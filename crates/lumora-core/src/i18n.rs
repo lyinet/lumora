@@ -485,6 +485,7 @@ messages! {
     ErrSpeechUnavailableStrict => "This Mac can’t recognize {0} without Apple’s servers. To transcribe, switch Speech recognition to “Cloud (AI provider)” in Settings → Recording, or turn off “Never send audio to Apple servers”.", "本机无法在不使用 Apple 服务器的情况下识别{0}。如需转写，请在“设置 → 录制”中将语音识别切换为“云端（AI 服务商）”，或关闭“绝不将音频发送到 Apple 服务器”。";
     ErrSpeechLocaleUnsupported => "Apple Speech doesn’t support {0} on this Mac. Switch Speech recognition to “Cloud (AI provider)” in Settings → Recording.", "此 Mac 上的 Apple 语音识别不支持{0}。请在“设置 → 录制”中将语音识别切换为“云端（AI 服务商）”。";
     ErrSpeechNotReady => "Apple Speech isn’t available right now. Check that Siri & Dictation is allowed in System Settings, or switch Speech recognition to “Cloud (AI provider)” in Settings → Recording.", "Apple 语音识别暂时不可用。请检查系统设置中是否允许 Siri 与听写，或在“设置 → 录制”中将语音识别切换为“云端（AI 服务商）”。";
+    ErrReadAudio => "Couldn’t read the recording’s audio. Try again, or check that the recording still exists.", "无法读取录屏的音频。请重试，或确认录屏文件仍然存在。";
     ErrSpeech => "Speech recognition failed: {0}", "语音识别失败：{0}";
     ErrNoAudio => "The recording has no audio.", "此录屏没有音频。";
     ErrCancelled => "Cancelled.", "已取消。";

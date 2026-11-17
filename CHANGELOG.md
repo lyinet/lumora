@@ -51,6 +51,9 @@ All notable changes to Lumora are documented here. The format follows
   the first Esc finishes editing a step's title or detail instead.
 - Menu bar: the screenshot items are greyed out while a recording runs
   (they were silently ignored before).
+- Error toasts for saving an edited screenshot, building a tutorial and
+  reading a recording's audio for cloud subtitles now show localised,
+  actionable text instead of raw English error strings.
 - Smart Redact's AI check and the Settings → AI tab read the API key from
   the Keychain off the main thread, so a Keychain prompt no longer freezes
   the app.
