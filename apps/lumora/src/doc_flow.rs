@@ -188,6 +188,7 @@ impl App {
                     beautify: Some(beautify),
                     created_at: loaded.created_at,
                     from_file: true,
+                    ocr: Default::default(),
                 }),
             },
         );
@@ -232,6 +233,7 @@ impl App {
                     beautify: Some(l.beautify.unwrap_or(BeautifyStyle { enabled: false, ..settings_style })),
                     created_at: l.created_at,
                     from_file,
+                    ocr: Default::default(),
                 });
             }
             // Fall back to what's in memory; the file may be mid-write.

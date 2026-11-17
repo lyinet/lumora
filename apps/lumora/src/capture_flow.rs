@@ -34,20 +34,13 @@ use lumora_core::i18n::{tr, trf, Msg};
 use crate::app::{on_main, App, CaptureRecord, Editable, Mode, Notice};
 use crate::system;
 
-/// Encode `image` to PNG once, write it to `path` and return the bytes (for
-/// the `.lumora` document that embeds the same PNG).
-fn write_png_shared(
-    image: &CGImage,
-    path: &std::path::Path,
-    scale: f64,
-) -> Result<std::sync::Arc<Vec<u8>>, CaptureError> {
+/// Write already-encoded PNG bytes to `path` (creating its folder).
+fn write_png_file(png: &[u8], path: &std::path::Path) -> Result<(), CaptureError> {
     let err = |reason: String| CaptureError::Write { path: path.display().to_string(), reason };
-    let png = lumora_capture::image::png_bytes(image, scale).map_err(|e| err(e.to_string()))?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| err(e.to_string()))?;
     }
-    std::fs::write(path, &png).map_err(|e| err(e.to_string()))?;
-    Ok(std::sync::Arc::new(png))
+    std::fs::write(path, png).map_err(|e| err(e.to_string()))
 }
 
 fn background() -> dispatch2::DispatchRetained<DispatchQueue> {
@@ -232,17 +225,17 @@ impl App {
     pub fn finish_capture(self: &Rc<Self>, image: CFRetained<CGImage>, scale: f64, frame: Rect) {
         let redact = self.settings.borrow().redact.clone();
         if !redact.auto_redact {
-            return self.finish_capture_with(image, scale, frame, Vec::new());
+            return self.finish_capture_with(image, scale, frame, Vec::new(), None);
         }
         background().exec_async(move || {
-            let rects = match crate::redact_flow::detect_sync(&image, scale, &redact, None) {
-                Ok(d) => d.rects,
+            let (rects, ocr) = match crate::redact_flow::detect_sync(&image, scale, &redact, None, None) {
+                Ok(d) => (d.rects, d.recognised),
                 Err(e) => {
                     log::warn!("auto-redaction failed: {e}");
-                    Vec::new()
+                    (Vec::new(), None)
                 }
             };
-            on_main(move |app| app.finish_capture_with(image, scale, frame, rects));
+            on_main(move |app| app.finish_capture_with(image, scale, frame, rects, ocr));
         });
     }
 
@@ -255,6 +248,7 @@ impl App {
         scale: f64,
         frame: Rect,
         redactions: Vec<Rect>,
+        ocr: Option<Arc<Vec<lumora_core::ocr::TextBox>>>,
     ) {
         let id = self.next_id();
         let s = self.settings.borrow().clone();
@@ -310,7 +304,15 @@ impl App {
             file: file.clone(),
             temp,
             video: false,
-            editable: Some(Editable { document, ..Editable::new(original, scale) }),
+            editable: Some({
+                let mut ed = Editable { document, ..Editable::new(original, scale) };
+                // Auto-redaction already read the text: Smart Redact and AI
+                // writing reuse it.
+                if let Some(boxes) = ocr {
+                    ed.ocr.store(Editable::ocr_key(&ed.original), boxes);
+                }
+                ed
+            }),
         };
         // The editable document keeps the original capture (not the
         // beautified export) plus the beautify style, when enabled.
@@ -333,34 +335,54 @@ impl App {
         if edit_now {
             self.open_editor(id);
         }
-        // Nothing to render: fill the clipboard now rather than after the
-        // encode + write. The file URL resolves once the PNG lands.
-        if copy && !style.enabled {
-            lumora_capture::clipboard::copy_image(&image, scale, Some(&file));
-        }
-
+        // Encode once off the main thread; the same PNG bytes feed the
+        // clipboard (as PNG data, not an `NSImage` serialised to TIFF on
+        // main), the file and the `.lumora` document.
         background().exec_async(move || {
             let image = lumora_capture::beautify_render::beautify_for_export(image, &style, scale);
-            if copy && style.enabled {
-                // Rendered: hop to main for the clipboard before encoding.
-                let (img, f) = (image.clone(), file.clone());
-                on_main(move |_| lumora_capture::clipboard::copy_image(&img, scale, Some(&f)));
-            }
-            let result = match shared_job {
-                Some(job) => write_png_shared(&image, &file, scale).map(|png| {
-                    on_main(move |app| app.spawn_doc_write(job.with_png(png)));
-                }),
-                None => lumora_capture::image::write_png(&image, &file, scale),
+            let png = match lumora_capture::image::png_bytes(&image, scale) {
+                Ok(png) => std::sync::Arc::new(png),
+                Err(e) => {
+                    let e = CaptureError::Write { path: file.display().to_string(), reason: e.to_string() };
+                    on_main(move |app| {
+                        log::error!("{e}");
+                        if copy {
+                            // Still give the user the image.
+                            lumora_capture::clipboard::copy_image(&image, scale, None);
+                        }
+                        app.notify(Notice::Error(Msg::ToastSaveFailed), Some(error_text(&e)));
+                    });
+                    return;
+                }
             };
-            on_main(move |_app| match result {
+            // Copied before the write lands; the file URL resolves a moment
+            // later. `0` = not copied.
+            let copied = std::sync::Arc::new(std::sync::atomic::AtomicIsize::new(0));
+            if copy {
+                let (bytes, f, slot) = (png.clone(), file.clone(), copied.clone());
+                on_main(move |_| {
+                    let n = lumora_capture::clipboard::copy_png(&bytes, Some(&f));
+                    slot.store(n, std::sync::atomic::Ordering::SeqCst);
+                });
+            }
+            let result = write_png_file(&png, &file);
+            if result.is_ok() {
+                if let Some(job) = shared_job {
+                    let png = png.clone();
+                    on_main(move |app| app.spawn_doc_write(job.with_png(png)));
+                }
+            }
+            on_main(move |app| match result {
                 Ok(()) => log::info!("saved {}", file.display()),
                 Err(e) => {
                     log::error!("{e}");
-                    if copy {
-                        // Drop the dangling file URL.
-                        lumora_capture::clipboard::copy_image(&image, scale, None);
+                    // Drop the dangling file URL, unless the user has copied
+                    // something else since.
+                    let ours = copied.load(std::sync::atomic::Ordering::SeqCst);
+                    if copy && ours != 0 && ours == lumora_capture::clipboard::change_count() {
+                        lumora_capture::clipboard::copy_png(&png, None);
                     }
-                    _app.notify(Notice::Error(Msg::ToastSaveFailed), Some(error_text(&e)));
+                    app.notify(Notice::Error(Msg::ToastSaveFailed), Some(error_text(&e)));
                 }
             });
         });
@@ -400,13 +422,27 @@ pub fn error_text(e: &CaptureError) -> String {
         }
         CaptureError::Empty => tr(Msg::ErrNothing).to_string(),
         CaptureError::SpeechDenied => tr(Msg::ErrSpeechPermission).to_string(),
-        CaptureError::SpeechUnavailable(why) if why.starts_with(lumora_capture::transcribe::STRICT_UNAVAILABLE) => {
-            tr(Msg::ErrSpeechUnavailableStrict).to_string()
+        CaptureError::SpeechOnDeviceUnavailable(locale) => {
+            trf(Msg::ErrSpeechUnavailableStrict, &[&speech_language_name(locale)])
         }
+        CaptureError::SpeechLocaleUnsupported(locale) => {
+            trf(Msg::ErrSpeechLocaleUnsupported, &[&speech_language_name(locale)])
+        }
+        CaptureError::SpeechNotReady => tr(Msg::ErrSpeechNotReady).to_string(),
         CaptureError::SpeechUnavailable(why) => trf(Msg::ErrSpeechUnavailable, &[why]),
         CaptureError::Speech(why) => trf(Msg::ErrSpeech, &[why]),
         CaptureError::NoAudio => tr(Msg::ErrNoAudio).to_string(),
         CaptureError::Cancelled => tr(Msg::ErrCancelled).to_string(),
+    }
+}
+
+/// A speech locale as the user reads it ("Chinese (Mandarin)" / "English"),
+/// or the identifier itself for anything else.
+fn speech_language_name(locale: &str) -> String {
+    match locale.split(['-', '_']).next().unwrap_or("") {
+        "zh" => tr(Msg::TranscribeLanguageZh).to_string(),
+        "en" => tr(Msg::TranscribeLanguageEn).to_string(),
+        _ => locale.to_string(),
     }
 }
 

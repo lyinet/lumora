@@ -9,12 +9,14 @@
 
 use std::rc::Rc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
 use lumora_ai::{AiError, AiSettings, KeyStore, Keychain};
 use lumora_capture::CaptureError;
 use lumora_core::geometry::Rect;
 use lumora_core::i18n::{tr, trf, Msg};
+use lumora_core::ocr::TextBox;
 use lumora_core::redact::{self, Finding, RedactSettings};
 use lumora_ui::events::SmartRedactRequest;
 use lumora_ui::toast::ToastKind;
@@ -29,10 +31,14 @@ pub struct Detection {
     pub rects: Vec<Rect>,
     /// The AI check was requested but failed (local results only).
     pub ai_failed: bool,
+    /// Text Vision recognised here (pixels), for the OCR cache; `None` when
+    /// cached boxes were passed in or no text detector was on.
+    pub recognised: Option<Arc<Vec<TextBox>>>,
 }
 
 /// The AI settings and key for the AI check, or `Err(())` when it was
 /// asked for but cannot run (AI off, no key…). `Ok(None)` = not asked.
+/// Reads the Keychain: call off the main thread.
 pub fn ai_for_check(settings: &lumora_core::settings::Settings) -> Result<Option<(AiSettings, Option<String>)>, ()> {
     if !settings.redact.ai_check {
         return Ok(None);
@@ -48,26 +54,37 @@ pub fn ai_for_check(settings: &lumora_core::settings::Settings) -> Result<Option
     Ok(Some((cfg, key)))
 }
 
-/// Blocking detection over `image` (call off the main thread).
+/// Blocking detection over `image` (call off the main thread). `cached`
+/// skips Vision text recognition when this image was already read.
 pub fn detect_sync(
     image: &CGImage,
     scale: f64,
     settings: &RedactSettings,
     ai: Option<(AiSettings, Option<String>)>,
+    cached: Option<Arc<Vec<TextBox>>>,
 ) -> Result<Detection, CaptureError> {
     let (w, h) = lumora_capture::image::pixel_size(image);
     if w == 0 || h == 0 {
         return Err(CaptureError::Empty);
     }
     let text_wanted = redact::Category::TEXT.iter().any(|&c| settings.enabled(c)) || ai.is_some();
-    let boxes = if text_wanted { lumora_capture::ocr::recognize_boxes_sync(image) } else { Ok(Vec::new()) };
+    let mut recognised = None;
+    let boxes = match (text_wanted, cached) {
+        (false, _) => Ok(Arc::new(Vec::new())),
+        (true, Some(boxes)) => Ok(boxes),
+        (true, None) => lumora_capture::ocr::recognize_boxes_sync(image).map(|b| {
+            let b = Arc::new(b);
+            recognised = Some(b.clone());
+            b
+        }),
+    };
     let faces = if settings.faces { lumora_capture::faces::detect_faces_sync(image) } else { Ok(Vec::new()) };
     let (boxes, faces) = match (boxes, faces) {
         (Err(e), Err(_)) => return Err(e),
         (b, f) => (
             b.unwrap_or_else(|e| {
                 log::warn!("OCR for smart redaction failed: {e}");
-                Vec::new()
+                Arc::new(Vec::new())
             }),
             f.unwrap_or_else(|e| {
                 log::warn!("face detection failed: {e}");
@@ -98,25 +115,32 @@ pub fn detect_sync(
     }
     let canvas = Rect::new(0.0, 0.0, w as f64 / scale, h as f64 / scale);
     log::info!("smart redaction: {} findings", findings.len());
-    Ok(Detection { rects: redact::redaction_rects(&findings, scale, canvas), ai_failed })
+    Ok(Detection { rects: redact::redaction_rects(&findings, scale, canvas), ai_failed, recognised })
 }
 
 impl App {
     /// "Smart Redact" in editor `editor`.
     pub fn on_smart_redact(self: &Rc<Self>, editor: u64, req: SmartRedactRequest) {
         let settings = self.settings.borrow().clone();
-        let (ai, ai_unavailable) = match ai_for_check(&settings) {
-            Ok(ai) => (ai, false),
-            Err(()) => (None, true),
-        };
         let SmartRedactRequest { request, base, scale } = req;
-        let redact_settings = settings.redact;
+        let cached = self.cached_ocr(editor, &base);
         DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
             move || {
-                let result = detect_sync(&base, scale, &redact_settings, ai).map(|mut d| {
+                // Off the main thread: an ad-hoc-signed build may show a
+                // Keychain prompt, which would block the run loop.
+                let (ai, ai_unavailable) = match ai_for_check(&settings) {
+                    Ok(ai) => (ai, false),
+                    Err(()) => (None, true),
+                };
+                let redact_settings = settings.redact;
+                let result = detect_sync(&base, scale, &redact_settings, ai, cached).map(|mut d| {
                     d.ai_failed |= ai_unavailable;
                     d
                 });
+                if let Some(boxes) = result.as_ref().ok().and_then(|d| d.recognised.clone()) {
+                    let key = crate::app::Editable::ocr_key(&base);
+                    on_main(move |app| app.store_ocr(editor, key, boxes));
+                }
                 let mode = redact_settings.mode;
                 on_main(move |app| app.smart_redact_done(editor, request, result, mode));
             },

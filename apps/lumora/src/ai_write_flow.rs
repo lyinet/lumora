@@ -44,6 +44,7 @@ impl App {
         self.ai_jobs.borrow_mut().insert(editor, AiJob { request, cancel: cancel.clone() });
         let ui = lumora_core::i18n::language();
         let AiWriteRequest { kind, source_text, document, base, scale, .. } = req;
+        let cached = self.cached_ocr(editor, &base);
         log::info!("AI writing: {kind:?} (editor {editor}, request {request})");
         DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
             move || {
@@ -55,10 +56,24 @@ impl App {
                     })?;
                     cfg.check_ready(key.as_deref())?;
                     let boxes = if kind.needs_ocr(source_text.is_some()) {
-                        lumora_capture::ocr::recognize_boxes_sync(&base).unwrap_or_else(|e| {
-                            log::warn!("OCR for AI writing failed: {e}");
-                            Vec::new()
-                        })
+                        let all = match cached {
+                            Some(b) => b,
+                            None => match lumora_capture::ocr::recognize_boxes_sync(&base) {
+                                Ok(b) => {
+                                    let b = Arc::new(b);
+                                    let (key, c) = (crate::app::Editable::ocr_key(&base), b.clone());
+                                    on_main(move |app| app.store_ocr(editor, key, c));
+                                    b
+                                }
+                                Err(e) => {
+                                    log::warn!("OCR for AI writing failed: {e}");
+                                    Arc::new(Vec::new())
+                                }
+                            },
+                        };
+                        // Only what the edited image still shows: never text
+                        // the user cropped away or covered with a redaction.
+                        lumora_core::ocr::visible_in_document(&all, scale, &document)
                     } else {
                         Vec::new()
                     };

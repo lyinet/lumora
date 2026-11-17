@@ -57,19 +57,10 @@ impl FrameGrabber {
 
     /// The frame shown at `seconds` (full size).
     pub fn frame_at(&self, seconds: f64) -> Result<CFRetained<CGImage>, CaptureError> {
-        // SAFETY: synchronous generation (we are off the main thread);
-        // `actualTime` may be NULL.
-        unsafe {
-            let time = CMTime::with_seconds(seconds.max(0.0), 600);
-            #[allow(deprecated)] // the async API needs a run loop; this is a worker thread.
-            let image = self
-                .generator
-                .copyCGImageAtTime_actualTime_error(time, std::ptr::null_mut())
-                .map_err(|e| CaptureError::Framework(e.localizedDescription().to_string()))?;
-            // Transfer the +1 reference from `Retained` to `CFRetained`.
-            let raw = std::ptr::NonNull::new(Retained::into_raw(image)).ok_or(CaptureError::Empty)?;
-            Ok(CFRetained::from_raw(raw))
-        }
+        // SAFETY: CMTime construction has no preconditions.
+        let time = unsafe { CMTime::with_seconds(seconds.max(0.0), 600) };
+        // Blocks until AVFoundation hands the frame over (we are off main).
+        crate::av_sync::image_at(&self.generator, time)
     }
 }
 

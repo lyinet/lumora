@@ -585,19 +585,18 @@ pub fn thumbnail(
 ) -> Option<objc2_core_foundation::CFRetained<objc2_core_graphics::CGImage>> {
     use objc2_av_foundation::{AVAsset, AVAssetImageGenerator};
     let url = crate::clipboard::file_url(path)?;
-    // SAFETY: synchronous image generation from a local file; all
-    // arguments are valid. `actualTime` may be NULL.
-    unsafe {
+    // SAFETY: plain setters on a fresh generator for a local file.
+    let generator = unsafe {
         let asset = AVAsset::assetWithURL(&url);
         let generator = AVAssetImageGenerator::assetImageGeneratorWithAsset(&asset);
         generator.setAppliesPreferredTrackTransform(true);
         generator.setMaximumSize(objc2_core_foundation::CGSize::new(max_side, max_side));
-        #[allow(deprecated)] // async replacement is macOS 13+, but sync is simpler here and off the main thread.
-        let image = generator.copyCGImageAtTime_actualTime_error(CMTime::new(0, 600), std::ptr::null_mut()).ok()?;
-        // Transfer the +1 reference from objc2's `Retained` to `CFRetained`.
-        let raw = std::ptr::NonNull::new(Retained::into_raw(image))?;
-        Some(objc2_core_foundation::CFRetained::from_raw(raw))
-    }
+        generator
+    };
+    // SAFETY: CMTime construction has no preconditions.
+    let start = unsafe { CMTime::new(0, 600) };
+    // Blocks until AVFoundation hands the frame over (we are off main).
+    crate::av_sync::image_at(&generator, start).inspect_err(|e| log::warn!("recording thumbnail: {e}")).ok()
 }
 
 #[cfg(test)]

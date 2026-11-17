@@ -562,11 +562,22 @@ fn build_buttons(
         let at = actions.len() - 1; // before Delete, after Tutorial
         actions.insert(at, ("captions.bubble", tr(Msg::MakeSubtitles), CardAction::Subtitles));
     }
-    let b = size::CARD_BUTTON;
-    let gap = 6.0;
-    let total = actions.len() as f64 * b + (actions.len() as f64 - 1.0) * gap;
-    let mut x = (frame.width() - total) / 2.0;
-    let y = (frame.height() - b) / 2.0;
+    // Recordings carry a duration badge along the bottom (8 + 20 pt): keep
+    // the row clear of it on short cards, and shrink the row rather than
+    // let five or six buttons run into the edges.
+    let reserved = if is_video { 32.0 } else { 0.0 };
+    let row = lumora_core::layout::button_row(
+        actions.len(),
+        Size::new(frame.width(), frame.height()),
+        size::CARD_BUTTON,
+        24.0,
+        6.0,
+        8.0,
+        reserved,
+    );
+    let (b, gap) = (row.size, row.gap);
+    let mut x = row.x;
+    let y = row.y;
     let mut targets = Vec::new();
     for (symbol, tip, action) in actions {
         let sink = sink.clone();

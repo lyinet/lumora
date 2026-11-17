@@ -127,7 +127,16 @@ fn spoken(segments: &[Segment]) -> Vec<Segment> {
 fn capture_failure(e: &CaptureError) -> Outcome {
     match e {
         CaptureError::Cancelled => Outcome::Cancelled,
-        _ => Outcome::Failed { title: tr(Msg::ToastTranscribeFailed).to_string(), detail: Some(error_text(e)) },
+        _ => Outcome::Failed { title: failure_title(e).to_string(), detail: Some(error_text(e)) },
+    }
+}
+
+/// Toast title for a failed transcription: specific when the fix is a
+/// setting (on-device speech unavailable → switch to Cloud), else generic.
+fn failure_title(e: &CaptureError) -> &'static str {
+    match e {
+        CaptureError::SpeechOnDeviceUnavailable(_) => tr(Msg::ToastSpeechOnDeviceUnavailable),
+        _ => tr(Msg::ToastTranscribeFailed),
     }
 }
 
@@ -145,9 +154,12 @@ fn recognise(job: &Job, audio: &Path) -> Result<Vec<Segment>, Outcome> {
             if !ai.enabled {
                 return Err(Outcome::Failed { title: tr(Msg::ToastTranscribeCloudOff).to_string(), detail: None });
             }
-            let bytes = std::fs::read(audio).map_err(|e| Outcome::Failed {
-                title: tr(Msg::ToastTranscribeFailed).to_string(),
-                detail: Some(e.to_string()),
+            let bytes = std::fs::read(audio).map_err(|e| {
+                log::warn!("reading the exported audio failed: {e}");
+                Outcome::Failed {
+                    title: tr(Msg::ToastTranscribeFailed).to_string(),
+                    detail: Some(tr(Msg::ErrReadAudio).to_string()),
+                }
             })?;
             if bytes.len() > MAX_UPLOAD_BYTES {
                 return Err(too_large(bytes.len()));
@@ -328,18 +340,14 @@ impl App {
                     return;
                 }
                 SpeechAuthorization::Denied => return self.transcribe_failed_with(&CaptureError::SpeechDenied),
-                SpeechAuthorization::Restricted => {
-                    return self.transcribe_failed_with(&CaptureError::SpeechUnavailable(
-                        "speech recognition is restricted on this Mac".into(),
-                    ))
-                }
+                SpeechAuthorization::Restricted => return self.transcribe_failed_with(&CaptureError::SpeechNotReady),
             }
         }
         self.start_transcription(movie);
     }
 
     fn transcribe_failed_with(self: &Rc<Self>, e: &CaptureError) {
-        self.notify_text(ToastKind::Error, tr(Msg::ToastTranscribeFailed), Some(&error_text(e)));
+        self.notify_text(ToastKind::Error, failure_title(e), Some(&error_text(e)));
     }
 
     fn start_transcription(self: &Rc<Self>, movie: PathBuf) {

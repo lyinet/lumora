@@ -131,7 +131,7 @@ impl App {
             move || {
                 let mut t = tutorial;
                 let outcome = match lumora_capture::tutorial::render_steps(&movie_bg, &mut t, |_, _| {}) {
-                    Err(e) => Outcome::Failed(e.to_string()),
+                    Err(e) => Outcome::Failed(crate::capture_flow::error_text(&e)),
                     Ok(()) => {
                         // OCR hints are in now: better local titles first.
                         t.apply_local_titles(ui);

@@ -25,8 +25,19 @@ pub enum CaptureError {
     /// The user has not granted Speech Recognition permission.
     #[error("Lumora needs Speech Recognition permission")]
     SpeechDenied,
-    /// Speech recognition is not available (unsupported locale, Siri &
-    /// Dictation disabled, or the recognizer is temporarily unavailable).
+    /// "Never send audio to Apple servers" is on, but this Mac can't
+    /// recognise the locale (e.g. `"zh-CN"`) on-device.
+    #[error("on-device speech recognition is not supported for {0} on this Mac")]
+    SpeechOnDeviceUnavailable(String),
+    /// Apple Speech has no recognizer for the locale.
+    #[error("speech recognition does not support {0}")]
+    SpeechLocaleUnsupported(String),
+    /// The recognizer exists but is not available right now (offline,
+    /// Siri & Dictation off, or restricted by a profile / Screen Time).
+    #[error("speech recognition is not available right now")]
+    SpeechNotReady,
+    /// Speech recognition is not available for another reason (carries
+    /// the framework's description).
     #[error("speech recognition is unavailable: {0}")]
     SpeechUnavailable(String),
     /// The recognizer failed; carries `NSError.localizedDescription`.

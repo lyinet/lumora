@@ -6,6 +6,60 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-11-17 (prerelease, polish only, not yet hardware-tested)
+
+### Changed
+- **Clipboard copies PNG, not TIFF** — screenshots and Quick Access "Copy"
+  put the PNG (with its Retina DPI) on the pasteboard as `public.png` plus
+  the file URL, encoded once off the main thread, instead of an `NSImage`
+  that AppKit serialises to uncompressed TIFF on the main thread.
+- **Text is recognised once per capture** — auto-redaction, Smart Redact
+  and every editor AI task share one Vision OCR result instead of running
+  it again each time.
+- Recording poster frames, tutorial frames and subtitle audio export use
+  AVFoundation's current asynchronous loaders
+  (`generateCGImageAsynchronouslyForTime:`, `loadTracksWithMediaType:`)
+  instead of the deprecated synchronous calls, waited on from the worker
+  thread with a 30 s timeout. (`exportAsynchronously…` and the mic device
+  list keep their deprecated APIs: the replacements need macOS 15.)
+
+### Fixed
+- Editor AI writing no longer sends text you cropped away or covered with
+  a redaction: only text still visible in the edited image is used.
+- Transcript window: Esc while editing a line now just finishes the edit
+  (keeping the text; Esc during pinyin / IME composition still goes to the
+  input method) — a second Esc closes the window. Closing or exporting
+  mid-edit always uses the text as typed.
+- Transcript window opens immediately for long recordings: the first rows
+  are built up front and the rest are added in batches, instead of creating
+  thousands of views before the window appears.
+- Subtitles: when "Never send audio to Apple servers" is on and this Mac
+  can't recognise the language on-device, the toast now says so plainly
+  ("On-device speech recognition isn't available") and tells you how to
+  switch to Cloud recognition, instead of a generic failure. An unsupported
+  language or an unavailable recognizer (Siri & Dictation off, restricted)
+  also get their own localised, actionable messages instead of English
+  framework text.
+- Quick Access: a recording card's hover buttons (Copy, Save, Make
+  Tutorial, Subtitles, Delete) no longer crowd the duration badge on short,
+  wide cards — the row sits above the badge, and shrinks slightly instead of
+  running into the edges when there are many buttons.
+- Settings: every tab is top-anchored in a scroll view, so the Recording tab
+  (recording options plus the subtitle rows) and the others never clip their
+  last rows in English or Chinese, whatever height the tab view gets; the
+  scroller only appears when a tab actually runs long.
+- The tutorial window and the welcome / permission window now close on Esc
+  like the transcript window (⌘W already worked); in the tutorial window
+  the first Esc finishes editing a step's title or detail instead.
+- Menu bar: the screenshot items are greyed out while a recording runs
+  (they were silently ignored before).
+- Error toasts for saving an edited screenshot, building a tutorial and
+  reading a recording's audio for cloud subtitles now show localised,
+  actionable text instead of raw English error strings.
+- Smart Redact's AI check and the Settings → AI tab read the API key from
+  the Keychain off the main thread, so a Keychain prompt no longer freezes
+  the app.
+
 ## [0.5.0] — 2026-11-17 (prerelease, not yet hardware-tested)
 
 ### Added
@@ -274,7 +328,8 @@ All notable changes to Lumora are documented here. The format follows
 - Screen Recording onboarding with live permission polling and relaunch.
 - Universal bundle script (lipo, codesign, notarytool, create-dmg) and CI.
 
-[Unreleased]: https://github.com/lyinet/lumora/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/lyinet/lumora/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/lyinet/lumora/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lyinet/lumora/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lyinet/lumora/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/lyinet/lumora/releases/tag/v0.3.0

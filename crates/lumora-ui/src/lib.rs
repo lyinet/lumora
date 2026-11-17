@@ -26,6 +26,8 @@ pub mod countdown;
 #[cfg(target_os = "macos")]
 pub mod editor;
 #[cfg(target_os = "macos")]
+mod esc_window;
+#[cfg(target_os = "macos")]
 pub mod events;
 #[cfg(target_os = "macos")]
 pub mod icon;

@@ -66,6 +66,21 @@
   (⌘Z / ⌘C / ⌘W …), bank-card false positives, sidecars moving with
   recordings, scratch-folder cleanup, background Keychain reads.
 
+## v0.5.1 — polish (2026-11-17, awaiting hardware QA)
+
+- ✅ PNG pasteboard type (`public.png` + file URL) instead of TIFF.
+- ✅ OCR result cache per capture, shared by auto-redaction, Smart Redact and
+  AI Writing; AI Writing only reads text still visible after crop/redaction.
+- ✅ Keychain reads off the main thread everywhere (redaction AI check,
+  Settings key load).
+- ✅ Transcript window: Esc commits an edit instead of closing, batched rows
+  for long recordings; clear message + "switch to Cloud" hint when on-device
+  speech is unavailable.
+- ✅ Async AVFoundation loaders instead of deprecated synchronous calls;
+  Quick Access recording buttons clear the duration badge; scrollable,
+  top-anchored Settings tabs; Esc on tutorial / welcome windows; capture
+  menu items disabled while recording; localised error details.
+
 ## v0.6 — real-Mac bring-up, signing, history, recording extras
 
 - Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
@@ -81,8 +96,6 @@
 - Recording extras: keystroke HUD (needs Input Monitoring / Accessibility
   permission — opt-in), GIF export and trim on the card, burn-in subtitles.
 - Scrolling capture.
-- OCR result cache in the editor (reuse Vision results across Smart Redact,
-  AI Writing and Extract); PNG pasteboard type instead of TIFF.
 
 ## Later
 

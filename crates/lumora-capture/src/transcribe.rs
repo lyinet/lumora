@@ -41,9 +41,6 @@ extern "C" {}
 pub const CHUNK_THRESHOLD_SECS: f64 = 55.0;
 /// Chunk length (seconds) for long audio.
 pub const CHUNK_SECS: f64 = 50.0;
-/// Start of the [`CaptureError::SpeechUnavailable`] message when strict
-/// on-device mode refuses a recognizer that would use Apple's servers.
-pub const STRICT_UNAVAILABLE: &str = "on-device recognition is not supported";
 /// How often a blocked wait checks the cancel flag.
 const POLL: Duration = Duration::from_millis(150);
 
@@ -204,15 +201,12 @@ fn export_m4a(
 pub fn export_audio(movie: &Path, track: AudioTrack) -> Result<PathBuf, CaptureError> {
     let url = crate::clipboard::file_url(movie).ok_or_else(|| CaptureError::Framework("invalid movie path".into()))?;
     let audio = audio_type()?;
-    // SAFETY: synchronous property reads on a local file asset (worker thread).
-    let (asset, tracks, duration) = unsafe {
-        let asset = AVAsset::assetWithURL(&url);
-        #[allow(deprecated)] // the async loaders need a completion hop; we are on a worker thread.
-        let tracks: Retained<NSArray<AVAssetTrack>> = asset.tracksWithMediaType(audio);
-        let duration = asset.duration();
-        (asset, tracks, duration)
-    };
-    let tracks: Vec<Retained<AVAssetTrack>> = tracks.iter().collect();
+    // SAFETY: opening a local file asset.
+    let asset = unsafe { AVAsset::assetWithURL(&url) };
+    // Blocks until the tracks are loaded (worker thread).
+    let tracks: Vec<Retained<AVAssetTrack>> = crate::av_sync::tracks(&asset, audio)?;
+    // SAFETY: plain property read (the tracks are loaded by now).
+    let duration = unsafe { asset.duration() };
     let chosen: Vec<&AVAssetTrack> = match (track, tracks.len()) {
         (_, 0) => return Err(CaptureError::NoAudio),
         (_, 1) | (AudioTrack::System, _) => vec![&tracks[0]],
@@ -364,8 +358,8 @@ fn map_speech_error(domain: &str, code: isize, msg: String) -> Result<Vec<Word>,
 /// setting `cancel` stops it with [`CaptureError::Cancelled`].
 ///
 /// With `strict`, a recognizer that can't run on this Mac for `locale`
-/// fails with [`CaptureError::SpeechUnavailable`] instead of falling back to
-/// Apple's servers (the message suggests the Cloud engine).
+/// fails with [`CaptureError::SpeechOnDeviceUnavailable`] instead of falling
+/// back to Apple's servers (the app's message suggests the Cloud engine).
 pub fn transcribe_on_device(
     audio: &Path,
     locale: &str,
@@ -375,9 +369,7 @@ pub fn transcribe_on_device(
     match speech_authorization() {
         SpeechAuthorization::Authorized => {}
         SpeechAuthorization::NotDetermined | SpeechAuthorization::Denied => return Err(CaptureError::SpeechDenied),
-        SpeechAuthorization::Restricted => {
-            return Err(CaptureError::SpeechUnavailable("speech recognition is restricted on this Mac".into()))
-        }
+        SpeechAuthorization::Restricted => return Err(CaptureError::SpeechNotReady),
     }
     let rec_cls = speech_class(c"SFSpeechRecognizer")?;
     // SAFETY: SFSpeechRecognizer / NSLocale / NSOperationQueue setup.
@@ -386,11 +378,10 @@ pub fn transcribe_on_device(
             msg_send![class!(NSLocale), localeWithLocaleIdentifier: &*NSString::from_str(locale)];
         let alloc: Allocated<AnyObject> = msg_send![rec_cls, alloc];
         let recognizer: Option<Retained<AnyObject>> = msg_send![alloc, initWithLocale: &*loc];
-        let recognizer = recognizer
-            .ok_or_else(|| CaptureError::SpeechUnavailable(format!("language “{locale}” is not supported")))?;
+        let recognizer = recognizer.ok_or_else(|| CaptureError::SpeechLocaleUnsupported(locale.to_string()))?;
         let available: bool = msg_send![&*recognizer, isAvailable];
         if !available {
-            return Err(CaptureError::SpeechUnavailable(format!("recognizer for “{locale}” is not available")));
+            return Err(CaptureError::SpeechNotReady);
         }
         let on_device: bool = msg_send![&*recognizer, supportsOnDeviceRecognition];
         // Deliver results on a private queue, not the main queue we may not run.
@@ -400,9 +391,7 @@ pub fn transcribe_on_device(
     };
     if !on_device {
         if strict {
-            return Err(CaptureError::SpeechUnavailable(format!(
-                "{STRICT_UNAVAILABLE} for “{locale}” on this Mac; use the Cloud engine instead"
-            )));
+            return Err(CaptureError::SpeechOnDeviceUnavailable(locale.to_string()));
         }
         log::warn!("speech: on-device recognition not supported for {locale}; Apple servers will be used");
     }

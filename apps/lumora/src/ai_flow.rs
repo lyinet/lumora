@@ -13,13 +13,21 @@ use crate::app::{on_main, App};
 impl App {
     /// Settings asked for the stored key of `provider`.
     pub fn on_ai_key_requested(self: &Rc<Self>, provider: AiProvider) {
-        let result = Keychain.get(provider);
-        if let Err(e) = &result {
-            log::warn!("reading the {} API key from the Keychain failed: {e:?}", provider.id());
-        }
-        if let Some(w) = self.settings_window.borrow().as_ref() {
-            w.set_ai_key(provider, result);
-        }
+        // Off the main thread: an ad-hoc-signed build may show a Keychain
+        // prompt, which would block the run loop (and the Settings window).
+        DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
+            move || {
+                let result = Keychain.get(provider);
+                if let Err(e) = &result {
+                    log::warn!("reading the {} API key from the Keychain failed: {e:?}", provider.id());
+                }
+                on_main(move |app| {
+                    if let Some(w) = app.settings_window.borrow().as_ref() {
+                        w.set_ai_key(provider, result);
+                    }
+                });
+            },
+        );
     }
 
     /// Settings wants `key` stored for `provider` (empty = delete).

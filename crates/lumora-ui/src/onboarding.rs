@@ -5,7 +5,7 @@
 use objc2::rc::Retained;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSBackingStoreType, NSBezelStyle, NSButton, NSFont, NSImageView, NSTextAlignment, NSTextField,
+    NSApplication, NSBezelStyle, NSButton, NSFont, NSImageView, NSTextAlignment, NSTextField,
     NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindow,
     NSWindowStyleMask, NSWindowTitleVisibility,
 };
@@ -50,15 +50,8 @@ impl Onboarding {
     pub fn show(mtm: MainThreadMarker, sink: EventSink, granted: bool) -> Self {
         let style = NSWindowStyleMask::Titled | NSWindowStyleMask::Closable | NSWindowStyleMask::FullSizeContentView;
         let frame = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(W, H));
-        let window = unsafe {
-            NSWindow::initWithContentRect_styleMask_backing_defer(
-                NSWindow::alloc(mtm),
-                frame,
-                style,
-                NSBackingStoreType::Buffered,
-                false,
-            )
-        };
+        // Esc closes it like ⌘W.
+        let window = crate::esc_window::create(mtm, frame, style);
         unsafe { window.setReleasedWhenClosed(false) };
         window.setTitlebarAppearsTransparent(true);
         window.setTitleVisibility(NSWindowTitleVisibility::Hidden);

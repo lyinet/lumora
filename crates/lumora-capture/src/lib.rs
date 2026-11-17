@@ -35,6 +35,8 @@ mod send;
 pub use send::SendBox;
 
 #[cfg(target_os = "macos")]
+mod av_sync;
+#[cfg(target_os = "macos")]
 pub mod beautify_render;
 #[cfg(target_os = "macos")]
 pub mod clipboard;

@@ -17,9 +17,9 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::{define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSAutoresizingMaskOptions, NSBackingStoreType, NSBezelStyle, NSBorderType, NSBox, NSBoxType,
-    NSButton, NSColor, NSFont, NSImage, NSImageScaling, NSImageView, NSLineBreakMode, NSResponder, NSScrollView,
-    NSTextField, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
+    NSApplication, NSAutoresizingMaskOptions, NSBezelStyle, NSBorderType, NSBox, NSBoxType, NSButton, NSColor, NSFont,
+    NSImage, NSImageScaling, NSImageView, NSLineBreakMode, NSResponder, NSScrollView, NSTextField, NSView, NSWindow,
+    NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSString};
@@ -150,8 +150,8 @@ impl State {
         let rows = self.rows.borrow();
         let mut t = self.tutorial.borrow_mut();
         for (step, row) in t.steps.iter_mut().zip(rows.iter()) {
-            step.title = row.title.stringValue().to_string().trim().to_string();
-            step.detail = row.detail.stringValue().to_string().trim().to_string();
+            step.title = crate::esc_window::field_text(&row.title).trim().to_string();
+            step.detail = crate::esc_window::field_text(&row.detail).trim().to_string();
         }
     }
 
@@ -304,16 +304,8 @@ impl TutorialWindow {
             | NSWindowStyleMask::Closable
             | NSWindowStyleMask::Miniaturizable
             | NSWindowStyleMask::Resizable;
-        // SAFETY: standard window creation on the main thread.
-        let window = unsafe {
-            NSWindow::initWithContentRect_styleMask_backing_defer(
-                NSWindow::alloc(mtm),
-                CGRect::new(origin, CGSize::new(w, h)),
-                style,
-                NSBackingStoreType::Buffered,
-                false,
-            )
-        };
+        // Esc commits a field edit, then closes (⌘W via the main menu).
+        let window = crate::esc_window::create(mtm, CGRect::new(origin, CGSize::new(w, h)), style);
         // SAFETY: we own the window through `Retained`.
         unsafe { window.setReleasedWhenClosed(false) };
         let title = if tutorial.title.trim().is_empty() {
