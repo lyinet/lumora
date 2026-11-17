@@ -470,6 +470,7 @@ messages! {
     ToastTranscribeSummarizing => "Writing summary and chapters with AI…", "正在用 AI 撰写摘要和章节…";
     ToastTranscribeReady => "Subtitles ready", "字幕已生成";
     ToastTranscribeFailed => "Couldn’t transcribe the recording", "无法转写录屏";
+    ToastSpeechOnDeviceUnavailable => "On-device speech recognition isn’t available", "本机离线语音识别不可用";
     ToastTranscribeCancelled => "Transcription cancelled", "已取消转写";
     ToastTranscribeNoSpeech => "No speech found in the recording", "录屏中没有识别到语音";
     ToastTranscribeTooLarge => "The audio is too large to upload ({0} MB; the limit is 25 MB)", "音频过大，无法上传（{0} MB，上限为 25 MB）";
@@ -481,7 +482,9 @@ messages! {
     ToastSummaryCopied => "Summary copied", "已拷贝摘要";
     ErrSpeechPermission => "Lumora needs Speech Recognition permission (System Settings → Privacy & Security → Speech Recognition).", "Lumora 需要语音识别权限（系统设置 → 隐私与安全性 → 语音识别）。";
     ErrSpeechUnavailable => "Speech recognition is unavailable: {0}", "语音识别不可用：{0}";
-    ErrSpeechUnavailableStrict => "This Mac can’t recognize this language on-device. Choose Cloud recognition in Settings → Recording, or allow Apple servers.", "本机无法离线识别此语言。请在“设置 → 录制”中选择云端识别，或允许使用 Apple 服务器。";
+    ErrSpeechUnavailableStrict => "This Mac can’t recognize {0} without Apple’s servers. To transcribe, switch Speech recognition to “Cloud (AI provider)” in Settings → Recording, or turn off “Never send audio to Apple servers”.", "本机无法在不使用 Apple 服务器的情况下识别{0}。如需转写，请在“设置 → 录制”中将语音识别切换为“云端（AI 服务商）”，或关闭“绝不将音频发送到 Apple 服务器”。";
+    ErrSpeechLocaleUnsupported => "Apple Speech doesn’t support {0} on this Mac. Switch Speech recognition to “Cloud (AI provider)” in Settings → Recording.", "此 Mac 上的 Apple 语音识别不支持{0}。请在“设置 → 录制”中将语音识别切换为“云端（AI 服务商）”。";
+    ErrSpeechNotReady => "Apple Speech isn’t available right now. Check that Siri & Dictation is allowed in System Settings, or switch Speech recognition to “Cloud (AI provider)” in Settings → Recording.", "Apple 语音识别暂时不可用。请检查系统设置中是否允许 Siri 与听写，或在“设置 → 录制”中将语音识别切换为“云端（AI 服务商）”。";
     ErrSpeech => "Speech recognition failed: {0}", "语音识别失败：{0}";
     ErrNoAudio => "The recording has no audio.", "此录屏没有音频。";
     ErrCancelled => "Cancelled.", "已取消。";

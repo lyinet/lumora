@@ -25,6 +25,13 @@ All notable changes to Lumora are documented here. The format follows
 - Transcript window opens immediately for long recordings: the first rows
   are built up front and the rest are added in batches, instead of creating
   thousands of views before the window appears.
+- Subtitles: when "Never send audio to Apple servers" is on and this Mac
+  can't recognise the language on-device, the toast now says so plainly
+  ("On-device speech recognition isn't available") and tells you how to
+  switch to Cloud recognition, instead of a generic failure. An unsupported
+  language or an unavailable recognizer (Siri & Dictation off, restricted)
+  also get their own localised, actionable messages instead of English
+  framework text.
 - Smart Redact's AI check and the Settings → AI tab read the API key from
   the Keychain off the main thread, so a Keychain prompt no longer freezes
   the app.

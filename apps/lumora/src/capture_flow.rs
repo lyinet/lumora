@@ -422,13 +422,27 @@ pub fn error_text(e: &CaptureError) -> String {
         }
         CaptureError::Empty => tr(Msg::ErrNothing).to_string(),
         CaptureError::SpeechDenied => tr(Msg::ErrSpeechPermission).to_string(),
-        CaptureError::SpeechUnavailable(why) if why.starts_with(lumora_capture::transcribe::STRICT_UNAVAILABLE) => {
-            tr(Msg::ErrSpeechUnavailableStrict).to_string()
+        CaptureError::SpeechOnDeviceUnavailable(locale) => {
+            trf(Msg::ErrSpeechUnavailableStrict, &[&speech_language_name(locale)])
         }
+        CaptureError::SpeechLocaleUnsupported(locale) => {
+            trf(Msg::ErrSpeechLocaleUnsupported, &[&speech_language_name(locale)])
+        }
+        CaptureError::SpeechNotReady => tr(Msg::ErrSpeechNotReady).to_string(),
         CaptureError::SpeechUnavailable(why) => trf(Msg::ErrSpeechUnavailable, &[why]),
         CaptureError::Speech(why) => trf(Msg::ErrSpeech, &[why]),
         CaptureError::NoAudio => tr(Msg::ErrNoAudio).to_string(),
         CaptureError::Cancelled => tr(Msg::ErrCancelled).to_string(),
+    }
+}
+
+/// A speech locale as the user reads it ("Chinese (Mandarin)" / "English"),
+/// or the identifier itself for anything else.
+fn speech_language_name(locale: &str) -> String {
+    match locale.split(['-', '_']).next().unwrap_or("") {
+        "zh" => tr(Msg::TranscribeLanguageZh).to_string(),
+        "en" => tr(Msg::TranscribeLanguageEn).to_string(),
+        _ => locale.to_string(),
     }
 }
 
