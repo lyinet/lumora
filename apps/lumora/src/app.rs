@@ -154,6 +154,9 @@ pub struct Editable {
     /// Opened from a `.lumora` file: keep that file updated regardless of
     /// the "save editable document" setting.
     pub from_file: bool,
+    /// Vision text recognised on `original`, shared by auto-redaction,
+    /// Smart Redact and editor AI writing (see [`lumora_core::ocr::OcrCache`]).
+    pub ocr: lumora_core::ocr::OcrCache,
 }
 
 impl Editable {
@@ -166,7 +169,18 @@ impl Editable {
             beautify: None,
             created_at: crate::system::unix_now(),
             from_file: false,
+            ocr: lumora_core::ocr::OcrCache::default(),
         }
+    }
+
+    /// Cache key for `image`: its address (the base never changes in place).
+    pub fn ocr_key(image: &CGImage) -> usize {
+        image as *const CGImage as usize
+    }
+
+    /// Cached OCR boxes for `base`, if it is this capture's original.
+    pub fn cached_ocr(&self, base: &CGImage) -> Option<Arc<Vec<lumora_core::ocr::TextBox>>> {
+        self.ocr.get(Self::ocr_key(base))
     }
 }
 
@@ -213,6 +227,22 @@ pub struct App {
 }
 
 impl App {
+    /// Cached OCR boxes of capture `id`'s original, when `base` is it.
+    pub fn cached_ocr(&self, id: u64, base: &CGImage) -> Option<Arc<Vec<lumora_core::ocr::TextBox>>> {
+        self.captures.borrow().get(&id)?.editable.as_ref()?.cached_ocr(base)
+    }
+
+    /// Remember OCR boxes recognised on capture `id`'s image `key` (ignored
+    /// if the capture's original has since been replaced).
+    pub fn store_ocr(&self, id: u64, key: usize, boxes: Arc<Vec<lumora_core::ocr::TextBox>>) {
+        let mut caps = self.captures.borrow_mut();
+        if let Some(ed) = caps.get_mut(&id).and_then(|r| r.editable.as_mut()) {
+            if Editable::ocr_key(&ed.original) == key {
+                ed.ocr.store(key, boxes);
+            }
+        }
+    }
+
     pub fn start(mtm: MainThreadMarker, delegate: &AppDelegate) -> Rc<App> {
         let home = system::home_dir();
         let settings_path = Settings::default_path();

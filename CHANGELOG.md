@@ -11,6 +11,13 @@ All notable changes to Lumora are documented here. The format follows
   put the PNG (with its Retina DPI) on the pasteboard as `public.png` plus
   the file URL, encoded once off the main thread, instead of an `NSImage`
   that AppKit serialises to uncompressed TIFF on the main thread.
+- **Text is recognised once per capture** — auto-redaction, Smart Redact
+  and every editor AI task share one Vision OCR result instead of running
+  it again each time.
+
+### Fixed
+- Editor AI writing no longer sends text you cropped away or covered with
+  a redaction: only text still visible in the edited image is used.
 
 ## [0.5.0] — 2026-11-17 (prerelease, not yet hardware-tested)
 

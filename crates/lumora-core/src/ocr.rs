@@ -132,6 +132,91 @@ pub fn preview(text: &str, max_chars: usize) -> String {
     format!("{}…", cut.trim_end())
 }
 
+/// One editor's OCR result, so Vision runs once per capture rather than once
+/// for auto-redaction, again for Smart Redact and again for every AI task.
+///
+/// Recognition always reads the editor's unannotated base image, so the
+/// cache is keyed by that image (`base` = any stable identity, such as the
+/// image's address) and is dropped when the base changes. Edits and the crop
+/// do not re-run Vision: they are applied to the cached boxes on every use
+/// by [`visible_boxes`], so a cached result can never show text the user
+/// has since cropped away or redacted.
+#[derive(Debug, Default, Clone)]
+pub struct OcrCache {
+    entry: Option<(usize, std::sync::Arc<Vec<TextBox>>)>,
+}
+
+impl OcrCache {
+    /// The boxes recognised on `base` (pixels, y down), if cached.
+    pub fn get(&self, base: usize) -> Option<std::sync::Arc<Vec<TextBox>>> {
+        match &self.entry {
+            Some((b, boxes)) if *b == base => Some(boxes.clone()),
+            _ => None,
+        }
+    }
+
+    /// Remember `boxes` for `base`, replacing whatever was there.
+    pub fn store(&mut self, base: usize, boxes: std::sync::Arc<Vec<TextBox>>) {
+        self.entry = Some((base, boxes));
+    }
+
+    /// Forget the cached result (the base image changed).
+    pub fn invalidate(&mut self) {
+        self.entry = None;
+    }
+
+    pub fn is_cached(&self) -> bool {
+        self.entry.is_some()
+    }
+}
+
+/// Share of a text box that a redaction must cover before the whole box is
+/// treated as hidden. Low on purpose: a line with a redacted e-mail address
+/// in it is dropped entirely rather than sent to an AI provider.
+pub const HIDDEN_COVERAGE: f64 = 0.1;
+
+/// The boxes (pixels of the base, y down) a reader of the edited image would
+/// still see: boxes that overlap `crop` (points; `None` = whole image) and
+/// are less than [`HIDDEN_COVERAGE`] covered by the `hidden` rects (points,
+/// e.g. Redact annotations).
+pub fn visible_boxes(boxes: &[TextBox], scale: f64, crop: Option<Rect>, hidden: &[Rect]) -> Vec<TextBox> {
+    let s = if scale.is_finite() && scale > 0.0 { scale } else { 1.0 };
+    boxes
+        .iter()
+        .filter(|b| {
+            let r = b.rect.normalized();
+            let pt = Rect::new(r.min_x() / s, r.min_y() / s, r.width() / s, r.height() / s);
+            if let Some(c) = crop {
+                match pt.intersection(&c.normalized()) {
+                    Some(i) if i.area() > 0.0 => {}
+                    _ => return false,
+                }
+            }
+            let area = pt.area();
+            if area <= 0.0 {
+                return hidden.iter().all(|h| !h.normalized().contains(pt.origin));
+            }
+            let covered: f64 = hidden.iter().filter_map(|h| pt.intersection(&h.normalized())).map(|i| i.area()).sum();
+            covered / area < HIDDEN_COVERAGE
+        })
+        .cloned()
+        .collect()
+}
+
+/// [`visible_boxes`] for an annotation document: its crop, and its Redact
+/// shapes as the hidden rects.
+pub fn visible_in_document(boxes: &[TextBox], scale: f64, doc: &crate::annotate::Document) -> Vec<TextBox> {
+    let hidden: Vec<Rect> = doc
+        .items()
+        .iter()
+        .filter_map(|a| match &a.shape {
+            crate::annotate::Shape::Redact { rect, .. } => Some(*rect),
+            _ => None,
+        })
+        .collect();
+    visible_boxes(boxes, scale, doc.crop(), &hidden)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,5 +270,69 @@ mod tests {
         assert!(is_cjk('中') && is_cjk('の') && is_cjk('。') && is_cjk('한'));
         assert!(!is_cjk('a') && !is_cjk('1') && !is_cjk('é'));
         assert_eq!(RECOGNITION_LANGUAGES.len(), 4);
+    }
+    #[test]
+    fn ocr_cache_is_keyed_by_base_image() {
+        let mut c = OcrCache::default();
+        assert!(c.get(1).is_none());
+        c.store(1, std::sync::Arc::new(vec![TextBox::new("hi", Rect::new(0.0, 0.0, 10.0, 10.0))]));
+        assert_eq!(c.get(1).map(|b| b.len()), Some(1));
+        // Another base (the image was replaced): miss, never stale data.
+        assert!(c.get(2).is_none());
+        c.invalidate();
+        assert!(c.get(1).is_none());
+        assert!(!c.is_cached());
+    }
+
+    fn sample() -> Vec<TextBox> {
+        // Pixels at scale 2: "top" at points (0,0)-(50,10), "bottom" at
+        // points (0,100)-(50,110).
+        vec![
+            TextBox::new("top", Rect::new(0.0, 0.0, 100.0, 20.0)),
+            TextBox::new("bottom", Rect::new(0.0, 200.0, 100.0, 20.0)),
+        ]
+    }
+
+    fn texts(b: &[TextBox]) -> Vec<&str> {
+        b.iter().map(|b| b.text.as_str()).collect()
+    }
+
+    #[test]
+    fn visible_boxes_follow_the_crop() {
+        let b = sample();
+        assert_eq!(texts(&visible_boxes(&b, 2.0, None, &[])), ["top", "bottom"]);
+        // Crop to the lower half: "top" is cut away.
+        let crop = Some(Rect::new(0.0, 60.0, 200.0, 100.0));
+        assert_eq!(texts(&visible_boxes(&b, 2.0, crop, &[])), ["bottom"]);
+        // A box straddling the crop edge stays.
+        let edge = Some(Rect::new(0.0, 5.0, 200.0, 200.0));
+        assert_eq!(texts(&visible_boxes(&b, 2.0, edge, &[])), ["top", "bottom"]);
+    }
+
+    #[test]
+    fn visible_boxes_drop_redacted_text() {
+        let b = sample();
+        // A redaction over a fifth of "top" hides the whole line.
+        let hidden = [Rect::new(40.0, 0.0, 10.0, 10.0)];
+        assert_eq!(texts(&visible_boxes(&b, 2.0, None, &hidden)), ["bottom"]);
+        // A sliver (under 10%) does not.
+        let sliver = [Rect::new(0.0, 0.0, 2.0, 10.0)];
+        assert_eq!(texts(&visible_boxes(&b, 2.0, None, &sliver)), ["top", "bottom"]);
+    }
+
+    #[test]
+    fn visible_in_document_tracks_edits_and_undo() {
+        use crate::annotate::{Document, Shape, Style};
+        use crate::geometry::Size;
+        let b = sample();
+        let mut doc = Document::new(Size::new(200.0, 200.0));
+        assert_eq!(visible_in_document(&b, 2.0, &doc).len(), 2);
+        doc.add(Shape::Redact { rect: Rect::new(0.0, 100.0, 50.0, 10.0), mode: Default::default() }, Style::default());
+        assert_eq!(texts(&visible_in_document(&b, 2.0, &doc)), ["top"]);
+        assert!(doc.set_crop(Some(Rect::new(0.0, 50.0, 200.0, 150.0))));
+        assert!(visible_in_document(&b, 2.0, &doc).is_empty());
+        doc.undo();
+        doc.undo();
+        assert_eq!(visible_in_document(&b, 2.0, &doc).len(), 2);
     }
 }

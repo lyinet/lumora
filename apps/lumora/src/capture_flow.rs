@@ -225,17 +225,17 @@ impl App {
     pub fn finish_capture(self: &Rc<Self>, image: CFRetained<CGImage>, scale: f64, frame: Rect) {
         let redact = self.settings.borrow().redact.clone();
         if !redact.auto_redact {
-            return self.finish_capture_with(image, scale, frame, Vec::new());
+            return self.finish_capture_with(image, scale, frame, Vec::new(), None);
         }
         background().exec_async(move || {
-            let rects = match crate::redact_flow::detect_sync(&image, scale, &redact, None) {
-                Ok(d) => d.rects,
+            let (rects, ocr) = match crate::redact_flow::detect_sync(&image, scale, &redact, None, None) {
+                Ok(d) => (d.rects, d.recognised),
                 Err(e) => {
                     log::warn!("auto-redaction failed: {e}");
-                    Vec::new()
+                    (Vec::new(), None)
                 }
             };
-            on_main(move |app| app.finish_capture_with(image, scale, frame, rects));
+            on_main(move |app| app.finish_capture_with(image, scale, frame, rects, ocr));
         });
     }
 
@@ -248,6 +248,7 @@ impl App {
         scale: f64,
         frame: Rect,
         redactions: Vec<Rect>,
+        ocr: Option<Arc<Vec<lumora_core::ocr::TextBox>>>,
     ) {
         let id = self.next_id();
         let s = self.settings.borrow().clone();
@@ -303,7 +304,15 @@ impl App {
             file: file.clone(),
             temp,
             video: false,
-            editable: Some(Editable { document, ..Editable::new(original, scale) }),
+            editable: Some({
+                let mut ed = Editable { document, ..Editable::new(original, scale) };
+                // Auto-redaction already read the text: Smart Redact and AI
+                // writing reuse it.
+                if let Some(boxes) = ocr {
+                    ed.ocr.store(Editable::ocr_key(&ed.original), boxes);
+                }
+                ed
+            }),
         };
         // The editable document keeps the original capture (not the
         // beautified export) plus the beautify style, when enabled.
