@@ -38,6 +38,7 @@ pub struct Detection {
 
 /// The AI settings and key for the AI check, or `Err(())` when it was
 /// asked for but cannot run (AI off, no key…). `Ok(None)` = not asked.
+/// Reads the Keychain: call off the main thread.
 pub fn ai_for_check(settings: &lumora_core::settings::Settings) -> Result<Option<(AiSettings, Option<String>)>, ()> {
     if !settings.redact.ai_check {
         return Ok(None);
@@ -121,15 +122,17 @@ impl App {
     /// "Smart Redact" in editor `editor`.
     pub fn on_smart_redact(self: &Rc<Self>, editor: u64, req: SmartRedactRequest) {
         let settings = self.settings.borrow().clone();
-        let (ai, ai_unavailable) = match ai_for_check(&settings) {
-            Ok(ai) => (ai, false),
-            Err(()) => (None, true),
-        };
         let SmartRedactRequest { request, base, scale } = req;
         let cached = self.cached_ocr(editor, &base);
-        let redact_settings = settings.redact;
         DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
             move || {
+                // Off the main thread: an ad-hoc-signed build may show a
+                // Keychain prompt, which would block the run loop.
+                let (ai, ai_unavailable) = match ai_for_check(&settings) {
+                    Ok(ai) => (ai, false),
+                    Err(()) => (None, true),
+                };
+                let redact_settings = settings.redact;
                 let result = detect_sync(&base, scale, &redact_settings, ai, cached).map(|mut d| {
                     d.ai_failed |= ai_unavailable;
                     d

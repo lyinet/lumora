@@ -18,6 +18,9 @@ All notable changes to Lumora are documented here. The format follows
 ### Fixed
 - Editor AI writing no longer sends text you cropped away or covered with
   a redaction: only text still visible in the edited image is used.
+- Smart Redact's AI check and the Settings → AI tab read the API key from
+  the Keychain off the main thread, so a Keychain prompt no longer freezes
+  the app.
 
 ## [0.5.0] — 2026-11-17 (prerelease, not yet hardware-tested)
 
