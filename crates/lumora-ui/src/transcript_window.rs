@@ -14,12 +14,11 @@ use lumora_core::i18n::{tr, trf, Msg};
 use lumora_core::transcript::chapters::format_chapter_time;
 use lumora_core::transcript::Transcript;
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, ProtocolObject};
+use objc2::runtime::ProtocolObject;
 use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{
-    NSApplication, NSAutoresizingMaskOptions, NSBackingStoreType, NSBezelStyle, NSBorderType, NSBox, NSBoxType,
-    NSButton, NSColor, NSEvent, NSEventType, NSFont, NSLineBreakMode, NSResponder, NSScrollView, NSTextField,
-    NSTextInputClient, NSTextView, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
+    NSApplication, NSAutoresizingMaskOptions, NSBezelStyle, NSBorderType, NSBox, NSBoxType, NSButton, NSColor, NSFont,
+    NSLineBreakMode, NSResponder, NSScrollView, NSTextField, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSString, NSTimer};
@@ -46,8 +45,6 @@ const TIME_W: f64 = 96.0;
 /// segments, two views each) opens at once and stays responsive.
 const FIRST_ROWS: usize = 120;
 const BATCH_ROWS: usize = 250;
-/// Virtual key code of Esc.
-const KEY_ESCAPE: u16 = 53;
 
 type MakeAction = fn(Box<Transcript>) -> TranscriptAction;
 
@@ -72,62 +69,6 @@ impl ListView {
     fn new(mtm: MainThreadMarker, frame: CGRect) -> Retained<Self> {
         let this = Self::alloc(mtm).set_ivars(());
         unsafe { msg_send![super(this), initWithFrame: frame] }
-    }
-}
-
-define_class!(
-    /// A document window that closes on Esc (⌘. too), like a sheet.
-    #[unsafe(super(NSWindow, NSResponder, NSObject))]
-    #[thread_kind = MainThreadOnly]
-    #[name = "LumoraTranscriptWindow"]
-    struct EscWindow;
-
-    unsafe impl NSObjectProtocol for EscWindow {}
-
-    impl EscWindow {
-        /// Esc while a line is being edited ends the edit (keeping the text)
-        /// instead of reaching the field editor, which could revert it or
-        /// pop up completions, or closing the window under the user. Esc
-        /// during input-method composition (pinyin…) still goes to the IME.
-        #[unsafe(method(sendEvent:))]
-        fn send_event(&self, event: &NSEvent) {
-            if event.r#type() == NSEventType::KeyDown && event.keyCode() == KEY_ESCAPE && self.commit_editing() {
-                return;
-            }
-            // SAFETY: forwarding the event to NSWindow's implementation.
-            unsafe { msg_send![super(self), sendEvent: event] }
-        }
-
-        #[unsafe(method(cancelOperation:))]
-        fn cancel_operation(&self, _sender: Option<&AnyObject>) {
-            if !self.commit_editing() {
-                self.performClose(None);
-            }
-        }
-    }
-);
-
-impl EscWindow {
-    /// When a text field is being edited (and no IME composition is in
-    /// progress), end the edit, committing its text, and return `true`.
-    fn commit_editing(&self) -> bool {
-        let Some(responder) = self.firstResponder() else { return false };
-        let Some(text) = responder.downcast_ref::<NSTextView>() else { return false };
-        if !text.isFieldEditor() || text.hasMarkedText() {
-            return false;
-        }
-        // Resigning first responder ends editing and keeps the typed text.
-        self.makeFirstResponder(None);
-        true
-    }
-
-    fn create(mtm: MainThreadMarker, frame: CGRect, style: NSWindowStyleMask) -> Retained<NSWindow> {
-        let this = Self::alloc(mtm).set_ivars(());
-        // SAFETY: NSWindow's designated initialiser on a fresh subclass instance.
-        let w: Retained<Self> = unsafe {
-            msg_send![super(this), initWithContentRect: frame, styleMask: style, backing: NSBackingStoreType::Buffered, defer: false]
-        };
-        Retained::into_super(w)
     }
 }
 
@@ -237,14 +178,8 @@ fn separator(mtm: MainThreadMarker, frame: Rect) -> Retained<NSBox> {
     line
 }
 
-/// A field's text, including an edit in progress (read from its field
-/// editor, so nothing typed is lost when the window acts mid-edit).
 fn read(field: &NSTextField) -> String {
-    let text = match field.currentEditor() {
-        Some(editor) => editor.string().to_string(),
-        None => field.stringValue().to_string(),
-    };
-    text.trim().to_string()
+    crate::esc_window::field_text(field).trim().to_string()
 }
 
 /// Where the segment rows go and how many are built.
@@ -392,7 +327,7 @@ impl TranscriptWindow {
             | NSWindowStyleMask::Closable
             | NSWindowStyleMask::Miniaturizable
             | NSWindowStyleMask::Resizable;
-        let window = EscWindow::create(mtm, CGRect::new(origin, CGSize::new(w, h)), style);
+        let window = crate::esc_window::create(mtm, CGRect::new(origin, CGSize::new(w, h)), style);
         // SAFETY: we own the window through `Retained`.
         unsafe { window.setReleasedWhenClosed(false) };
         let win_title = if title.trim().is_empty() {
