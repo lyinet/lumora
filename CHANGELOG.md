@@ -18,6 +18,13 @@ All notable changes to Lumora are documented here. The format follows
 ### Fixed
 - Editor AI writing no longer sends text you cropped away or covered with
   a redaction: only text still visible in the edited image is used.
+- Transcript window: Esc while editing a line now just finishes the edit
+  (keeping the text; Esc during pinyin / IME composition still goes to the
+  input method) — a second Esc closes the window. Closing or exporting
+  mid-edit always uses the text as typed.
+- Transcript window opens immediately for long recordings: the first rows
+  are built up front and the rest are added in batches, instead of creating
+  thousands of views before the window appears.
 - Smart Redact's AI check and the Settings → AI tab read the API key from
   the Keychain off the main thread, so a Keychain prompt no longer freezes
   the app.

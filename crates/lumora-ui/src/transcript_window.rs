@@ -15,18 +15,18 @@ use lumora_core::transcript::chapters::format_chapter_time;
 use lumora_core::transcript::Transcript;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, ProtocolObject};
-use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
+use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{
     NSApplication, NSAutoresizingMaskOptions, NSBackingStoreType, NSBezelStyle, NSBorderType, NSBox, NSBoxType,
-    NSButton, NSColor, NSFont, NSLineBreakMode, NSResponder, NSScrollView, NSTextField, NSView, NSWindow,
-    NSWindowDelegate, NSWindowStyleMask,
+    NSButton, NSColor, NSEvent, NSEventType, NSFont, NSLineBreakMode, NSResponder, NSScrollView, NSTextField,
+    NSTextInputClient, NSTextView, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSString, NSTimer};
 
 use crate::events::{EventSink, TranscriptAction, UiEvent};
 use crate::tokens::typography;
-use crate::util::{cg_rect, mono_digits, screen_under_mouse, weight, ActionTarget};
+use crate::util::{cg_rect, mono_digits, schedule_timer, screen_under_mouse, weight, ActionTarget};
 
 const WIDTH: f64 = 760.0;
 const HEIGHT: f64 = 640.0;
@@ -41,6 +41,13 @@ const SUMMARY_H: f64 = 84.0;
 const CHAPTER_ROW: f64 = 28.0;
 const SEGMENT_ROW: f64 = 30.0;
 const TIME_W: f64 = 96.0;
+/// Segment rows built before the window shows; the rest are added in
+/// batches on later run-loop turns so a long recording (thousands of
+/// segments, two views each) opens at once and stays responsive.
+const FIRST_ROWS: usize = 120;
+const BATCH_ROWS: usize = 250;
+/// Virtual key code of Esc.
+const KEY_ESCAPE: u16 = 53;
 
 type MakeAction = fn(Box<Transcript>) -> TranscriptAction;
 
@@ -78,14 +85,42 @@ define_class!(
     unsafe impl NSObjectProtocol for EscWindow {}
 
     impl EscWindow {
+        /// Esc while a line is being edited ends the edit (keeping the text)
+        /// instead of reaching the field editor, which could revert it or
+        /// pop up completions, or closing the window under the user. Esc
+        /// during input-method composition (pinyin…) still goes to the IME.
+        #[unsafe(method(sendEvent:))]
+        fn send_event(&self, event: &NSEvent) {
+            if event.r#type() == NSEventType::KeyDown && event.keyCode() == KEY_ESCAPE && self.commit_editing() {
+                return;
+            }
+            // SAFETY: forwarding the event to NSWindow's implementation.
+            unsafe { msg_send![super(self), sendEvent: event] }
+        }
+
         #[unsafe(method(cancelOperation:))]
         fn cancel_operation(&self, _sender: Option<&AnyObject>) {
-            self.performClose(None);
+            if !self.commit_editing() {
+                self.performClose(None);
+            }
         }
     }
 );
 
 impl EscWindow {
+    /// When a text field is being edited (and no IME composition is in
+    /// progress), end the edit, committing its text, and return `true`.
+    fn commit_editing(&self) -> bool {
+        let Some(responder) = self.firstResponder() else { return false };
+        let Some(text) = responder.downcast_ref::<NSTextView>() else { return false };
+        if !text.isFieldEditor() || text.hasMarkedText() {
+            return false;
+        }
+        // Resigning first responder ends editing and keeps the typed text.
+        self.makeFirstResponder(None);
+        true
+    }
+
     fn create(mtm: MainThreadMarker, frame: CGRect, style: NSWindowStyleMask) -> Retained<NSWindow> {
         let this = Self::alloc(mtm).set_ivars(());
         // SAFETY: NSWindow's designated initialiser on a fresh subclass instance.
@@ -139,6 +174,7 @@ struct State {
     window: Retained<NSWindow>,
     transcript: RefCell<Transcript>,
     fields: RefCell<Fields>,
+    rows: RefCell<Option<Rows>>,
     _bar_targets: RefCell<Vec<Retained<ActionTarget>>>,
     _delegate: RefCell<Option<Retained<WindowDelegate>>>,
 }
@@ -201,8 +237,25 @@ fn separator(mtm: MainThreadMarker, frame: Rect) -> Retained<NSBox> {
     line
 }
 
+/// A field's text, including an edit in progress (read from its field
+/// editor, so nothing typed is lost when the window acts mid-edit).
 fn read(field: &NSTextField) -> String {
-    field.stringValue().to_string().trim().to_string()
+    let text = match field.currentEditor() {
+        Some(editor) => editor.string().to_string(),
+        None => field.stringValue().to_string(),
+    };
+    text.trim().to_string()
+}
+
+/// Where the segment rows go and how many are built.
+struct Rows {
+    list: Retained<ListView>,
+    /// Top of the first segment row.
+    top: f64,
+    /// Show hours in the time column.
+    long: bool,
+    built: usize,
+    timer: Option<Retained<NSTimer>>,
 }
 
 impl State {
@@ -276,16 +329,46 @@ impl State {
 
         list.addSubview(&heading(mtm, tr(Msg::TranscriptSegmentsHeading), Rect::new(PAD, y, inner, 16.0)));
         y += HEADING_H - 8.0;
-        for seg in &t.segments {
-            let time = format_chapter_time(seg.start, long);
-            list.addSubview(&time_label(mtm, &time, Rect::new(PAD, y + 4.0, TIME_W, 18.0)));
-            let f = text_field(mtm, &seg.text, Rect::new(PAD + TIME_W, y, inner - TIME_W, 22.0));
-            list.addSubview(&f);
-            fields.segments.push(f);
-            y += SEGMENT_ROW;
-        }
+        let total = t.segments.len();
+        drop(t);
         *self.fields.borrow_mut() = fields;
-        y + PAD
+        *self.rows.borrow_mut() = Some(Rows { list: list.retain(), top: y, long, built: 0, timer: None });
+        // Every row has the same height, so the document is sized for all
+        // of them up front; rows past the first batch fill in shortly.
+        self.build_rows(FIRST_ROWS);
+        y + total as f64 * SEGMENT_ROW + PAD
+    }
+
+    /// Build up to `n` more segment rows. Returns whether rows remain.
+    fn build_rows(&self, n: usize) -> bool {
+        let mut rows = self.rows.borrow_mut();
+        let Some(rows) = rows.as_mut() else { return false };
+        let t = self.transcript.borrow();
+        let mut fields = self.fields.borrow_mut();
+        let inner = (rows.list.frame().size.width - 2.0 * PAD).max(200.0);
+        let end = (rows.built + n).min(t.segments.len());
+        for seg in &t.segments[rows.built..end] {
+            let y = rows.top + rows.built as f64 * SEGMENT_ROW;
+            let time = format_chapter_time(seg.start, rows.long);
+            rows.list.addSubview(&time_label(self.mtm, &time, Rect::new(PAD, y + 4.0, TIME_W, 18.0)));
+            let f = text_field(self.mtm, &seg.text, Rect::new(PAD + TIME_W, y, inner - TIME_W, 22.0));
+            rows.list.addSubview(&f);
+            fields.segments.push(f);
+            rows.built += 1;
+        }
+        rows.built < t.segments.len()
+    }
+
+    /// Add the remaining rows a batch per run-loop turn.
+    fn build_rest(this: &Rc<Self>) {
+        let weak = Rc::downgrade(this);
+        let timer = schedule_timer(0.0, true, move || match weak.upgrade() {
+            Some(s) => s.build_rows(BATCH_ROWS),
+            None => false,
+        });
+        if let Some(rows) = this.rows.borrow_mut().as_mut() {
+            rows.timer = Some(timer);
+        }
     }
 
     fn info(&self) -> String {
@@ -357,6 +440,7 @@ impl TranscriptWindow {
             window: window.clone(),
             transcript: RefCell::new(transcript),
             fields: RefCell::new(Fields { summary: None, chapters: Vec::new(), segments: Vec::new() }),
+            rows: RefCell::new(None),
             _bar_targets: RefCell::new(Vec::new()),
             _delegate: RefCell::new(None),
         });
@@ -415,6 +499,10 @@ impl TranscriptWindow {
         scroll.contentView().scrollToPoint(CGPoint::ZERO);
         scroll.reflectScrolledClipView(&scroll.contentView());
 
+        if state.rows.borrow().as_ref().is_some_and(|r| r.built < state.transcript.borrow().segments.len()) {
+            State::build_rest(&state);
+        }
+
         NSApplication::sharedApplication(mtm).activate();
         window.makeKeyAndOrderFront(None);
         TranscriptWindow { state }
@@ -434,6 +522,9 @@ impl TranscriptWindow {
 
 impl Drop for TranscriptWindow {
     fn drop(&mut self) {
+        if let Some(timer) = self.state.rows.borrow_mut().as_mut().and_then(|r| r.timer.take()) {
+            timer.invalidate();
+        }
         self.state.window.setDelegate(None);
         self.state.window.orderOut(None);
     }
