@@ -14,6 +14,12 @@ All notable changes to Lumora are documented here. The format follows
 - **Text is recognised once per capture** — auto-redaction, Smart Redact
   and every editor AI task share one Vision OCR result instead of running
   it again each time.
+- Recording poster frames, tutorial frames and subtitle audio export use
+  AVFoundation's current asynchronous loaders
+  (`generateCGImageAsynchronouslyForTime:`, `loadTracksWithMediaType:`)
+  instead of the deprecated synchronous calls, waited on from the worker
+  thread with a 30 s timeout. (`exportAsynchronously…` and the mic device
+  list keep their deprecated APIs: the replacements need macOS 15.)
 
 ### Fixed
 - Editor AI writing no longer sends text you cropped away or covered with

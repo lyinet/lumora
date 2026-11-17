@@ -201,15 +201,12 @@ fn export_m4a(
 pub fn export_audio(movie: &Path, track: AudioTrack) -> Result<PathBuf, CaptureError> {
     let url = crate::clipboard::file_url(movie).ok_or_else(|| CaptureError::Framework("invalid movie path".into()))?;
     let audio = audio_type()?;
-    // SAFETY: synchronous property reads on a local file asset (worker thread).
-    let (asset, tracks, duration) = unsafe {
-        let asset = AVAsset::assetWithURL(&url);
-        #[allow(deprecated)] // the async loaders need a completion hop; we are on a worker thread.
-        let tracks: Retained<NSArray<AVAssetTrack>> = asset.tracksWithMediaType(audio);
-        let duration = asset.duration();
-        (asset, tracks, duration)
-    };
-    let tracks: Vec<Retained<AVAssetTrack>> = tracks.iter().collect();
+    // SAFETY: opening a local file asset.
+    let asset = unsafe { AVAsset::assetWithURL(&url) };
+    // Blocks until the tracks are loaded (worker thread).
+    let tracks: Vec<Retained<AVAssetTrack>> = crate::av_sync::tracks(&asset, audio)?;
+    // SAFETY: plain property read (the tracks are loaded by now).
+    let duration = unsafe { asset.duration() };
     let chosen: Vec<&AVAssetTrack> = match (track, tracks.len()) {
         (_, 0) => return Err(CaptureError::NoAudio),
         (_, 1) | (AudioTrack::System, _) => vec![&tracks[0]],
