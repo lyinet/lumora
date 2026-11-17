@@ -19,9 +19,10 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
 use objc2::{define_class, msg_send, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSBackingStoreType, NSBox, NSBoxType, NSButton, NSControlStateValueOff, NSControlStateValueOn,
-    NSEvent, NSEventModifierFlags, NSFont, NSOpenPanel, NSPopUpButton, NSResponder, NSTabView, NSTabViewDelegate,
-    NSTabViewItem, NSTextAlignment, NSTextField, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
+    NSApplication, NSAutoresizingMaskOptions, NSBackingStoreType, NSBorderType, NSBox, NSBoxType, NSButton,
+    NSControlStateValueOff, NSControlStateValueOn, NSEvent, NSEventModifierFlags, NSFont, NSOpenPanel, NSPopUpButton,
+    NSResponder, NSScrollView, NSTabView, NSTabViewDelegate, NSTabViewItem, NSTextAlignment, NSTextField, NSView,
+    NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_foundation::{NSNotification, NSObject, NSString};
@@ -43,6 +44,59 @@ const ROW_H: f64 = 30.0;
 const CONTENT_W: f64 = W - 48.0;
 /// Width available to notes and wide controls in the control column.
 const NOTE_W: f64 = CONTENT_W - CONTROL_X - 8.0;
+/// Space kept below a tab's last row.
+const BOTTOM_PAD: f64 = 16.0;
+
+define_class!(
+    /// Top-anchored document view for a tab's scroll view.
+    #[unsafe(super(NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "LumoraSettingsTabDocument"]
+    struct TabDocument;
+
+    unsafe impl NSObjectProtocol for TabDocument {}
+
+    impl TabDocument {
+        #[unsafe(method(isFlipped))]
+        fn is_flipped(&self) -> bool {
+            true
+        }
+    }
+);
+
+/// Put a built tab (`view`, laid out top-down from `TAB_H`, last row ending
+/// at `bottom`) in a scroll view, so rows stay anchored to the top whatever
+/// height NSTabView gives the tab, and a tab that runs long (longer English
+/// or Chinese notes, a new setting) scrolls instead of clipping its last
+/// rows. The scroller only appears when it is needed.
+fn scrollable_tab(mtm: MainThreadMarker, view: &NSView, bottom: f64) -> Retained<NSView> {
+    let overflow = (BOTTOM_PAD - bottom).max(0.0);
+    let doc_h = TAB_H + overflow;
+    if overflow > 0.0 {
+        // Grow the view downwards: move every row up by the overflow.
+        for sub in view.subviews().iter() {
+            let mut f = sub.frame();
+            f.origin.y += overflow;
+            sub.setFrame(f);
+        }
+    }
+    view.setFrame(CGRect::new(CGPoint::ZERO, CGSize::new(CONTENT_W, doc_h)));
+    let doc = TabDocument::alloc(mtm).set_ivars(());
+    // SAFETY: NSView's designated initialiser on a fresh subclass instance.
+    let doc: Retained<TabDocument> =
+        unsafe { msg_send![super(doc), initWithFrame: CGRect::new(CGPoint::ZERO, CGSize::new(CONTENT_W, doc_h))] };
+    doc.addSubview(view);
+    let scroll = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), cg_rect(Rect::new(0.0, 0.0, CONTENT_W, TAB_H)));
+    scroll.setHasVerticalScroller(true);
+    scroll.setAutohidesScrollers(true);
+    scroll.setBorderType(NSBorderType::NoBorder);
+    scroll.setDrawsBackground(false);
+    scroll.setAutoresizingMask(
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+    );
+    scroll.setDocumentView(Some(&doc));
+    Retained::into_super(scroll)
+}
 
 // ---------------------------------------------------------------------------
 // Shortcut recorder control
@@ -368,9 +422,12 @@ impl SettingsWindow {
             let view = NSView::initWithFrame(NSView::alloc(mtm), tab_frame);
             let mut form = Form { mtm, view: &view, y: TAB_H - 16.0 };
             build(&mut form, &state, &mut targets, &mut fields);
+            // Lowest edge of anything laid out (some rows are placed by hand).
+            let bottom = view.subviews().iter().map(|v| v.frame().origin.y).fold(form.y, f64::min);
+            let content = scrollable_tab(mtm, &view, bottom);
             let item = unsafe { NSTabViewItem::initWithIdentifier(NSTabViewItem::alloc(), None) };
             item.setLabel(&NSString::from_str(title));
-            item.setView(Some(&view));
+            item.setView(Some(&content));
             tabs.addTabViewItem(&item);
         }
         let delegate = SettingsDelegate::new(mtm, Rc::downgrade(&state));
