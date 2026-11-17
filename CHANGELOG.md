@@ -6,6 +6,12 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Clipboard copies PNG, not TIFF** — screenshots and Quick Access "Copy"
+  put the PNG (with its Retina DPI) on the pasteboard as `public.png` plus
+  the file URL, encoded once off the main thread, instead of an `NSImage`
+  that AppKit serialises to uncompressed TIFF on the main thread.
+
 ## [0.5.0] — 2026-11-17 (prerelease, not yet hardware-tested)
 
 ### Added

@@ -405,20 +405,27 @@ impl App {
                         (Some(img), false) => {
                             // The record holds the plain capture; the file
                             // (and so the clipboard) gets the beautified one.
+                            // Render (when on) and encode off the main thread,
+                            // then put PNG data on the pasteboard.
                             let style = self.settings.borrow().beautify.clone();
-                            if style.enabled {
-                                // Render off the main thread, then copy.
-                                let (img, scale, file) = (img.clone(), rec.scale, rec.file.clone());
-                                DispatchQueue::global_queue(dispatch2::GlobalQueueIdentifier::QualityOfService(
-                                    dispatch2::DispatchQoS::UserInitiated,
-                                ))
-                                .exec_async(move || {
-                                    let out = lumora_capture::beautify_render::beautify_for_export(img, &style, scale);
-                                    on_main(move |_| lumora_capture::clipboard::copy_image(&out, scale, Some(&file)));
-                                });
-                            } else {
-                                lumora_capture::clipboard::copy_image(img, rec.scale, Some(&rec.file));
-                            }
+                            let (img, scale, file) = (img.clone(), rec.scale, rec.file.clone());
+                            DispatchQueue::global_queue(dispatch2::GlobalQueueIdentifier::QualityOfService(
+                                dispatch2::DispatchQoS::UserInitiated,
+                            ))
+                            .exec_async(move || {
+                                let out = lumora_capture::beautify_render::beautify_for_export(img, &style, scale);
+                                match lumora_capture::image::png_bytes(&out, scale) {
+                                    Ok(png) => on_main(move |_| {
+                                        lumora_capture::clipboard::copy_png(&png, Some(&file));
+                                    }),
+                                    Err(e) => {
+                                        log::warn!("PNG encode for copy failed, copying the bitmap: {e}");
+                                        on_main(move |_| {
+                                            lumora_capture::clipboard::copy_image(&out, scale, Some(&file))
+                                        });
+                                    }
+                                }
+                            });
                         }
                         _ => lumora_capture::clipboard::copy_file(&rec.file),
                     }

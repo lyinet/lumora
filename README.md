@@ -68,7 +68,7 @@
 
 **And the details that make it feel right:**
 
-- **Retina-correct output** — PNGs at native pixel density with DPI metadata, so they display at the right size everywhere. Named like `Lumora 2026-11-15 at 04.30.12.png` and copied to the clipboard.
+- **Retina-correct output** — PNGs at native pixel density with DPI metadata, so they display at the right size everywhere. Named like `Lumora 2026-11-15 at 04.30.12.png` and copied to the clipboard as PNG (plus the file, for pasting into Finder or chat apps).
 - **Keyboard precision** — move, aspect-lock and nudge a selection to the point without touching the mouse (see below).
 - **Motion with physics** — every appear, snap, nudge and reflow is a damped spring that keeps its velocity when interrupted. Direct manipulation is never animated, so the selection never lags your pointer.
 - **Shutter, then fly** — a flash over the region, then the capture shrinks onto its card while the card slides in.

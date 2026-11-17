@@ -5,10 +5,12 @@ use std::path::Path;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2::AnyThread;
-use objc2_app_kit::{NSImage, NSPasteboard, NSPasteboardTypeString, NSPasteboardWriting};
+use objc2_app_kit::{
+    NSImage, NSPasteboard, NSPasteboardItem, NSPasteboardTypePNG, NSPasteboardTypeString, NSPasteboardWriting,
+};
 use objc2_core_foundation::CGSize;
 use objc2_core_graphics::CGImage;
-use objc2_foundation::{NSArray, NSString, NSURL};
+use objc2_foundation::{NSArray, NSData, NSString, NSURL};
 
 /// Put an image on the general pasteboard. When the capture was also saved,
 /// the file URL is written alongside so pasting into Finder/Slack/Mail gets
@@ -28,6 +30,34 @@ pub fn copy_image(image: &CGImage, scale: f64, file: Option<&Path>) {
     let pb = NSPasteboard::generalPasteboard();
     pb.clearContents();
     pb.writeObjects(&NSArray::from_retained_slice(&items));
+}
+
+/// Put already-encoded PNG bytes on the general pasteboard as
+/// `NSPasteboardTypePNG` (plus the file URL when the capture is saved).
+///
+/// Prefer this over [`copy_image`] whenever the PNG exists anyway: an
+/// `NSImage` is serialised to uncompressed TIFF on the main thread (tens of
+/// MB for a 5K capture), while PNG data is a few MB and costs nothing more
+/// here. Returns the pasteboard's change count after the write, so a later
+/// fix-up can tell whether the user copied something else meanwhile.
+pub fn copy_png(png: &[u8], file: Option<&Path>) -> isize {
+    let item = NSPasteboardItem::new();
+    let data = NSData::with_bytes(png);
+    // SAFETY: NSPasteboardTypePNG is a valid static.
+    unsafe { item.setData_forType(&data, NSPasteboardTypePNG) };
+    let mut items: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = vec![ProtocolObject::from_retained(item)];
+    if let Some(url) = file.and_then(file_url) {
+        items.push(ProtocolObject::from_retained(url));
+    }
+    let pb = NSPasteboard::generalPasteboard();
+    pb.clearContents();
+    pb.writeObjects(&NSArray::from_retained_slice(&items));
+    pb.changeCount()
+}
+
+/// The general pasteboard's change count (bumps on every write by anyone).
+pub fn change_count() -> isize {
+    NSPasteboard::generalPasteboard().changeCount()
 }
 
 /// Put a file (e.g. a finished recording) on the pasteboard.
