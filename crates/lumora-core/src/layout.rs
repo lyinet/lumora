@@ -152,6 +152,53 @@ pub fn toolbar_overflow(advances: &[f64], available: f64, more_width: f64) -> us
     advances.len()
 }
 
+/// Placement of a centred row of round buttons (Quick Access hover row).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ButtonRow {
+    /// Button diameter.
+    pub size: f64,
+    pub gap: f64,
+    /// Left edge of the first button.
+    pub x: f64,
+    /// Bottom edge of the row (AppKit, y up).
+    pub y: f64,
+}
+
+/// Lay out `count` round buttons centred in `area` (AppKit, y up). Buttons
+/// shrink from `preferred` down to `min`, and gaps from `gap` down to half,
+/// so the row keeps `margin` on both sides. The bottom `reserved` points (a
+/// duration badge) are kept clear when the height allows; otherwise the row
+/// is simply centred.
+pub fn button_row(
+    count: usize,
+    area: Size,
+    preferred: f64,
+    min: f64,
+    gap: f64,
+    margin: f64,
+    reserved: f64,
+) -> ButtonRow {
+    let n = count.max(1) as f64;
+    let avail = (area.width - 2.0 * margin).max(0.0);
+    let width = |size: f64, gap: f64| n * size + (n - 1.0) * gap;
+    let (mut size, mut g) = (preferred, gap);
+    if width(size, g) > avail {
+        g = (gap / 2.0).max(0.0);
+        size = ((avail - (n - 1.0) * g) / n).clamp(min.min(preferred), preferred);
+    }
+    let x = (area.width - width(size, g)) / 2.0;
+    let centred = (area.height - size) / 2.0;
+    // Centre in the space above the reserved strip when the row fits there
+    // with a few points to spare; never push it off the top.
+    let above = reserved + (area.height - reserved - size) / 2.0;
+    let y = if reserved > 0.0 && centred < reserved + 4.0 && above + size <= area.height - 4.0 {
+        above.max(centred)
+    } else {
+        centred
+    };
+    ButtonRow { size, gap: g, x, y }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,5 +290,23 @@ mod tests {
             assert!(n >= last);
             last = n;
         }
+    }
+    #[test]
+    fn button_row_fits_and_clears_the_badge() {
+        // Five 30 pt buttons fit a 220 pt thumbnail unchanged, centred.
+        let r = button_row(5, Size::new(220.0, 118.0), 30.0, 24.0, 6.0, 8.0, 32.0);
+        assert_eq!((r.size, r.gap), (30.0, 6.0));
+        assert!((r.x - (220.0 - 174.0) / 2.0).abs() < 1e-9);
+        assert!((r.y - 44.0).abs() < 1e-9, "tall enough: plain centring clears the badge");
+        // Short (wide-aspect) card: the row moves above the badge.
+        let r = button_row(5, Size::new(220.0, 84.0), 30.0, 24.0, 6.0, 8.0, 32.0);
+        assert!(r.y >= 32.0 && r.y + r.size <= 84.0 - 4.0, "{r:?}");
+        // Too narrow: gaps halve, buttons shrink, margins hold.
+        let r = button_row(6, Size::new(180.0, 84.0), 30.0, 24.0, 6.0, 8.0, 0.0);
+        assert!(r.size < 30.0 && r.size >= 24.0 && r.gap == 3.0, "{r:?}");
+        assert!(r.x >= 8.0 - 1e-9);
+        // No reserved strip: centred.
+        let r = button_row(4, Size::new(220.0, 84.0), 30.0, 24.0, 6.0, 8.0, 0.0);
+        assert!((r.y - 27.0).abs() < 1e-9);
     }
 }

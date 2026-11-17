@@ -38,6 +38,10 @@ All notable changes to Lumora are documented here. The format follows
   language or an unavailable recognizer (Siri & Dictation off, restricted)
   also get their own localised, actionable messages instead of English
   framework text.
+- Quick Access: a recording card's hover buttons (Copy, Save, Make
+  Tutorial, Subtitles, Delete) no longer crowd the duration badge on short,
+  wide cards — the row sits above the badge, and shrinks slightly instead of
+  running into the edges when there are many buttons.
 - Smart Redact's AI check and the Settings → AI tab read the API key from
   the Keychain off the main thread, so a Keychain prompt no longer freezes
   the app.
