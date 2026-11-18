@@ -35,7 +35,7 @@
 <br>
 
 > [!NOTE]
-> **Lumora 目前处于早期 alpha 阶段（v0.6）。** 整个应用已能针对 Apple Silicon 和 Intel 通过类型检查与 clippy，与平台无关的核心逻辑也有单元测试覆盖——但它**还没有在真机上运行过**，难免会有粗糙之处。下一个里程碑就是真机调试。⭐ **点个 Star 关注进展**；哪些已验证、哪些尚未验证，请看 [STATUS.md](STATUS.md)。
+> **Lumora 目前处于早期 alpha 阶段（v0.6.1）。** 整个应用已能针对 Apple Silicon 和 Intel 通过类型检查与 clippy，与平台无关的核心逻辑也有单元测试覆盖。真机测试刚刚开始（v0.6.1 修复了它发现的首次启动权限与启动问题），难免会有粗糙之处。⭐ **点个 Star 关注进展**；哪些已验证、哪些尚未验证，请看 [STATUS.md](STATUS.md)。
 
 ## 功能
 
@@ -126,7 +126,7 @@
 
 ## 安装
 
-**Homebrew cask —— 即将推出。** 签名并公证的版本会在真机调试完成后发布（见[路线图](#路线图)）。在此之前，请从源码构建。
+**Homebrew cask —— 即将推出。** 签名并公证的版本会在真机调试完成后发布（见[路线图](#路线图)）。在此之前，可以从 Releases 页面最新的预发布版本下载 `Lumora-<版本>.dmg`（ad-hoc 签名：把 Lumora 拖到“应用程序”，首次启动请看[故障排除](#故障排除)），或从源码构建。
 
 ### 从源码构建
 
@@ -167,6 +167,34 @@ Lumora 只在某项功能第一次需要时才请求对应权限：
 
 无需“辅助功能”权限；“输入监控”仅用于可选的按键提示。网络请求只会发往你配置的 AI 服务商，且仅在你使用 AI 功能或云端转写时发生。
 
+### 故障排除
+
+Lumora 是一个**菜单栏应用**：没有程序坞图标，也没有主窗口。如果启动时已经允许了“屏幕录制”，它会显示一条“Lumora 正在菜单栏中运行”的提示，之后就待在菜单栏图标里。在“访达”或“聚焦”中再次打开 Lumora 会打开设置窗口。
+
+**“屏幕与系统录音”列表里没有 Lumora，或点击“授予权限”没有反应**
+
+1. 把 `Lumora.app` 移到 `/Applications`（从磁盘映像中拖过去），并从那里打开。直接从磁盘映像或“下载”文件夹打开的副本会在临时位置运行（App Translocation），权限不会保留在它上面。Lumora 发现这种情况时会主动提出把自己移过去。
+2. 如果 macOS 仍然不显示它，移除下载隔离标记后再打开：
+   ```sh
+   /usr/bin/xattr -dr com.apple.quarantine /Applications/Lumora.app
+   ```
+3. 重置 Lumora 的屏幕录制记录，打开 Lumora，点击 **授予权限** 并允许，然后重新启动：
+   ```sh
+   tccutil reset ScreenCapture com.lumora.app
+   ```
+
+**截图没有反应，或已经打开开关但 macOS 仍然拒绝。** 预发布版本使用 ad-hoc 签名，macOS 会把**每次更新都当作一个新应用**，旧的授权不再生效。安装更新后，请在“屏幕与系统录音”中用“–”删除 Lumora（或运行上面的 `tccutil` 命令），重新允许并重新启动。现在 macOS 拒绝截图时，Lumora 会自己给出这些说明。
+
+**不要从“终端”直接启动可执行文件**（`Lumora.app/Contents/MacOS/lumora`）来测试权限：这时 macOS 检查的是*“终端”*的权限，而不是 Lumora 的。请使用 `open /Applications/Lumora.app`。
+
+**菜单栏里看不到图标。** 在 macOS 26 上请检查“系统设置”→“菜单栏”并允许 Lumora；菜单栏太拥挤时（尤其是刘海附近）图标可能被隐藏。快捷键（<kbd>⌥</kbd><kbd>⇧</kbd><kbd>4</kbd> 等）仍然可用。
+
+**日志。** Lumora 会把日志写到 `~/Library/Logs/Lumora/lumora.log`（也可在“控制台”App 中查看）；崩溃时的 panic 信息和调用栈也会记录在这里。需要更多细节时，用调试日志启动：
+```sh
+LUMORA_DEBUG=1 /Applications/Lumora.app/Contents/MacOS/lumora   # 或 LUMORA_LOG=debug / RUST_LOG=debug
+```
+（注意：从“终端”启动的副本使用的是“终端”的权限。）报告问题时请附上这份日志。
+
 <details>
 <summary><b>在 Linux 或 CI 中开发</b></summary>
 
@@ -195,7 +223,7 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
 
 设置以 TOML 格式保存在 `~/Library/Application Support/Lumora/settings.toml`。缺失的键使用默认值，未知的键会被忽略，损坏的文件会被移到 `settings.toml.bak`。清除的快捷键会保存为 `""`，重启后依然保持清除状态。
 
-截图历史索引（文件列表、尺寸以及截图中识别出的文字，用于搜索）保存在同目录的 `history.json`，缩略图在 `Thumbnails/` 中。两者都只是缓存：随时可以删除，下次扫描会自动重建；所有内容都不会离开你的 Mac。日志输出到 stderr；设置 `LUMORA_LOG=debug` 可查看更多信息。
+截图历史索引（文件列表、尺寸以及截图中识别出的文字，用于搜索）保存在同目录的 `history.json`，缩略图在 `Thumbnails/` 中。两者都只是缓存：随时可以删除，下次扫描会自动重建；所有内容都不会离开你的 Mac。日志输出到 stderr 和 `~/Library/Logs/Lumora/lumora.log`；设置 `LUMORA_DEBUG=1`（或 `LUMORA_LOG=debug` / `RUST_LOG=debug`）可查看更多信息——见[故障排除](#故障排除)。
 
 </details>
 

@@ -35,7 +35,7 @@
 <br>
 
 > [!NOTE]
-> **Lumora is in early alpha (v0.6).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested — but it **has not been run on real hardware yet**, so expect rough edges. Hardware bring-up is the next milestone. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
+> **Lumora is in early alpha (v0.6.1).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested. Testing on real Macs has just started (v0.6.1 fixes the first-run permission and launch issues it found), so expect rough edges. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
 
 ## Features
 
@@ -126,7 +126,7 @@ Option-Shift avoids clashing with macOS's own <kbd>⇧</kbd><kbd>⌘</kbd><kbd>3
 
 ## Install
 
-**Homebrew cask — coming soon.** A signed and notarized build will follow hardware bring-up ([roadmap](#roadmap)). Until then, build from source.
+**Homebrew cask — coming soon.** A signed and notarized build will follow hardware bring-up ([roadmap](#roadmap)). Until then, download `Lumora-<version>.dmg` from the latest pre-release on the Releases page (ad-hoc signed: drag Lumora to Applications, then see [Troubleshooting](#troubleshooting) for the first launch) or build from source.
 
 ### Build from source
 
@@ -167,6 +167,34 @@ Lumora asks for each permission only when a feature first needs it:
 
 No Accessibility access is needed, and Input Monitoring only for the optional keystroke HUD. Network requests go only to the AI provider you configure, and only when you use an AI feature or cloud transcription.
 
+### Troubleshooting
+
+Lumora is a **menu-bar app**: it has no Dock icon and no main window. When it starts with Screen Recording already allowed, it shows a short “Lumora is running in the menu bar” notice and then lives behind its icon in the menu bar. Opening Lumora again from Finder or Spotlight opens Settings.
+
+**Lumora isn’t listed under Screen & System Audio Recording, or Grant Access does nothing**
+
+1. Move `Lumora.app` to `/Applications` (drag it there from the disk image) and open it from there. A copy opened straight from the disk image or from Downloads runs from a temporary location (App Translocation), and permissions don’t stick to it. Lumora offers to move itself when it notices this.
+2. If macOS still won’t show it, remove the download quarantine flag and open it again:
+   ```sh
+   /usr/bin/xattr -dr com.apple.quarantine /Applications/Lumora.app
+   ```
+3. Reset Lumora’s Screen Recording entry, open Lumora, click **Grant Access**, allow it, then relaunch:
+   ```sh
+   tccutil reset ScreenCapture com.lumora.app
+   ```
+
+**Capturing does nothing, or macOS keeps refusing although Lumora is switched on.** Pre-release builds are ad-hoc signed, so macOS treats **every update as a new app** and the old grant no longer applies. After installing an update, remove Lumora from Screen & System Audio Recording with “–” (or run the `tccutil` command above), allow it again, and relaunch. Lumora now explains this itself when macOS refuses a capture.
+
+**Don’t start the binary from Terminal** (`Lumora.app/Contents/MacOS/lumora`) to test permissions: macOS then checks *Terminal’s* permission, not Lumora’s. Use `open /Applications/Lumora.app`.
+
+**I can’t see the menu-bar icon.** On macOS 26 check System Settings → Menu Bar and allow Lumora; on a crowded menu bar (especially next to the notch) icons can be hidden. The shortcuts (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>4</kbd> and friends) still work.
+
+**Logs.** Lumora writes a log to `~/Library/Logs/Lumora/lumora.log` (also readable in Console.app); a crash leaves its panic message and backtrace there. For more detail, start it with debug logging:
+```sh
+LUMORA_DEBUG=1 /Applications/Lumora.app/Contents/MacOS/lumora   # or LUMORA_LOG=debug / RUST_LOG=debug
+```
+(Remember that a Terminal-started copy uses Terminal’s permissions.) Please attach the log when you report a bug.
+
 <details>
 <summary><b>Developing on Linux or in CI</b></summary>
 
@@ -195,7 +223,7 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
 
 Settings are stored as TOML at `~/Library/Application Support/Lumora/settings.toml`. Missing keys fall back to defaults, unknown keys are ignored, and a corrupt file is moved aside to `settings.toml.bak`. A cleared shortcut is saved as `""` and stays cleared.
 
-The capture history index (file list, dimensions and the text recognised in your screenshots, for search) is `history.json` next to it, with thumbnails in `Thumbnails/`. Both are caches: delete them any time and the next scan rebuilds them; nothing leaves your Mac. Logs go to stderr; set `LUMORA_LOG=debug` for more.
+The capture history index (file list, dimensions and the text recognised in your screenshots, for search) is `history.json` next to it, with thumbnails in `Thumbnails/`. Both are caches: delete them any time and the next scan rebuilds them; nothing leaves your Mac. Logs go to stderr and `~/Library/Logs/Lumora/lumora.log`; set `LUMORA_DEBUG=1` (or `LUMORA_LOG=debug` / `RUST_LOG=debug`) for more — see [Troubleshooting](#troubleshooting).
 
 </details>
 
