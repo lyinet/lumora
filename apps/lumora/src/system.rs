@@ -145,3 +145,11 @@ pub fn relaunch(mtm: MainThreadMarker) {
     }
     NSApplication::sharedApplication(mtm).terminate(None);
 }
+
+/// The terminal Lumora seems to have been started from (`TERM_PROGRAM`, or
+/// `TERM` when that is missing), if any. A Finder / Spotlight / Launchpad
+/// launch has neither. TCC then treats the terminal as the responsible
+/// process for permission prompts.
+pub fn launched_from_terminal() -> Option<String> {
+    std::env::var("TERM_PROGRAM").ok().or_else(|| std::env::var("TERM").ok()).filter(|v| !v.is_empty() && v != "dumb")
+}

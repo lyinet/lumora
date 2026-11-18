@@ -102,6 +102,12 @@ impl ToastCenter {
 
     /// Show a toast; replaces any toast already on screen.
     pub fn show(&self, kind: ToastKind, title: &str, detail: Option<&str>) {
+        self.show_for(kind, title, detail, kind.duration());
+    }
+
+    /// Like [`show`](Self::show) but stays up for `seconds` (the launch
+    /// toast needs longer to read).
+    pub fn show_for(&self, kind: ToastKind, title: &str, detail: Option<&str>, seconds: f64) {
         let mtm = self.mtm;
         drop(self.current.borrow_mut().take());
 
@@ -161,7 +167,7 @@ impl ToastCenter {
         spring.animate((x, y), 1.0, motion::TOAST, None);
 
         let current = Rc::downgrade(&self.current);
-        let timer = schedule_timer(kind.duration(), false, move || {
+        let timer = schedule_timer(seconds, false, move || {
             if let Some(cur) = current.upgrade() {
                 ToastCenter::dismiss(&cur);
             }

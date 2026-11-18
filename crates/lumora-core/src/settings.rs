@@ -340,6 +340,17 @@ impl Shortcuts {
     pub fn bound(&self) -> Vec<(Action, Hotkey)> {
         Action::ALL.iter().filter_map(|&a| self.get(a).map(|h| (a, h))).collect()
     }
+
+    /// The main shortcuts in one line for the "running in the menu bar"
+    /// launch toast, e.g. `⌥⇧4 Capture Area · ⌥⇧R Record Screen · …`, in the
+    /// current language. `None` when none of them is bound.
+    pub fn launch_summary(&self) -> Option<String> {
+        let parts: Vec<String> = [Action::CaptureArea, Action::RecordScreen, Action::History]
+            .iter()
+            .filter_map(|&a| self.get(a).map(|h| format!("{h} {}", a.title())))
+            .collect();
+        (!parts.is_empty()).then(|| parts.join("  ·  "))
+    }
 }
 
 impl Default for Capture {
@@ -758,5 +769,21 @@ mod tests {
         assert!(r.bitrate_for(3840, 2160) > r.bitrate_for(1920, 1080) * 3);
         let hevc = Recording { codec: Codec::Hevc, ..r.clone() };
         assert!(hevc.bitrate_for(1920, 1080) < r.bitrate_for(1920, 1080));
+    }
+
+    #[test]
+    fn launch_summary_lists_bound_main_shortcuts() {
+        // Titles depend on the (global) UI language; check the shortcuts only.
+        let mut s = Shortcuts::default();
+        let full = s.launch_summary().unwrap();
+        assert!(full.starts_with("⌥⇧4 "), "{full}");
+        assert_eq!(full.matches("  ·  ").count(), 2, "{full}");
+        assert!(full.contains("⌥⇧R") && full.contains("⌥⇧H"), "{full}");
+        s.set(Action::RecordScreen, None);
+        assert!(!s.launch_summary().unwrap().contains("⌥⇧R"));
+        for a in Action::ALL {
+            s.set(a, None);
+        }
+        assert_eq!(s.launch_summary(), None);
     }
 }

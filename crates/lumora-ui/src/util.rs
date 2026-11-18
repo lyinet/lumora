@@ -669,3 +669,15 @@ pub fn confirm_alert(mtm: MainThreadMarker, title: &str, detail: &str, confirm: 
     // NSAlertSecondButtonReturn: the confirm button was added second.
     alert.runModal() == objc2_app_kit::NSAlertSecondButtonReturn
 }
+
+/// Bring this menu-bar (LSUIElement) app to the front for real. On macOS 14+
+/// plain `activate()` is cooperative and is often ignored when another app
+/// is frontmost (e.g. after a global hotkey), leaving our window behind it,
+/// so also use the older forceful call.
+pub fn force_activate(mtm: MainThreadMarker) {
+    let app = objc2_app_kit::NSApplication::sharedApplication(mtm);
+    // SAFETY: -[NSApplication activateIgnoringOtherApps:] takes a BOOL and
+    // still works on macOS 14–26 (deprecated, not removed).
+    let _: () = unsafe { objc2::msg_send![&*app, activateIgnoringOtherApps: objc2::runtime::Bool::YES] };
+    app.activate();
+}

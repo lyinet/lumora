@@ -31,7 +31,13 @@ define_class!(
     unsafe impl NSApplicationDelegate for AppDelegate {
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn did_finish_launching(&self, _notification: &NSNotification) {
-            let app = App::start(self.mtm(), self);
+            // Translocated / DMG copy: offer to move first (quits on success).
+            if crate::relocate::check(self.mtm()) {
+                return;
+            }
+            let at_login = launched_as_login_item();
+            log::info!("launched{}", if at_login { " as a login item" } else { "" });
+            let app = App::start(self.mtm(), self, at_login);
             *self.ivars().app.borrow_mut() = Some(app);
             let pending = std::mem::take(&mut *self.ivars().pending.borrow_mut());
             if !pending.is_empty() {
@@ -49,6 +55,16 @@ define_class!(
             } else {
                 self.ivars().pending.borrow_mut().extend(paths);
             }
+        }
+
+        /// Opening Lumora again while it runs (Finder, Spotlight, `open`).
+        /// A menu-bar app has no window to bring back, so show one.
+        #[unsafe(method(applicationShouldHandleReopen:hasVisibleWindows:))]
+        fn should_handle_reopen(&self, _application: &NSApplication, _has_visible_windows: bool) -> bool {
+            if self.ivars().app.borrow().is_some() {
+                on_main(|app| app.handle_reopen());
+            }
+            true
         }
 
         #[unsafe(method(applicationWillTerminate:))]
@@ -139,5 +155,27 @@ impl AppDelegate {
             Self::alloc(mtm).set_ivars(DelegateIvars { app: RefCell::new(None), pending: RefCell::new(Vec::new()) });
         // SAFETY: NSObject's designated initialiser.
         unsafe { msg_send![super(this), init] }
+    }
+}
+
+/// Whether the launch Apple Event says we were started as a login item
+/// (`keyAEPropData` = `keyAELaunchedAsLogInItem`). Best effort: `false`
+/// when there is no event or it says nothing.
+fn launched_as_login_item() -> bool {
+    use objc2::runtime::AnyClass;
+    const KEY_AE_PROP_DATA: u32 = u32::from_be_bytes(*b"prdt");
+    const KEY_AE_LAUNCHED_AS_LOGIN_ITEM: u32 = u32::from_be_bytes(*b"lgit");
+    let Some(cls) = AnyClass::get(c"NSAppleEventManager") else { return false };
+    // SAFETY: documented NSAppleEventManager / NSAppleEventDescriptor API;
+    // every object may be nil and is checked.
+    unsafe {
+        let mgr: Option<Retained<AnyObject>> = msg_send![cls, sharedAppleEventManager];
+        let Some(mgr) = mgr else { return false };
+        let event: Option<Retained<AnyObject>> = msg_send![&*mgr, currentAppleEvent];
+        let Some(event) = event else { return false };
+        let prop: Option<Retained<AnyObject>> = msg_send![&*event, paramDescriptorForKeyword: KEY_AE_PROP_DATA];
+        let Some(prop) = prop else { return false };
+        let code: u32 = msg_send![&*prop, enumCodeValue];
+        code == KEY_AE_LAUNCHED_AS_LOGIN_ITEM
     }
 }

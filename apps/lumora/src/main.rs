@@ -32,6 +32,8 @@ mod record_flow;
 #[cfg(target_os = "macos")]
 mod redact_flow;
 #[cfg(target_os = "macos")]
+mod relocate;
+#[cfg(target_os = "macos")]
 mod scroll_flow;
 #[cfg(target_os = "macos")]
 mod status;

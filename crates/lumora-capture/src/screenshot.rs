@@ -74,7 +74,7 @@ pub fn capture(
     };
     let slot = Mutex::new(Some(completion));
     let block = RcBlock::new(move |image: *mut CGImage, error: *mut NSError| {
-        let Some(cb) = slot.lock().ok().and_then(|mut s| s.take()) else { return };
+        let Some(cb) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
         // SAFETY: `image` is null or a valid CGImage for the duration of the
         // callback; `retain` extends that.
         let result = match std::ptr::NonNull::new(image) {

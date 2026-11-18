@@ -109,10 +109,23 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub fn is_idle(&self) -> bool {
-        matches!(self, Mode::Idle)
+    /// For logs.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Mode::Idle => "idle",
+            Mode::Preparing => "preparing",
+            Mode::Selecting { .. } => "selecting",
+            Mode::Countdown { .. } => "countdown",
+            Mode::Recording { .. } => "recording",
+            Mode::Finishing => "finishing",
+            Mode::Scrolling(_) => "scrolling",
+        }
     }
 }
+
+/// How long ScreenCaptureKit may take to answer before a capture is given
+/// up (it normally answers in well under a second).
+const PREPARE_TIMEOUT_SECS: f64 = 5.0;
 
 /// A user-visible outcome for [`App::notify`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -208,6 +221,9 @@ pub struct App {
     onboarding: RefCell<Option<Onboarding>>,
     onboarding_target: RefCell<Option<Retained<ActionTarget>>>,
     permission_poll: RefCell<Option<Retained<NSTimer>>>,
+    /// Bumped every time a capture starts preparing; the watchdog only
+    /// resets the generation it was armed for.
+    prepare_gen: Cell<u64>,
     next_id: Cell<u64>,
     pub session: RefCell<RecordingSession>,
     /// Click log of the recording being finalised (written next to the movie).
@@ -260,17 +276,28 @@ impl App {
         }
     }
 
-    pub fn start(mtm: MainThreadMarker, delegate: &AppDelegate) -> Rc<App> {
+    /// `at_login`: launched as a login item (no launch toast then).
+    pub fn start(mtm: MainThreadMarker, delegate: &AppDelegate, at_login: bool) -> Rc<App> {
         let home = system::home_dir();
         let settings_path = Settings::default_path();
         let settings = settings_path.as_deref().map(Settings::load_or_default).unwrap_or_default();
         let lang = system::apply_language(settings.general.language);
         log::info!(
-            "starting Lumora {} (settings: {:?}, language: {})",
+            "starting Lumora {} (settings: {:?}, language: {}, bundle: {}, log: {:?}, macOS {})",
             env!("CARGO_PKG_VERSION"),
             settings_path,
-            lang.tag()
+            lang.tag(),
+            objc2_foundation::NSBundle::mainBundle().bundlePath(),
+            crate::logger::log_path(),
+            objc2_foundation::NSProcessInfo::processInfo().operatingSystemVersionString(),
         );
+        log::info!("screen recording preflight: {}", permission::has_screen_recording());
+        if let Some(term) = system::launched_from_terminal() {
+            log::warn!(
+                "launched from a terminal ({term}): macOS attributes Screen Recording requests to the terminal, \
+                 not Lumora; open Lumora from Finder/Spotlight/Launchpad to grant it"
+            );
+        }
 
         let app = Rc::new_cyclic(|weak: &Weak<App>| {
             let w = weak.clone();
@@ -300,6 +327,7 @@ impl App {
                 onboarding: RefCell::new(None),
                 onboarding_target: RefCell::new(None),
                 permission_poll: RefCell::new(None),
+                prepare_gen: Cell::new(0),
                 next_id: Cell::new(1),
                 session: RefCell::new(RecordingSession::default()),
                 pending_click_log: RefCell::new(None),
@@ -319,9 +347,71 @@ impl App {
         system::clean_temp_dir(app.settings.borrow().save_folder(&app.home));
 
         if !permission::has_screen_recording() {
-            app.dispatch(Command::ShowOnboarding);
+            // Ask macOS right away, without depending on any window: the
+            // request plus a real ScreenCaptureKit query make TCC list
+            // Lumora under Screen & System Audio Recording and show its
+            // prompt (macOS 15/26).
+            let requested = permission::request_screen_recording();
+            log::info!("screen recording not granted; CGRequestScreenCaptureAccess -> {requested}; probing SCK");
+            permission::probe_screen_capture(|ok| log::info!("launch SCK probe finished (ok: {ok})"));
+            // Show the onboarding once launching has fully finished.
+            let weak = Rc::downgrade(&app);
+            lumora_ui::util::schedule_timer(0.3, false, move || {
+                if let Some(app) = weak.upgrade() {
+                    app.dispatch(Command::ShowOnboarding);
+                }
+                false
+            });
+        } else if !at_login {
+            // Lumora has no window and no Dock icon: without this a launch
+            // with permission granted looks like "nothing happened".
+            app.schedule_launch_feedback();
         }
         app
+    }
+
+    /// Shortly after launch (once the menu bar has laid the item out), say
+    /// that Lumora runs in the menu bar and list the main shortcuts. If the
+    /// status item looks hidden, say where to turn it on and open Settings
+    /// so there is something to click.
+    fn schedule_launch_feedback(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        lumora_ui::util::schedule_timer(1.2, false, move || {
+            if let Some(app) = weak.upgrade() {
+                app.show_launch_feedback();
+            }
+            false
+        });
+    }
+
+    fn show_launch_feedback(self: &Rc<Self>) {
+        let summary = self.settings.borrow().shortcuts.launch_summary();
+        if self.status.appears_visible() {
+            let detail = summary.unwrap_or_else(|| tr(Msg::ToastRunningNoShortcuts).to_string());
+            log::info!("launch toast: running in the menu bar");
+            self.toasts.show_for(ToastKind::Success, tr(Msg::ToastRunningTitle), Some(&detail), 6.0);
+        } else {
+            log::warn!("status item does not appear to be visible");
+            self.toasts.show_for(
+                ToastKind::Warning,
+                tr(Msg::ToastMenuBarHiddenTitle),
+                Some(tr(Msg::ToastMenuBarHiddenDetail)),
+                10.0,
+            );
+            self.show_settings();
+        }
+    }
+
+    /// The user opened Lumora again (Finder, Spotlight, Launchpad) while it
+    /// is running: show the onboarding without permission, Settings with it.
+    pub fn handle_reopen(self: &Rc<Self>) {
+        log::info!("reopen");
+        if permission::has_screen_recording() {
+            self.show_settings();
+            NSApplication::sharedApplication(self.mtm).activate();
+        } else {
+            self.show_onboarding();
+        }
     }
 
     /// Tell the user how something went, with a toast HUD.
@@ -365,7 +455,7 @@ impl App {
     // -- commands -----------------------------------------------------------
 
     pub fn dispatch(self: &Rc<Self>, cmd: Command) {
-        log::debug!("command {cmd:?}");
+        log::info!("command {cmd:?} (mode: {})", self.mode.borrow().name());
         match cmd {
             Command::CaptureArea => self.begin_selection(lumora_ui::events::OverlayMode::Capture, false),
             Command::CaptureWindow => self.begin_selection(lumora_ui::events::OverlayMode::Capture, true),
@@ -387,13 +477,77 @@ impl App {
         }
     }
 
-    /// Ensure Screen Recording permission; shows onboarding when missing.
+    /// Ensure Screen Recording permission; shows onboarding (brought to the
+    /// front) and a toast when missing. Never fails silently.
     pub fn require_permission(self: &Rc<Self>) -> bool {
         if permission::has_screen_recording() {
             return true;
         }
+        log::info!("capture refused: Screen Recording permission missing (preflight false)");
+        // Registers the app in the privacy list if it is not there yet.
+        permission::probe_screen_capture(|_| {});
         self.show_onboarding();
+        self.notify(Notice::Warning(Msg::ToastPermissionMissing), Some(tr(Msg::ToastPermissionMissingDetail).into()));
         false
+    }
+
+    /// Whether a new capture/recording/scroll session may start: the app is
+    /// idle and Screen Recording is allowed. Every refusal is logged and
+    /// shown. A session stuck in `Preparing` (ScreenCaptureKit never
+    /// answered) is the watchdog's job, see [`App::begin_preparing`].
+    pub fn ready_for_capture(self: &Rc<Self>, what: &str) -> bool {
+        let mode = self.mode.borrow().name();
+        if mode != "idle" {
+            log::info!("{what} refused: busy ({mode})");
+            self.notify(Notice::Warning(Msg::ToastBusy), Some(tr(Msg::ToastBusyDetail).into()));
+            return false;
+        }
+        if !self.require_permission() {
+            return false;
+        }
+        log::info!("{what}: starting");
+        true
+    }
+
+    /// Enter `Preparing` and arm a watchdog: if nothing moved the app out of
+    /// this preparation within [`PREPARE_TIMEOUT_SECS`], reset to idle and
+    /// say so (otherwise every later capture would be refused as busy).
+    pub fn begin_preparing(self: &Rc<Self>, what: &'static str) {
+        self.set_mode(Mode::Preparing);
+        self.arm_prepare_watchdog(what);
+    }
+
+    /// Arm the watchdog for the `Preparing` state the app is already in.
+    pub fn arm_prepare_watchdog(self: &Rc<Self>, what: &'static str) {
+        let gen = self.prepare_gen.get().wrapping_add(1);
+        self.prepare_gen.set(gen);
+        let weak = Rc::downgrade(self);
+        lumora_ui::util::schedule_timer(PREPARE_TIMEOUT_SECS, false, move || {
+            let Some(app) = weak.upgrade() else { return false };
+            let stuck = app.prepare_gen.get() == gen && matches!(*app.mode.borrow(), Mode::Preparing);
+            if stuck {
+                log::error!("{what}: ScreenCaptureKit did not answer within {PREPARE_TIMEOUT_SECS} s; resetting");
+                app.set_mode(Mode::Idle);
+                app.notify(Notice::Error(Msg::ToastCaptureStalled), Some(tr(Msg::ToastCaptureStalledDetail).into()));
+            }
+            false
+        });
+    }
+
+    /// macOS refused the capture although the preflight says it is allowed:
+    /// the grant usually belongs to an older (differently signed) build.
+    pub fn show_reset_permission_help(self: &Rc<Self>) {
+        log::error!("screen capture refused although preflight says granted (stale TCC grant?)");
+        lumora_ui::util::force_activate(self.mtm);
+        let alert = objc2_app_kit::NSAlert::new(self.mtm);
+        alert.setAlertStyle(objc2_app_kit::NSAlertStyle::Warning);
+        alert.setMessageText(&objc2_foundation::NSString::from_str(tr(Msg::ResetPermissionTitle)));
+        alert.setInformativeText(&objc2_foundation::NSString::from_str(tr(Msg::ResetPermissionBody)));
+        alert.addButtonWithTitle(&objc2_foundation::NSString::from_str(tr(Msg::OpenSystemSettings)));
+        alert.addButtonWithTitle(&objc2_foundation::NSString::from_str(tr(Msg::ResetPermissionClose)));
+        if alert.runModal() == objc2_app_kit::NSAlertFirstButtonReturn {
+            system::open_url(permission::SCREEN_RECORDING_SETTINGS_URL);
+        }
     }
 
     // -- UI events ----------------------------------------------------------
@@ -703,11 +857,36 @@ impl App {
     // -- onboarding -----------------------------------------------------------
 
     fn show_onboarding(self: &Rc<Self>) {
-        if self.onboarding.borrow().is_some() {
+        if let Some(o) = self.onboarding.borrow().as_ref() {
+            // Never return silently: the panel may be behind other apps.
+            log::info!("onboarding already open (visible: {}); bringing it to the front", o.is_visible());
+            o.bring_to_front(self.mtm);
+            log::info!("onboarding shown, {}", o.diagnostics(self.mtm));
             return;
         }
         let granted = permission::has_screen_recording();
-        *self.onboarding.borrow_mut() = Some(Onboarding::show(self.mtm, self.sink.clone(), granted));
+        log::info!("showing onboarding (granted: {granted})");
+        let onboarding = Onboarding::show(self.mtm, self.sink.clone(), granted);
+        log::info!("onboarding shown, {}", onboarding.diagnostics(self.mtm));
+        *self.onboarding.borrow_mut() = Some(onboarding);
+        // Re-check once things settle; if the window still isn't up, push
+        // it to the front again and say so in the log.
+        let weak = Rc::downgrade(self);
+        lumora_ui::util::schedule_timer(1.0, false, move || {
+            if let Some(app) = weak.upgrade() {
+                if let Some(o) = app.onboarding.borrow().as_ref() {
+                    if !o.is_visible() {
+                        log::warn!("onboarding not visible after 1 s; ordering front again");
+                        o.bring_to_front(app.mtm);
+                    }
+                    log::info!("onboarding after 1 s: {}", o.diagnostics(app.mtm));
+                }
+            }
+            false
+        });
+        if let Some(t) = self.permission_poll.borrow_mut().take() {
+            t.invalidate();
+        }
         // Poll so the panel flips to "Relaunch" as soon as access is granted.
         let weak = Rc::downgrade(self);
         let timer = lumora_ui::util::schedule_timer(1.0, true, move || {
@@ -730,13 +909,26 @@ impl App {
     fn on_onboarding(self: &Rc<Self>, action: OnboardingAction) {
         match action {
             OnboardingAction::RequestAccess => {
-                if !permission::request_screen_recording() {
-                    system::open_url(permission::SCREEN_RECORDING_SETTINGS_URL);
+                if permission::request_screen_recording() {
+                    log::info!("screen recording already granted");
+                    return;
                 }
+                // CGRequestScreenCaptureAccess alone may neither prompt nor
+                // list the app on macOS 15/26: also ask ScreenCaptureKit for
+                // content so TCC registers Lumora, then open the pane.
+                log::info!("requesting screen recording access");
+                permission::probe_screen_capture(|ok| {
+                    on_main(move |_| {
+                        if !ok {
+                            system::open_url(permission::SCREEN_RECORDING_SETTINGS_URL);
+                        }
+                    })
+                });
             }
             OnboardingAction::OpenSystemSettings => system::open_url(permission::SCREEN_RECORDING_SETTINGS_URL),
             OnboardingAction::Relaunch => system::relaunch(self.mtm),
             OnboardingAction::Dismiss => {
+                log::info!("onboarding dismissed");
                 if let Some(t) = self.permission_poll.borrow_mut().take() {
                     t.invalidate();
                 }
