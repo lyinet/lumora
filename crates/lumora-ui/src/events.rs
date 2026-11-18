@@ -35,6 +35,8 @@ pub enum OverlayMode {
     Record,
     /// Choose a region to read text from (OCR): frozen backdrop, no loupe.
     Text,
+    /// Choose a region for scrolling capture: live backdrop, no loupe.
+    Scroll,
 }
 
 /// Buttons and gestures on a Quick Access card.
@@ -54,6 +56,23 @@ pub enum CardAction {
     Tutorial,
     /// "Subtitles" (recordings): transcribe, or reopen the transcript.
     Subtitles,
+    /// "Trim / GIF…" (recordings): open the trim window.
+    Trim,
+}
+
+/// What the trim window tells the app.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TrimAction {
+    /// A slider moved: show the frame at this time (seconds).
+    Preview(f64),
+    /// "Save Trimmed".
+    Save(lumora_core::clip::TrimRange),
+    /// "Export GIF…" with the window's options.
+    ExportGif { range: lumora_core::clip::TrimRange, width: lumora_core::clip::GifWidth, fps: u32 },
+    /// Cancel the running export.
+    Cancel,
+    /// The window closed (the app cancels any export and drops it).
+    Closed,
 }
 
 /// What the transcript window tells the app. Each carries the transcript
@@ -64,6 +83,12 @@ pub enum TranscriptAction {
     ExportVtt(Box<lumora_core::transcript::Transcript>),
     CopyChapters(Box<lumora_core::transcript::Transcript>),
     CopySummary(Box<lumora_core::transcript::Transcript>),
+    /// Burn the subtitles into a copy of the movie with this style.
+    BurnIn(Box<lumora_core::transcript::Transcript>, lumora_core::transcript::burn::SubtitleStyle),
+    /// Cancel the running burn-in.
+    CancelBurn,
+    /// The burn-in style controls changed (the app saves them).
+    SubtitleStyle(lumora_core::transcript::burn::SubtitleStyle),
     /// The window closed (the app saves `.transcript.json` and drops it).
     Closed(Box<lumora_core::transcript::Transcript>),
 }
@@ -196,6 +221,36 @@ impl std::fmt::Debug for TextAiRequest {
     }
 }
 
+/// A thumbnail the history window needs: the app renders it off the main
+/// thread (cached on disk under `key`) and answers with
+/// `HistoryWindow::set_thumbnail`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThumbRequest {
+    pub key: String,
+    pub path: std::path::PathBuf,
+    pub kind: lumora_core::history::ItemKind,
+}
+
+/// What the capture history window tells the app. Paths name an item by
+/// its primary file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HistoryAction {
+    /// Reopen in the editor (its `.lumora` when there is one); recordings
+    /// open in the default player.
+    Reopen(std::path::PathBuf),
+    Copy(std::path::PathBuf),
+    Reveal(std::path::PathBuf),
+    /// Move to the Trash (the app confirms first).
+    Delete(std::path::PathBuf),
+    /// Open the trim / GIF window (recordings).
+    Trim(std::path::PathBuf),
+    /// Move everything older than the retention setting to the Trash (the
+    /// app confirms first).
+    TrashExpired,
+    NeedThumbnails(Vec<ThumbRequest>),
+    Closed,
+}
+
 /// Onboarding panel buttons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnboardingAction {
@@ -229,6 +284,10 @@ pub enum UiEvent {
     CountdownFinished,
     CountdownCancelled,
     StopRecording,
+    /// Scrolling capture control: Done (or ↩) finishes, Cancel (or Esc)
+    /// throws the frames away.
+    ScrollCaptureDone,
+    ScrollCaptureCancel,
     SettingsChanged(Box<Settings>),
     /// An editor's beautify panel changed the style ("remember last"): the
     /// app stores it in `Settings::beautify`, saves, and pushes it to the
@@ -253,6 +312,13 @@ pub enum UiEvent {
         id: u64,
         action: TranscriptAction,
     },
+    /// A trim window (`id` from `TrimWindow::show`).
+    Trim {
+        id: u64,
+        action: TrimAction,
+    },
+    /// The capture history window.
+    History(HistoryAction),
     /// The AI tab needs the stored API key for `provider`; the app reads
     /// the Keychain and answers with `SettingsWindow::set_ai_key`.
     AiKeyRequested(lumora_core::ai::AiProvider),

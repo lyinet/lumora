@@ -30,7 +30,11 @@ mod esc_window;
 #[cfg(target_os = "macos")]
 pub mod events;
 #[cfg(target_os = "macos")]
+pub mod history_window;
+#[cfg(target_os = "macos")]
 pub mod icon;
+#[cfg(target_os = "macos")]
+pub mod keystroke_hud;
 #[cfg(target_os = "macos")]
 pub mod onboarding;
 #[cfg(target_os = "macos")]
@@ -42,6 +46,8 @@ pub mod quick_access;
 #[cfg(target_os = "macos")]
 pub mod recording_hud;
 #[cfg(target_os = "macos")]
+pub mod scroll_hud;
+#[cfg(target_os = "macos")]
 pub mod settings_window;
 #[cfg(target_os = "macos")]
 pub mod shutter;
@@ -51,6 +57,8 @@ pub mod text_result;
 pub mod toast;
 #[cfg(target_os = "macos")]
 pub mod transcript_window;
+#[cfg(target_os = "macos")]
+pub mod trim_window;
 #[cfg(target_os = "macos")]
 pub mod tutorial_window;
 #[cfg(target_os = "macos")]

@@ -16,10 +16,11 @@ use objc2::runtime::{Bool, NSObjectProtocol, ProtocolObject};
 use objc2::{define_class, msg_send, sel, AnyThread, DefinedClass};
 use objc2_av_foundation::{
     AVAuthorizationStatus, AVCaptureAudioDataOutput, AVCaptureAudioDataOutputSampleBufferDelegate, AVCaptureConnection,
-    AVCaptureDevice, AVCaptureDeviceInput, AVCaptureOutput, AVCaptureSession, AVMediaTypeAudio,
+    AVCaptureDevice, AVCaptureDeviceDiscoverySession, AVCaptureDeviceInput, AVCaptureDevicePosition,
+    AVCaptureDeviceTypeExternal, AVCaptureDeviceTypeMicrophone, AVCaptureOutput, AVCaptureSession, AVMediaTypeAudio,
 };
 use objc2_core_media::{CMClock, CMSampleBuffer, CMSampleTimingInfo, CMSyncConvertTime, CMTime};
-use objc2_foundation::{NSDictionary, NSNumber, NSObject, NSString};
+use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSObject, NSString};
 use objc2_screen_capture_kit::SCStreamConfiguration;
 
 use crate::{CaptureError, SendBox};
@@ -42,16 +43,31 @@ pub enum MicPermission {
     NotDetermined,
 }
 
-/// Connected microphones, in system order.
+/// Connected microphones: built-in / Continuity mics first, then external
+/// (USB, Bluetooth, aggregate) devices, via `AVCaptureDeviceDiscoverySession`
+/// (the `Microphone` + `External` device types are macOS 14+, our minimum).
 pub fn devices() -> Vec<MicDevice> {
     let Some(audio) = (unsafe { AVMediaTypeAudio }) else { return Vec::new() };
-    // SAFETY: class method with a valid media type.
-    #[allow(deprecated)] // DiscoverySession needs per-OS device types; this lists them all.
-    let list = unsafe { AVCaptureDevice::devicesWithMediaType(audio) };
-    list.iter()
+    // SAFETY: device-type constants exist on macOS 14+; the discovery session
+    // is created and read on this thread with valid arguments.
+    let list = unsafe {
+        let types = NSArray::from_slice(&[AVCaptureDeviceTypeMicrophone, AVCaptureDeviceTypeExternal]);
+        AVCaptureDeviceDiscoverySession::discoverySessionWithDeviceTypes_mediaType_position(
+            &types,
+            Some(audio),
+            AVCaptureDevicePosition::Unspecified,
+        )
+        .devices()
+    };
+    let mut out: Vec<MicDevice> = Vec::new();
+    for d in list.iter() {
         // SAFETY: read-only properties of a valid device.
-        .map(|d| unsafe { MicDevice { id: d.uniqueID().to_string(), name: d.localizedName().to_string() } })
-        .collect()
+        let dev = unsafe { MicDevice { id: d.uniqueID().to_string(), name: d.localizedName().to_string() } };
+        if !out.iter().any(|m| m.id == dev.id) {
+            out.push(dev);
+        }
+    }
+    out
 }
 
 /// Current microphone (TCC) authorisation.

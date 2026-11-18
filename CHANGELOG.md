@@ -6,6 +6,91 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-18 (prerelease, not yet hardware-tested)
+
+### Added
+- **Capture history window** (<kbd>⌥⇧H</kbd>, or **Capture History…** in the
+  menu bar): a thumbnail grid of the screenshots, recordings and `.lumora`
+  documents in your captures folder, newest first. Filter by type (All,
+  Screenshots, Recordings, Editable), search file names and the text
+  recognised in screenshots, and per item Open in Editor (the `.lumora` when
+  there is one; recordings play), Copy, Show in Finder and Move to Trash
+  (with confirmation). Clicking a thumbnail reopens it; Esc / ⌘W close the
+  window; an empty folder shows an explanation instead of a blank grid.
+  Only Lumora's files are listed: `.lumora` documents, PNGs with a
+  `.lumora` or a name matching the file-name template, movies with a click
+  log / steps / transcript or a matching name.
+- History index `~/Library/Application Support/Lumora/history.json`
+  (versioned schema with migration steps; a corrupt or newer file is moved
+  to `history.json.bak` and rebuilt from a scan) caching type, path, date,
+  size, dimensions and OCR text. Text is recognised on this Mac in the
+  background while the window is open, and reused from auto-redaction /
+  Smart Redact / AI Writing when a capture already had it. Thumbnails are
+  made off the main thread and cached in `Thumbnails/`; stale ones are
+  pruned.
+- **Keystroke HUD for recordings** (Settings → Recording, off by default):
+  a pill inside the recorded area shows shortcuts (`⇧⌘4`, `⌘Z ×3`) and
+  special keys (↩ ⇥ ⌫ ⌦ ⎋ arrows, F1–F12), merges repeats, fades after
+  about 1.2 s and is included in the video like the click ripples.
+  Position: bottom center (default), bottom left, bottom right or top
+  center. Plain typing (letters, digits, space — with or without ⇧) is
+  never shown, events are skipped while secure input is on, and nothing is
+  stored. A listen-only session event tap exists only while recording; it
+  needs Input Monitoring, which is requested when missing — the recording
+  goes ahead without keystrokes and a toast explains how to allow it.
+- **Trim and GIF export for recordings** — **Trim / GIF…** on a
+  recording's Quick Access card and in the capture history opens a trim
+  window: a preview frame, Start / End sliders with times, and the clip
+  length. **Save Trimmed** exports the range with `AVAssetExportSession`
+  (passthrough, so no re-encode; highest quality when passthrough isn't
+  offered) to `<name> (trimmed).<ext>` next to a saved recording, or
+  replaces a temporary one in place. The click log (`.events.json`) and
+  transcript are shifted to the new timeline (segments and chapters
+  clipped to the range); tutorial steps are not carried over. **Export
+  GIF…** uses the same range at 480 / 640 / 800 px or the original width
+  and 10 / 15 / 20 fps, with a size estimate; frames come from
+  `AVAssetImageGenerator` and are written by ImageIO (loops forever,
+  drift-free per-frame delays, at most 1200 frames). Both exports run off
+  the main thread with a progress bar and Cancel.
+- **Burn In Subtitles…** in the subtitles window (enabled when there are
+  subtitle lines): writes `<name> (subtitled).<ext>` next to the recording
+  (the captures folder for a temporary one) with the edited subtitles drawn
+  into the video, then shows it in Quick Access. Built with an
+  `AVMutableComposition` and a Core Animation overlay
+  (`AVVideoCompositionCoreAnimationTool`: one text layer per cue, shown only
+  during its time), exported at the highest quality with the audio kept;
+  runs off the main thread with a progress bar, Cancel and toasts. Style in
+  the window's bottom bar, remembered in `[transcribe]`: size Small /
+  Medium / Large (scaled to the video), position Bottom / Top, and a
+  rounded semi-black background box (default Medium, Bottom, box on); white
+  text, at most two lines per cue (CJK-aware wrapping; longer lines become
+  timed sub-cues).
+- **Scrolling capture** (<kbd>⌥⇧S</kbd>, or **Scrolling Capture** in the
+  menu bar): choose an area on the live screen, then scroll slowly. The
+  area is screenshotted every 150 ms and frames that moved are stitched
+  (row-hash matching over the overlap; sticky headers / footers detected
+  and kept once; scrolling up ignored). A non-activating control panel,
+  left out of the frames, shows the frame count with Done (↩, or the
+  shortcut again) and Cancel (Esc). Losing track of the scroll or reaching
+  20,000 px stops with a toast and keeps what was stitched. No synthetic
+  scroll events, so no Accessibility permission. The result goes through
+  the normal capture pipeline (Quick Access, save / copy, history, editor).
+- Settings → General → **Keep history** (everything / 30 days / 90 days).
+  Older captures are only offered for the Trash from a banner in the
+  history window, after a confirmation; nothing is ever deleted outright.
+
+### Changed
+- The microphone list (Settings → Recording) comes from
+  `AVCaptureDeviceDiscoverySession` (built-in / Continuity microphones,
+  then external ones) instead of the deprecated `devicesWithMediaType:`.
+
+### Fixed
+- An open Settings window no longer overwrites the subtitle burn-in style
+  chosen in a subtitles window (it now gets the new style, like beautify).
+- A shortcut cleared in Settings → Shortcuts came back as the default on
+  the next launch (the cleared key was omitted from `settings.toml`); it is
+  now saved as `""` and stays cleared.
+
 ## [0.5.1] — 2026-11-17 (prerelease, polish only, not yet hardware-tested)
 
 ### Changed
@@ -328,7 +413,8 @@ All notable changes to Lumora are documented here. The format follows
 - Screen Recording onboarding with live permission polling and relaunch.
 - Universal bundle script (lipo, codesign, notarytool, create-dmg) and CI.
 
-[Unreleased]: https://github.com/lyinet/lumora/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/lyinet/lumora/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/lyinet/lumora/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/lyinet/lumora/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lyinet/lumora/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lyinet/lumora/compare/v0.3.0...v0.4.0

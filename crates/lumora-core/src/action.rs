@@ -15,16 +15,22 @@ pub enum Action {
     CaptureText,
     RecordScreen,
     OpenFolder,
+    /// The capture history window.
+    History,
+    /// Select an area, then stitch it while the user scrolls.
+    ScrollingCapture,
 }
 
 impl Action {
-    pub const ALL: [Action; 6] = [
+    pub const ALL: [Action; 8] = [
         Action::CaptureArea,
         Action::CaptureFullscreen,
         Action::CaptureWindow,
         Action::CaptureText,
         Action::RecordScreen,
         Action::OpenFolder,
+        Action::History,
+        Action::ScrollingCapture,
     ];
 
     /// The localisation key of the title.
@@ -36,6 +42,8 @@ impl Action {
             Action::CaptureText => Msg::CaptureText,
             Action::RecordScreen => Msg::RecordScreen,
             Action::OpenFolder => Msg::OpenCapturesFolder,
+            Action::History => Msg::CaptureHistory,
+            Action::ScrollingCapture => Msg::ScrollingCapture,
         }
     }
 
@@ -53,6 +61,8 @@ impl Action {
             Action::CaptureText => "⌥⇧2",
             Action::RecordScreen => "⌥⇧R",
             Action::OpenFolder => "⌥⇧O",
+            Action::History => "⌥⇧H",
+            Action::ScrollingCapture => "⌥⇧S",
         }
     }
 
@@ -85,5 +95,10 @@ mod tests {
             assert!(!a.msg().text(crate::i18n::Language::ZhHans).is_empty());
         }
         assert_eq!(Action::CaptureText.msg().text(crate::i18n::Language::En), "Capture Text");
+        assert_eq!(Action::History.default_shortcut(), "⌥⇧H");
+        // Appended last, so earlier actions keep their Carbon hotkey ids.
+        assert_eq!(Action::History.id(), 7);
+        assert_eq!(Action::ScrollingCapture.default_shortcut(), "⌥⇧S");
+        assert_eq!(Action::ScrollingCapture.id(), 8);
     }
 }

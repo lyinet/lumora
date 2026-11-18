@@ -118,6 +118,7 @@ impl App {
                 on_main(move |app| match result {
                     Ok(png) => {
                         log::info!("saved document {}", path.display());
+                        app.history_note(path.clone());
                         for rec in app.captures.borrow_mut().values_mut() {
                             if lumora_doc::doc_path_for(&rec.file) == path {
                                 if let Some(ed) = rec.editable.as_mut().filter(|e| e.png.is_none()) {

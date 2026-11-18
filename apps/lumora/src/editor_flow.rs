@@ -95,6 +95,7 @@ impl App {
                 on_main(move |app| match result {
                     Ok(()) => {
                         log::info!("saved annotated {}", file.display());
+                        app.history_note(file.clone());
                         if notify {
                             app.notify(Notice::Success(Msg::ToastSaved), None);
                         }

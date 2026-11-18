@@ -35,7 +35,7 @@
 <br>
 
 > [!NOTE]
-> **Lumora is in early alpha (v0.5).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested — but it **has not been run on real hardware yet**, so expect rough edges. Hardware bring-up is the next milestone. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
+> **Lumora is in early alpha (v0.6).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested — but it **has not been run on real hardware yet**, so expect rough edges. Hardware bring-up is the next milestone. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
 
 ## Features
 
@@ -79,8 +79,12 @@
 - **OCR actions** — after Capture Text (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>2</kbd>) copies the text, a small floating panel offers Copy, Summarize, Translate (English / 简体中文), As Table, As Code and Checklist, streamed into a result sheet with Copy, Stop and Retry. Summarize and Translate use AI Writing; the rest work without it.
 - **Screenshot → table / code** — rebuild a table from a screenshot on your Mac (rows and columns recovered from the text positions) and copy it as Markdown or CSV, or turn a screenshot of code back into code with its indentation restored. With AI Writing on, AI refines the on-device result; the editor's AI menu has Extract table and Extract code too.
 - **Click ripples** — while recording, every click draws a springy ring (blue for left, orange for right) that appears in the video, while the border, stop button and toasts stay out of it. Toggle it in Settings → Recording. Each click is also logged with its time, position and app to a `<movie>.events.json` file next to the video, ready for step-by-step tutorials.
+- **Keystroke HUD** — optional (Settings → Recording, off by default): shortcuts such as <kbd>⇧</kbd><kbd>⌘</kbd><kbd>4</kbd> and keys such as ↩ ⌫ ← appear in a small pill in the video (bottom center, bottom left / right or top center), repeats merge into `×N`, and it fades after about a second. Plain typing is never shown, nothing is shown while a password field has secure input on, and no keystroke is ever saved. Needs Input Monitoring; without it the recording simply goes ahead without keystrokes.
 - **Recording → tutorial** — click **Make Tutorial** on a recording's Quick Access card (or **Make Tutorial from Recording…** in the menu bar) and Lumora turns the clicks into a step-by-step guide: a frame just after each click with a highlight ring, cropped around the pointer, titled from the text next to it (read on your Mac). With AI on, the steps are written by your provider from text only — app, window title and nearby words, never the frames. Edit or delete steps, then export Markdown, a single self-contained HTML page (light and dark), or copy Markdown.
-- **Subtitles, summary and chapters** — click **Subtitles** on a recording's Quick Access card (or **Transcribe Recording…** in the menu bar). Speech is recognised on your Mac with Apple Speech by default (strictly on-device unless you allow Apple's servers), or by your AI provider's Whisper-compatible endpoint (audio up to 25 MB). Choose the spoken language (Chinese, English or the app's language) and the audio source (microphone, system audio or both) in Settings → Recording. Lumora then writes a short summary and chapters — by AI when it's on (text only), otherwise locally from pauses and clicks. Edit the lines (<kbd>Esc</kbd> finishes an edit, a second <kbd>Esc</kbd> closes the window; long recordings open instantly), then export SRT or WebVTT, or copy the chapters (YouTube-style) and the summary. Everything is kept in `<movie>.transcript.json` and reopens with your edits.
+- **Trim and GIF** — click **Trim / GIF…** (scissors) on a recording's Quick Access card or in the capture history. Drag Start and End (the preview follows), then **Save Trimmed** — a saved recording gets a new `<name> (trimmed)` copy next to it, a temporary one is trimmed in place; the click log and subtitles are shifted to match (tutorial steps are not kept). **Export GIF…** uses the same range at 480 / 640 / 800 px or the original width and 10 / 15 / 20 fps, shows a size estimate, loops forever and lands next to the recording. Both run in the background with a progress bar and Cancel; trimming doesn't re-encode the video.
+- **Subtitles, summary and chapters** — click **Subtitles** on a recording's Quick Access card (or **Transcribe Recording…** in the menu bar). Speech is recognised on your Mac with Apple Speech by default (strictly on-device unless you allow Apple's servers), or by your AI provider's Whisper-compatible endpoint (audio up to 25 MB). Choose the spoken language (Chinese, English or the app's language) and the audio source (microphone, system audio or both) in Settings → Recording. Lumora then writes a short summary and chapters — by AI when it's on (text only), otherwise locally from pauses and clicks. Edit the lines (<kbd>Esc</kbd> finishes an edit, a second <kbd>Esc</kbd> closes the window; long recordings open instantly), then export SRT or WebVTT, or copy the chapters (YouTube-style) and the summary. **Burn In Subtitles…** draws them into a `<name> (subtitled)` copy of the video (white text, Small / Medium / Large, bottom or top, optional rounded background box — remembered for next time) in the background with a progress bar and Cancel, and shows it in Quick Access. Everything is kept in `<movie>.transcript.json` and reopens with your edits.
+- **Scrolling capture** — press <kbd>⌥</kbd><kbd>⇧</kbd><kbd>S</kbd> (or **Scrolling Capture** in the menu bar), drag over the part of a window that scrolls, then scroll slowly. Lumora screenshots the area a few times a second and stitches the frames that moved into one tall image; sticky headers and footers appear once. A small panel shows the frame count — **Done** (or <kbd>↩</kbd>, or the shortcut again) finishes, **Cancel** (or <kbd>Esc</kbd>) discards. Scrolling back up is ignored; scrolling too fast to line up, or reaching 20,000 px, stops with a note and keeps what was stitched. Lumora never scrolls for you, so no Accessibility permission is needed. The result is a normal capture: Quick Access, copy / save, history and the editor.
+- **Capture history** — press <kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd> (or **Capture History…** in the menu bar) for a grid of every screenshot, recording and `.lumora` document in your captures folder. Filter by type, search file names *and the text in your screenshots* (recognised on your Mac while the window is open), then reopen in the editor (the `.lumora` when there is one, so annotations stay editable), copy, show in Finder or move to the Trash. Only Lumora's own files are listed (by `.lumora` / sidecar or your file-name template), thumbnails are made in the background and cached. An optional retention setting (Settings → General: keep everything, 30 or 90 days) only *offers* to move older captures to the Trash, with confirmation — nothing is ever deleted outright.
 - **Microphone recording on macOS 14+** — record your voice with the screen on macOS 14 as well as 15, from the system default or a microphone you pick in Settings → Recording. Lumora asks for microphone access the first time.
 
 ## Keyboard shortcuts
@@ -94,6 +98,8 @@ Option-Shift avoids clashing with macOS's own <kbd>⇧</kbd><kbd>⌘</kbd><kbd>3
 | Capture window | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>5</kbd> |
 | Record screen (start / stop) | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>R</kbd> |
 | Open captures folder | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>O</kbd> |
+| Capture history | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>H</kbd> |
+| Scrolling capture (start / done) | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>S</kbd> |
 
 | In the capture overlay | Key |
 |---|---|
@@ -156,9 +162,10 @@ Lumora asks for each permission only when a feature first needs it:
 | **Screen Recording** | Every screenshot and recording (required) |
 | **Microphone** | Recording your voice, only when the microphone is turned on in Settings → Recording |
 | **Speech Recognition** | On-device subtitles with Apple Speech, only when you transcribe a recording |
+| **Input Monitoring** | The keystroke HUD while recording, only when it is turned on in Settings → Recording (listen-only; nothing is stored) |
 | **Keychain** | Storing and reading your AI provider's API key (`app.lumora.ai`), only if you use AI features |
 
-No Accessibility or Input Monitoring access is needed. Network requests go only to the AI provider you configure, and only when you use an AI feature or cloud transcription.
+No Accessibility access is needed, and Input Monitoring only for the optional keystroke HUD. Network requests go only to the AI provider you configure, and only when you use an AI feature or cloud transcription.
 
 <details>
 <summary><b>Developing on Linux or in CI</b></summary>
@@ -186,7 +193,9 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
 
 <br>
 
-Settings are stored as TOML at `~/Library/Application Support/Lumora/settings.toml`. Missing keys fall back to defaults, unknown keys are ignored, and a corrupt file is moved aside to `settings.toml.bak`. Logs go to stderr; set `LUMORA_LOG=debug` for more.
+Settings are stored as TOML at `~/Library/Application Support/Lumora/settings.toml`. Missing keys fall back to defaults, unknown keys are ignored, and a corrupt file is moved aside to `settings.toml.bak`. A cleared shortcut is saved as `""` and stays cleared.
+
+The capture history index (file list, dimensions and the text recognised in your screenshots, for search) is `history.json` next to it, with thumbnails in `Thumbnails/`. Both are caches: delete them any time and the next scan rebuilds them; nothing leaves your Mac. Logs go to stderr; set `LUMORA_LOG=debug` for more.
 
 </details>
 
@@ -201,10 +210,10 @@ A Cargo workspace of five crates with a strict dependency direction. Logic that 
 | Crate | What it owns |
 |---|---|
 | [`apps/lumora`](apps/lumora) | The binary: `NSApplication`, status item, hidden main menu, Carbon hotkeys, app state and the capture / record / OCR / redaction / tutorial / transcription flows |
-| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation: overlay, Quick Access, pins, shutter, countdown, recording HUD, settings, onboarding, annotation editor + beautify panel + AI sheet, Capture Text actions panel, click-ripple overlay, tutorial and transcript windows |
+| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation: overlay, Quick Access, pins, shutter, countdown, recording HUD, settings, onboarding, annotation editor + beautify panel + AI sheet, Capture Text actions panel, click-ripple overlay, tutorial, transcript and capture-history windows |
 | [`lumora-ai`](crates/lumora-ai) | OpenAI-compatible streaming chat and `/audio/transcriptions` clients, Keychain key storage |
 | [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit, ImageIO, AVFoundation (incl. `AVCaptureSession` mic on macOS 14), pasteboard, beautify renderer, Vision OCR + face detection, tutorial frame rendering, Apple Speech transcription |
-| [`lumora-core`](crates/lumora-core) | Pure Rust: geometry, springs, selection state machine, snapping, settings, file names, hotkey parsing, layout, recording state machine, beautify model, `.lumora` document format, AI settings / prompts / stream parsing, redaction detectors, table / code extraction, click log, tutorial model + export, transcript (SRT / VTT, chapters, summary), temp-folder cleanup |
+| [`lumora-core`](crates/lumora-core) | Pure Rust: geometry, springs, selection state machine, snapping, settings, file names, hotkey parsing, layout, recording state machine, beautify model, `.lumora` document format, AI settings / prompts / stream parsing, redaction detectors, table / code extraction, click log, tutorial model + export, transcript (SRT / VTT, chapters, summary, burn-in layout), temp-folder cleanup, capture-history index |
 
 Deep dives: [ARCHITECTURE.md](ARCHITECTURE.md) (threading, data flow, coordinate spaces) · [DESIGN.md](DESIGN.md) (colour, shape, type and motion tokens).
 
@@ -219,13 +228,13 @@ Everything below is written, type-checked and unit-tested, but **not yet run on 
 - [x] **v0.5 — AI combo:** Smart Redaction (on-device detection, one-click pixelate / blur, optional AI check); OCR actions panel and screenshot → table / code, local-first; click ripples, click-event log and microphone on macOS 14; recording → step-by-step tutorial; subtitles, summary and chapters (on-device or cloud, SRT / VTT)
 - [x] **v0.5.1 — polish:** PNG clipboard, one OCR pass per capture (AI Writing skips cropped / redacted text), no Keychain prompts on the main thread, sturdier transcript window, clearer subtitle errors, scrollable Settings tabs
 
-**v0.6 — next**
+- [x] **v0.6 — history & recording extras:** capture history window (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>), keystroke HUD, trim + GIF export, burn-in subtitles, scrolling capture (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>S</kbd>)
+
+**v0.7 — next**
 
 - [ ] Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
 - [ ] Developer ID signing + notarization in CI
-- [ ] Capture history window (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>)
-- [ ] Recording extras: keystroke HUD, GIF export + trim, burn-in subtitles
-- [ ] Scrolling capture
+- [ ] Keyboard-layout-aware keystroke labels, scroll-wheel driven scrolling capture, live preview for burned-in subtitles
 
 **Later**
 

@@ -127,7 +127,12 @@ fn audio_type() -> Result<&'static NSString, CaptureError> {
 }
 
 /// Run `session` to completion on its own queue, blocking this thread.
-fn run_export(session: &AVAssetExportSession, cancel: Option<&AtomicBool>) -> Result<(), CaptureError> {
+/// `progress` (0…1) is reported about every 150 ms.
+pub(crate) fn run_export(
+    session: &AVAssetExportSession,
+    cancel: Option<&AtomicBool>,
+    progress: Option<&dyn Fn(f32)>,
+) -> Result<(), CaptureError> {
     let pair = Arc::new((Mutex::new(false), Condvar::new()));
     let signal = Arc::clone(&pair);
     let block = RcBlock::new(move || {
@@ -149,6 +154,11 @@ fn run_export(session: &AVAssetExportSession, cancel: Option<&AtomicBool>) -> Re
             // SAFETY: cancelling a running export is always allowed.
             unsafe { session.cancelExport() };
         }
+        if let Some(report) = progress {
+            // SAFETY: plain property read; thread-safe on a running export.
+            #[allow(deprecated)] // the `states` replacement is macOS 15+.
+            report(unsafe { session.progress() });
+        }
         done = cv.wait_timeout(done, POLL).map_err(|_| CaptureError::Framework("export lock poisoned".into()))?.0;
     }
     drop(done);
@@ -160,7 +170,7 @@ fn run_export(session: &AVAssetExportSession, cancel: Option<&AtomicBool>) -> Re
         Err(CaptureError::Cancelled)
     } else {
         Err(CaptureError::Framework(format!(
-            "audio export failed: {}",
+            "export failed: {}",
             error.map(|e| ns_error(&e)).unwrap_or_else(|| format!("status {}", status.0))
         )))
     }
@@ -186,7 +196,7 @@ fn export_m4a(
         }
         session
     };
-    match run_export(&session, cancel) {
+    match run_export(&session, cancel, None) {
         Ok(()) => Ok(out),
         Err(e) => {
             let _ = std::fs::remove_file(&out);

@@ -11,6 +11,7 @@
 //! charge each character its share of the line (a CJK character costs
 //! `1 / MAX_CJK` of a line, anything else `1 / MAX_LATIN`).
 
+pub mod burn;
 pub mod chapters;
 mod srt;
 
@@ -332,20 +333,30 @@ pub fn normalize(segments: &[Segment]) -> Vec<Segment> {
         }
         let pieces: Vec<String> =
             lines.chunks(MAX_LINES).map(|c| c.iter().fold(String::new(), |acc, l| join_text(&acc, l))).collect();
-        let counts: Vec<usize> =
-            pieces.iter().map(|p| p.chars().filter(|c| !c.is_whitespace()).count().max(1)).collect();
-        let total: usize = counts.iter().sum();
-        let dur = s.duration();
-        let mut t = s.start;
-        let mut acc = 0usize;
-        let last = pieces.len() - 1;
-        for (k, (text, n)) in pieces.into_iter().zip(counts).enumerate() {
-            acc += n;
-            #[allow(clippy::cast_precision_loss)]
-            let end = if k == last { s.end } else { s.start + dur * acc as f64 / total as f64 };
-            out.push(Segment::new(t, end, text));
-            t = end;
-        }
+        out.extend(split_proportional(s.start, s.end, pieces));
+    }
+    out
+}
+
+/// Split `[start, end]` among `pieces` in proportion to each piece's
+/// non-whitespace character count. The last piece ends exactly at `end`.
+pub(crate) fn split_proportional(start: f64, end: f64, pieces: Vec<String>) -> Vec<Segment> {
+    if pieces.is_empty() {
+        return Vec::new();
+    }
+    let counts: Vec<usize> = pieces.iter().map(|p| p.chars().filter(|c| !c.is_whitespace()).count().max(1)).collect();
+    let total: usize = counts.iter().sum();
+    let dur = (end - start).max(0.0);
+    let mut t = start;
+    let mut acc = 0usize;
+    let last = pieces.len() - 1;
+    let mut out = Vec::with_capacity(pieces.len());
+    for (k, (text, n)) in pieces.into_iter().zip(counts).enumerate() {
+        acc += n;
+        #[allow(clippy::cast_precision_loss)]
+        let e = if k == last { end } else { start + dur * acc as f64 / total as f64 };
+        out.push(Segment::new(t, e, text));
+        t = e;
     }
     out
 }

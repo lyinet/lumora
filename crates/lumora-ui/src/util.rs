@@ -649,3 +649,23 @@ pub fn warning_alert(mtm: MainThreadMarker, title: &str, detail: &str) {
     alert.setInformativeText(&NSString::from_str(detail));
     alert.runModal();
 }
+
+/// Ask before something destructive: a modal alert with `confirm` (marked
+/// destructive) and `cancel` buttons. Cancel is the default (Return), so a
+/// stray key press never deletes. Returns `true` only for `confirm`.
+pub fn confirm_alert(mtm: MainThreadMarker, title: &str, detail: &str, confirm: &str, cancel: &str) -> bool {
+    objc2_app_kit::NSApplication::sharedApplication(mtm).activate();
+    let alert = objc2_app_kit::NSAlert::new(mtm);
+    alert.setAlertStyle(objc2_app_kit::NSAlertStyle::Warning);
+    alert.setMessageText(&NSString::from_str(title));
+    alert.setInformativeText(&NSString::from_str(detail));
+    let cancel_button = alert.addButtonWithTitle(&NSString::from_str(cancel));
+    let confirm_button = alert.addButtonWithTitle(&NSString::from_str(confirm));
+    confirm_button.setHasDestructiveAction(true);
+    // The first button (Cancel) keeps Return; the destructive one gets no
+    // key equivalent at all.
+    let _ = cancel_button;
+    confirm_button.setKeyEquivalent(&NSString::from_str(""));
+    // NSAlertSecondButtonReturn: the confirm button was added second.
+    alert.runModal() == objc2_app_kit::NSAlertSecondButtonReturn
+}

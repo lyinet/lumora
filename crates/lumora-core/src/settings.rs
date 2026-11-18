@@ -17,6 +17,7 @@ use crate::beautify::BeautifyStyle;
 use crate::hotkey::Hotkey;
 use crate::i18n::LanguagePref;
 use crate::redact::RedactSettings;
+use crate::transcript::burn::{SubtitlePosition, SubtitleSize, SubtitleStyle};
 
 /// Errors from loading or saving settings.
 #[derive(Debug, Error)]
@@ -44,6 +45,8 @@ pub struct Settings {
     pub redact: RedactSettings,
     /// Subtitles / transcription (v0.5). Missing in older files.
     pub transcribe: Transcribe,
+    /// Capture history (v0.6). Missing in older files.
+    pub history: crate::history::HistorySettings,
 }
 
 /// Which recogniser turns a recording's speech into text.
@@ -114,6 +117,12 @@ pub struct Transcribe {
     /// On-device engine: refuse (instead of using Apple's servers) when the
     /// recogniser can't run locally for the language.
     pub strict_on_device: bool,
+    /// Burned-in subtitle text size (v0.6).
+    pub subtitle_size: SubtitleSize,
+    /// Burned-in subtitles at the bottom or top (v0.6).
+    pub subtitle_position: SubtitlePosition,
+    /// Burned-in subtitles get a semi-black box behind them (v0.6).
+    pub subtitle_box: bool,
 }
 
 /// Default cloud transcription model.
@@ -127,7 +136,24 @@ impl Default for Transcribe {
             audio_source: TranscribeAudio::Mixed,
             cloud_model: DEFAULT_CLOUD_MODEL.to_string(),
             strict_on_device: true,
+            subtitle_size: SubtitleSize::Medium,
+            subtitle_position: SubtitlePosition::Bottom,
+            subtitle_box: true,
         }
+    }
+}
+
+impl Transcribe {
+    /// The burn-in style these settings describe.
+    pub fn subtitle_style(&self) -> SubtitleStyle {
+        SubtitleStyle { size: self.subtitle_size, position: self.subtitle_position, background: self.subtitle_box }
+    }
+
+    /// Remember `style` for the next burn-in.
+    pub fn set_subtitle_style(&mut self, style: SubtitleStyle) {
+        self.subtitle_size = style.size;
+        self.subtitle_position = style.position;
+        self.subtitle_box = style.background;
     }
 }
 
@@ -158,12 +184,47 @@ pub struct General {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Shortcuts {
+    #[serde(with = "shortcut_slot")]
     pub capture_area: Option<Hotkey>,
+    #[serde(with = "shortcut_slot")]
     pub capture_fullscreen: Option<Hotkey>,
+    #[serde(with = "shortcut_slot")]
     pub capture_window: Option<Hotkey>,
+    #[serde(with = "shortcut_slot")]
     pub capture_text: Option<Hotkey>,
+    #[serde(with = "shortcut_slot")]
     pub record_screen: Option<Hotkey>,
+    #[serde(with = "shortcut_slot")]
     pub open_folder: Option<Hotkey>,
+    /// Capture history window (v0.6). Missing in older files → ⌥⇧H.
+    #[serde(with = "shortcut_slot")]
+    pub history: Option<Hotkey>,
+    /// Scrolling capture (v0.6). Missing in older files → ⌥⇧S.
+    #[serde(with = "shortcut_slot")]
+    pub scrolling_capture: Option<Hotkey>,
+}
+
+/// A cleared shortcut is written as `""`, so it stays cleared: an omitted
+/// key would come back as the default on the next launch.
+mod shortcut_slot {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use crate::hotkey::Hotkey;
+
+    pub fn serialize<S: Serializer>(v: &Option<Hotkey>, s: S) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(h) => h.serialize(s),
+            None => s.serialize_str(""),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Hotkey>, D::Error> {
+        let s = String::deserialize(d)?;
+        if s.trim().is_empty() {
+            return Ok(None);
+        }
+        s.parse().map(Some).map_err(serde::de::Error::custom)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -202,6 +263,11 @@ pub struct Recording {
     pub microphone_device: Option<String>,
     /// Draw a ripple at every click while recording (visible in the video).
     pub show_clicks: bool,
+    /// Show a keystroke HUD (shortcuts and special keys) in the video.
+    /// Missing in pre-v0.6 files (defaults off).
+    pub keystroke_hud: bool,
+    /// Where the keystroke HUD sits inside the recorded area.
+    pub keystroke_hud_position: crate::keystroke::HudPosition,
     /// Countdown before recording starts; 0 disables it.
     pub countdown: u32,
     /// Target video bitrate in Mbit/s at 1080p; scaled by pixel count.
@@ -236,6 +302,8 @@ impl Default for Shortcuts {
             capture_text: d(Action::CaptureText),
             record_screen: d(Action::RecordScreen),
             open_folder: d(Action::OpenFolder),
+            history: d(Action::History),
+            scrolling_capture: d(Action::ScrollingCapture),
         }
     }
 }
@@ -249,6 +317,8 @@ impl Shortcuts {
             Action::CaptureText => self.capture_text,
             Action::RecordScreen => self.record_screen,
             Action::OpenFolder => self.open_folder,
+            Action::History => self.history,
+            Action::ScrollingCapture => self.scrolling_capture,
         }
     }
 
@@ -260,6 +330,8 @@ impl Shortcuts {
             Action::CaptureText => &mut self.capture_text,
             Action::RecordScreen => &mut self.record_screen,
             Action::OpenFolder => &mut self.open_folder,
+            Action::History => &mut self.history,
+            Action::ScrollingCapture => &mut self.scrolling_capture,
         };
         *slot = h;
     }
@@ -293,6 +365,8 @@ impl Default for Recording {
             microphone: false,
             microphone_device: None,
             show_clicks: true,
+            keystroke_hud: false,
+            keystroke_hud_position: crate::keystroke::HudPosition::BottomCenter,
             countdown: 3,
             quality_mbps: 12.0,
         }
@@ -436,6 +510,23 @@ mod tests {
     }
 
     #[test]
+    fn subtitle_style_defaults_and_round_trips() {
+        let old = Settings::from_toml("[transcribe]\nengine = \"cloud\"\n").unwrap();
+        assert_eq!(old.transcribe.subtitle_style(), SubtitleStyle::default());
+        let mut s = Settings::default();
+        s.transcribe.set_subtitle_style(SubtitleStyle {
+            size: SubtitleSize::Large,
+            position: SubtitlePosition::Top,
+            background: false,
+        });
+        let t = s.to_toml().unwrap();
+        assert!(t.contains("subtitle_size = \"large\"") && t.contains("subtitle_position = \"top\""));
+        let back = Settings::from_toml(&t).unwrap();
+        assert_eq!(back.transcribe.subtitle_style(), s.transcribe.subtitle_style());
+        assert!(!back.transcribe.subtitle_box);
+    }
+
+    #[test]
     fn transcribe_language_resolves_auto_from_ui() {
         use crate::i18n::Language;
         assert_eq!(TranscribeLanguage::Auto.locale(Language::ZhHans), "zh-CN");
@@ -468,6 +559,24 @@ mod tests {
         assert!(s.capture.text_actions_panel);
         let off = Settings::from_toml("[capture]\ntext_actions_panel = false\n").unwrap();
         assert!(!off.capture.text_actions_panel);
+    }
+
+    #[test]
+    fn keystroke_hud_defaults_off_for_old_files_and_round_trips() {
+        use crate::keystroke::HudPosition;
+        let old = Settings::from_toml("[recording]\nfps = 30\nshow_clicks = false\n").unwrap();
+        assert!(!old.recording.keystroke_hud);
+        assert_eq!(old.recording.keystroke_hud_position, HudPosition::BottomCenter);
+        let mut s = Settings::default();
+        s.recording.keystroke_hud = true;
+        s.recording.keystroke_hud_position = HudPosition::TopCenter;
+        let t = s.to_toml().unwrap();
+        assert!(t.contains("keystroke_hud_position = \"top-center\""));
+        assert_eq!(Settings::from_toml(&t).unwrap(), s);
+        let future =
+            Settings::from_toml("[recording]\nkeystroke_hud = true\nkeystroke_hud_position = \"middle\"\n").unwrap();
+        assert!(future.recording.keystroke_hud);
+        assert_eq!(future.recording.keystroke_hud_position, HudPosition::BottomCenter);
     }
 
     #[test]
@@ -534,10 +643,10 @@ mod tests {
     #[test]
     fn shortcuts_accessors() {
         let mut s = Shortcuts::default();
-        assert_eq!(s.bound().len(), 6);
+        assert_eq!(s.bound().len(), 8);
         s.set(Action::OpenFolder, None);
         assert_eq!(s.get(Action::OpenFolder), None);
-        assert_eq!(s.bound().len(), 5);
+        assert_eq!(s.bound().len(), 7);
     }
 
     #[test]
@@ -610,12 +719,30 @@ mod tests {
                 && text.contains("output_language = \"zh-Hans\""),
             "{text}"
         );
-        assert!(!text.to_lowercase().contains("key"), "no API key in TOML");
+        // (`keystroke_hud*` in [recording] is a display setting, not a key.)
+        let secrets = text.lines().filter(|l| !l.starts_with("keystroke_hud"));
+        assert!(!secrets.into_iter().any(|l| l.to_lowercase().contains("key")), "no API key in TOML");
         assert_eq!(Settings::from_toml(&text).unwrap(), t);
         let c = Settings::from_toml("[ai]\nprovider = \"ollama\"\ntemperature = 5.0\nbase_url = \"\"\n").unwrap();
         assert_eq!(c.ai.base_url, "http://localhost:11434/v1");
         assert_eq!(c.ai.model, "llama3.2");
         assert_eq!(c.ai.temperature, 2.0);
+    }
+
+    #[test]
+    fn v05_files_gain_history_defaults() {
+        use crate::history::Retention;
+        let s = Settings::from_toml("[shortcuts]\nopen_folder = \"⌥⇧O\"\n[recording]\nfps = 30\n").unwrap();
+        assert_eq!(s.history.retention, Retention::KeepAll);
+        assert_eq!(s.shortcuts.history, "⌥⇧H".parse().ok());
+        assert_eq!(s.shortcuts.scrolling_capture, "⌥⇧S".parse().ok());
+        let mut t = Settings::default();
+        t.history.retention = Retention::Days30;
+        t.shortcuts.history = None;
+        let text = t.to_toml().unwrap();
+        assert!(text.contains("[history]") && text.contains("retention = \"30d\""), "{text}");
+        assert!(text.contains("history = \"\""), "a cleared shortcut stays cleared: {text}");
+        assert_eq!(Settings::from_toml(&text).unwrap(), t);
     }
 
     #[test]

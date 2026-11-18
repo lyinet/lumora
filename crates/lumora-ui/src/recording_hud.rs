@@ -34,6 +34,12 @@ impl RecordingBorder {
     /// `area` in AppKit global points. The outline sits just *outside* the
     /// area so it never overlaps recorded pixels.
     pub fn show(mtm: MainThreadMarker, area: Rect) -> Self {
+        Self::show_with(mtm, area, color::RECORD)
+    }
+
+    /// [`show`](Self::show) in another colour (scrolling capture uses the
+    /// accent: nothing is being recorded).
+    pub fn show_with(mtm: MainThreadMarker, area: Rect, stroke: crate::tokens::Rgba) -> Self {
         let pad = size::BORDER_INSET + 2.0;
         let outer = area.inset(-pad, -pad);
         let panel = make_panel(
@@ -45,7 +51,7 @@ impl RecordingBorder {
         let dash = CAShapeLayer::new();
         dash.setPath(Some(&rect_path(Rect::new(1.0, 1.0, outer.width() - 2.0, outer.height() - 2.0))));
         dash.setFillColor(None);
-        dash.setStrokeColor(Some(&cg_color(color::RECORD)));
+        dash.setStrokeColor(Some(&cg_color(stroke)));
         dash.setLineWidth(2.0);
         dash.setLineDashPattern(Some(&NSArray::from_retained_slice(&[
             NSNumber::numberWithDouble(6.0),

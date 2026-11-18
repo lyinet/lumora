@@ -11,6 +11,7 @@
 //! * [`beautify_render`] — draw a capture on a beautify canvas
 //!   (background, shadow, rounded frame, window chrome).
 //! * [`clipboard`] — put a capture on the pasteboard.
+//! * [`burn`] — burn subtitles into a recording (Core Animation overlay).
 //! * [`recorder`] — `SCStream` → `AVAssetWriter` MP4 recording.
 //! * [`mic`] — microphone devices, permission, and the macOS 14 capture path.
 //! * [`ocr`] — on-device text recognition (Vision).
@@ -39,6 +40,10 @@ mod av_sync;
 #[cfg(target_os = "macos")]
 pub mod beautify_render;
 #[cfg(target_os = "macos")]
+pub mod burn;
+#[cfg(target_os = "macos")]
+pub mod clip;
+#[cfg(target_os = "macos")]
 pub mod clipboard;
 #[cfg(target_os = "macos")]
 pub mod content;
@@ -46,6 +51,8 @@ pub mod content;
 pub mod faces;
 #[cfg(target_os = "macos")]
 pub mod image;
+#[cfg(target_os = "macos")]
+pub mod keys;
 #[cfg(target_os = "macos")]
 pub mod mic;
 #[cfg(target_os = "macos")]

@@ -153,6 +153,7 @@ messages! {
     RecordScreen => "Record Screen", "录制屏幕";
     StopRecording => "Stop Recording", "停止录制";
     OpenCapturesFolder => "Open Captures Folder", "打开截图文件夹";
+    CaptureHistoryMenu => "Capture History…", "截图历史…";
     OpenDocumentMenu => "Open…", "打开…";
     SettingsMenu => "Settings…", "设置…";
     PermissionMenu => "Screen Recording Permission…", "屏幕录制权限…";
@@ -258,6 +259,15 @@ messages! {
     MicrophoneDevice => "Microphone device:", "麦克风设备：";
     MicrophoneDefault => "System default", "系统默认设备";
     ShowClicks => "Click ripples", "点击涟漪效果";
+    KeystrokeHud => "Keystrokes (shortcuts and special keys)", "按键提示（快捷键与特殊键）";
+    KeystrokePosition => "Keystroke position:", "按键位置：";
+    PositionBottomCenter => "Bottom center", "底部居中";
+    PositionBottomLeft => "Bottom left", "左下角";
+    PositionBottomRight => "Bottom right", "右下角";
+    PositionTopCenter => "Top center", "顶部居中";
+    KeystrokeHudNote => "Shows shortcuts like ⌘⇧4 and keys like ↩ or ⌫ in the video; plain typing is never shown. Needs Input Monitoring permission.", "在视频中显示 ⌘⇧4 等快捷键和 ↩、⌫ 等按键，普通输入的文字永不显示。需要“输入监控”权限。";
+    ToastKeystrokesUnavailable => "Recording without keystrokes", "本次录制不显示按键";
+    KeystrokesAccessDetail => "Allow Lumora in System Settings → Privacy & Security → Input Monitoring, then start a new recording.", "请在“系统设置 → 隐私与安全性 → 输入监控”中允许 Lumora，然后重新开始录制。";
     Visualize => "Show:", "显示：";
     ToastMicUnavailable => "Recording without microphone", "本次录制不含麦克风声音";
     ErrMicPermission => "Allow Lumora in System Settings › Privacy & Security › Microphone.", "请在“系统设置 › 隐私与安全性 › 麦克风”中允许 Lumora。";
@@ -533,6 +543,92 @@ messages! {
     RedactAiCheck => "Also check with AI (sends text only)", "同时用 AI 检查（仅发送文字）";
     RedactAuto => "Redact new screenshots automatically", "复制 / 保存新截图前自动打码";
     RedactNote => "Detects on this Mac; AI check needs AI Writing on.", "检测在本机完成；AI 检查需先启用 AI 写作。";
+
+    // -- capture history (v0.6) ---------------------------------------------------
+    CaptureHistory => "Capture History", "截图历史";
+    HistoryFilterAll => "All", "全部";
+    HistoryFilterScreenshots => "Screenshots", "截图";
+    HistoryFilterRecordings => "Recordings", "录屏";
+    HistoryFilterDocuments => "Editable", "可编辑";
+    HistorySearchPlaceholder => "Search names and text", "搜索文件名和文字";
+    HistoryCount => "{0} items", "共 {0} 项";
+    HistoryEmptyTitle => "No captures yet", "还没有截图或录屏";
+    HistoryEmptyDetail => "Screenshots and recordings you save appear here.", "保存的截图和录屏会显示在这里。";
+    HistoryNoMatches => "Nothing matches your search", "没有符合搜索条件的项目";
+    HistoryLoading => "Loading history", "正在载入历史记录";
+    HistoryReopen => "Open in Editor", "在编辑器中打开";
+    HistoryPlay => "Play", "播放";
+    HistoryShowInFinder => "Show in Finder", "在访达中显示";
+    HistoryMoveToTrash => "Move to Trash", "移到废纸篓";
+    HistoryShowMore => "Show More", "显示更多";
+    HistoryDeleteTitle => "Move “{0}” to the Trash?", "将“{0}”移到废纸篓？";
+    HistoryDeleteDetail => "Its editable document and recording sidecars go with it. You can put them back from the Trash.",
+        "它的可编辑文档和录屏附属文件也会一起移走，可以从废纸篓中放回。";
+    HistoryRetentionBanner => "{0} captures are older than {1} days.", "有 {0} 项已超过 {1} 天。";
+    HistoryRetentionButton => "Move to Trash…", "移到废纸篓…";
+    HistoryRetentionConfirmTitle => "Move {0} captures older than {1} days to the Trash?", "将超过 {1} 天的 {0} 项移到废纸篓？";
+    HistoryRetentionConfirmDetail => "Their editable documents and recording sidecars go too. You can put them back from the Trash.",
+        "它们的可编辑文档和录屏附属文件也会一起移走，可以从废纸篓中放回。";
+    HistoryKeepAll => "Keep everything", "全部保留";
+    HistoryKeep30 => "30 days", "30 天";
+    HistoryKeep90 => "90 days", "90 天";
+    HistoryRetentionLabel => "Keep history:", "历史保留：";
+    HistoryRetentionNote => "Older captures are only offered for the Trash in the history window, never deleted on their own.",
+        "超期的项目只会在历史窗口中提示移到废纸篓，不会被自动删除。";
+    HistoryTrashFailed => "Couldn’t move to the Trash", "无法移到废纸篓";
+    HistoryTrashFailedDetail => "{0} could not be moved. Nothing was deleted.", "无法移动 {0}，没有删除任何文件。";
+    HistoryMissingFile => "That file is no longer there", "该文件已不存在";
+    HistoryCancel => "Cancel", "取消";
+
+    // -- trim & GIF ---------------------------------------------------------------
+    CardTrim => "Trim / GIF…", "剪辑 / GIF…";
+    HistoryTrim => "Trim or Export GIF…", "剪辑或导出 GIF…";
+    TrimWindowTitle => "Trim Recording", "剪辑录屏";
+    TrimStart => "Start:", "开始：";
+    TrimEnd => "End:", "结束：";
+    TrimLength => "Length: {0} of {1}", "时长：{0}（共 {1}）";
+    TrimSave => "Save Trimmed", "保存剪辑";
+    GifWidthLabel => "GIF width:", "GIF 宽度：";
+    GifWidthOriginal => "Original", "原始尺寸";
+    GifFpsLabel => "Frame rate:", "帧率：";
+    GifFps => "{0} fps", "{0} 帧/秒";
+    GifEstimate => "About {0} · {1} frames · {2}", "约 {0} · {1} 帧 · {2}";
+    GifCapped => "only the first {0} frames", "仅前 {0} 帧";
+    GifExport => "Export GIF…", "导出 GIF…";
+    ClipTrimming => "Trimming…", "正在剪辑…";
+    ClipMakingGif => "Making GIF…", "正在生成 GIF…";
+    ToastTrimDone => "Recording trimmed", "录屏已剪辑";
+    ToastTrimStepsDropped => "{0} — tutorial steps weren’t kept; make them again from the trimmed recording.", "{0} — 教程步骤未保留，请用剪辑后的录屏重新生成。";
+    ToastTrimFailed => "Couldn’t trim the recording", "无法剪辑录屏";
+    ToastTrimNothing => "Move Start or End to choose a shorter part first", "请先拖动开始或结束，选择更短的片段";
+    ToastGifSaved => "GIF saved", "GIF 已保存";
+    ToastGifFailed => "Couldn’t make the GIF", "无法生成 GIF";
+    ToastClipCancelled => "Export cancelled", "已取消导出";
+    ToastClipBusy => "Wait for the current export to finish", "请等待当前导出完成";
+    TranscriptBurnIn => "Burn In Subtitles…", "烧录字幕…";
+    SubtitleSizeLabel => "Size:", "字号：";
+    SubtitleSizeSmall => "Small", "小";
+    SubtitleSizeMedium => "Medium", "中";
+    SubtitleSizeLarge => "Large", "大";
+    SubtitlePositionLabel => "Position:", "位置：";
+    SubtitlePositionBottom => "Bottom", "底部";
+    SubtitlePositionTop => "Top", "顶部";
+    SubtitleBackgroundBox => "Background box", "背景框";
+    ClipBurningSubtitles => "Burning in subtitles…", "正在烧录字幕…";
+    ToastSubtitlesBurned => "Subtitled recording saved", "已保存带字幕的录屏";
+    ToastSubtitlesBurnFailed => "Couldn’t burn in the subtitles", "无法烧录字幕";
+    ToastSubtitlesNone => "There are no subtitles to burn in", "没有可烧录的字幕";
+
+    // -- scrolling capture (v0.6) -------------------------------------------------
+    ScrollingCapture => "Scrolling Capture", "滚动截图";
+    HintScroll => "Drag to choose the area to scroll through  ·  Esc to cancel", "拖动选择要滚动截取的区域  ·  按 Esc 取消";
+    ScrollPrompt => "Scroll slowly…", "请缓慢滚动…";
+    ScrollFrames => "{0} frames", "已截取 {0} 帧";
+    ScrollDone => "Done", "完成";
+    ScrollCancel => "Cancel", "取消";
+    ToastScrollCapped => "Scrolling capture reached its height limit", "滚动截图已达到高度上限";
+    ToastScrollNoOverlap => "Lost track of the scrolling, so the capture stopped there", "无法衔接滚动内容，截图已在此处停止";
+    ToastScrollNoOverlapDetail => "Scroll a little slower next time.", "下次请滚动得慢一些。";
 }
 
 #[cfg(test)]

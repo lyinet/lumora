@@ -48,7 +48,7 @@ fn background() -> dispatch2::DispatchRetained<DispatchQueue> {
 }
 
 impl App {
-    fn shot_options(&self) -> ShotOptions {
+    pub(crate) fn shot_options(&self) -> ShotOptions {
         let s = self.settings.borrow();
         ShotOptions { show_cursor: false, retina: s.capture.retina, window_shadow: s.capture.window_shadow }
     }
@@ -72,7 +72,7 @@ impl App {
             Ok(c) => Arc::new(c),
             Err(e) => return self.fail(e),
         };
-        if mode == OverlayMode::Record {
+        if matches!(mode, OverlayMode::Record | OverlayMode::Scroll) {
             return self.open_overlay(mode, window_only, content, Vec::new());
         }
         // Freeze every display in parallel; open the overlay when all land.
@@ -145,6 +145,9 @@ impl App {
         drop(overlay);
         if mode == OverlayMode::Record {
             return self.on_record_target(&content, target);
+        }
+        if mode == OverlayMode::Scroll {
+            return self.begin_scrolling(&content, target);
         }
         if mode == OverlayMode::Text {
             self.set_mode(Mode::Idle);
@@ -373,7 +376,10 @@ impl App {
                 }
             }
             on_main(move |app| match result {
-                Ok(()) => log::info!("saved {}", file.display()),
+                Ok(()) => {
+                    log::info!("saved {}", file.display());
+                    app.history_note(file);
+                }
                 Err(e) => {
                     log::error!("{e}");
                     // Drop the dangling file URL, unless the user has copied

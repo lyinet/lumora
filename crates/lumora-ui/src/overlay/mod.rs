@@ -113,6 +113,7 @@ impl OverlayController {
         let hint = tr(match (config.mode, config.window_only) {
             (OverlayMode::Record, _) => Msg::HintRecord,
             (OverlayMode::Text, _) => Msg::HintText,
+            (OverlayMode::Scroll, _) => Msg::HintScroll,
             (OverlayMode::Capture, true) => Msg::HintWindow,
             (OverlayMode::Capture, false) => Msg::HintCapture,
         });
@@ -127,7 +128,7 @@ impl OverlayController {
                         OverlayMode::Capture | OverlayMode::Text => {
                             frozen.iter().find(|f| f.id == id).map(|f| &*f.image)
                         }
-                        OverlayMode::Record => None,
+                        OverlayMode::Record | OverlayMode::Scroll => None,
                     };
                     let appkit_frame = screen.frame();
                     let panel = make_panel(
@@ -393,7 +394,7 @@ impl Inner {
                 let name = if w.app_name.is_empty() { String::new() } else { format!("{}  ·  ", w.app_name) };
                 make_pill(format!("{name}{}", format::dimensions(pw, ph)), hl, screen)
             })
-        } else if !self.config.show_magnifier || self.config.mode == OverlayMode::Record {
+        } else if !self.config.show_magnifier || matches!(self.config.mode, OverlayMode::Record | OverlayMode::Scroll) {
             self.screen_frame_at(mouse).map(|(screen, scale)| {
                 let x = ((mouse.x - screen.min_x()) * scale) as i64;
                 let y = ((mouse.y - screen.min_y()) * scale) as i64;

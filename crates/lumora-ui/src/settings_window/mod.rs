@@ -446,6 +446,12 @@ impl SettingsWindow {
         self.state.settings.borrow_mut().beautify = style;
     }
 
+    /// Keep the snapshot in step with the subtitle burn-in style changed in
+    /// a subtitles window, so the next edit here doesn't revert it.
+    pub fn set_subtitle_style(&self, style: lumora_core::transcript::burn::SubtitleStyle) {
+        self.state.settings.borrow_mut().transcribe.set_subtitle_style(style);
+    }
+
     /// Mark shortcuts another app already holds: red field outline plus an
     /// explanation under the list.
     pub fn set_unavailable(&self, taken: &[Action]) {
@@ -781,6 +787,20 @@ fn build_general(
         |s| s.general.launch_at_login,
         |s, v| s.general.launch_at_login = v,
     );
+    {
+        use lumora_core::history::Retention;
+        let labels: Vec<&str> = Retention::ALL.iter().map(|r| tr(r.msg())).collect();
+        popup(
+            form,
+            targets,
+            state,
+            tr(Msg::HistoryRetentionLabel),
+            &labels,
+            |s| Retention::ALL.iter().position(|r| *r == s.history.retention).unwrap_or(0),
+            |s, i| s.history.retention = Retention::ALL[i.min(Retention::ALL.len() - 1)],
+        );
+        form.note(tr(Msg::HistoryRetentionNote));
+    }
     let labels: Vec<&str> = LanguagePref::ALL.iter().map(|l| l.label()).collect();
     popup(
         form,
@@ -1028,6 +1048,30 @@ fn build_recording(
         |s| s.recording.show_clicks,
         |s, v| s.recording.show_clicks = v,
     );
+    checkbox(
+        form,
+        targets,
+        state,
+        "",
+        tr(Msg::KeystrokeHud),
+        |s| s.recording.keystroke_hud,
+        |s, v| s.recording.keystroke_hud = v,
+    );
+    popup(
+        form,
+        targets,
+        state,
+        tr(Msg::KeystrokePosition),
+        &[
+            tr(Msg::PositionBottomCenter),
+            tr(Msg::PositionBottomLeft),
+            tr(Msg::PositionBottomRight),
+            tr(Msg::PositionTopCenter),
+        ],
+        |s| s.recording.keystroke_hud_position.index(),
+        |s, i| s.recording.keystroke_hud_position = lumora_core::keystroke::HudPosition::from_index(i),
+    );
+    form.note(tr(Msg::KeystrokeHudNote));
     build_subtitles(form, state, targets);
 }
 

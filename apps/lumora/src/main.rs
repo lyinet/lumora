@@ -13,6 +13,8 @@ mod ai_write_flow;
 mod app;
 #[cfg(target_os = "macos")]
 mod capture_flow;
+#[cfg(target_os = "macos")]
+mod clip_flow;
 mod command;
 #[cfg(target_os = "macos")]
 mod delegate;
@@ -21,6 +23,8 @@ mod doc_flow;
 #[cfg(target_os = "macos")]
 mod editor_flow;
 #[cfg(target_os = "macos")]
+mod history_flow;
+#[cfg(target_os = "macos")]
 mod hotkeys;
 mod logger;
 #[cfg(target_os = "macos")]
@@ -28,7 +32,11 @@ mod record_flow;
 #[cfg(target_os = "macos")]
 mod redact_flow;
 #[cfg(target_os = "macos")]
+mod scroll_flow;
+#[cfg(target_os = "macos")]
 mod status;
+#[cfg(target_os = "macos")]
+mod subtitle_flow;
 #[cfg(target_os = "macos")]
 mod system;
 #[cfg(target_os = "macos")]
