@@ -288,8 +288,9 @@ impl App {
                 }
                 Push::Lost(n) => log::debug!("scrolling capture: frame lined up with nothing ({n} in a row)"),
                 Push::Mismatch => log::info!("scrolling capture: frame of another size skipped"),
-                Push::Appended(rows) => log::debug!("scrolling capture: +{rows} rows ({frames} frames)"),
-                Push::Started | Push::Unchanged | Push::ScrolledUp => {}
+                Push::Appended(rows) => log::debug!("scrolling capture: +{rows} rows below ({frames} frames)"),
+                Push::Prepended(rows) => log::debug!("scrolling capture: +{rows} rows above ({frames} frames)"),
+                Push::Started | Push::Unchanged | Push::Moved => {}
             },
         }
     }
