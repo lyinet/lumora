@@ -155,6 +155,17 @@ impl StatusBar {
     }
 
     /// Re-title every item after a language change.
+    /// Best-effort check that the status item is really on screen. On macOS
+    /// 26 the user can hide it in System Settings → Menu Bar, and a crowded
+    /// menu bar (notch) drops items without telling the app.
+    pub fn appears_visible(&self) -> bool {
+        if !self.item.isVisible() {
+            return false;
+        }
+        let Some(window) = self.item.button(self.mtm).and_then(|b| b.window()) else { return false };
+        window.screen().is_some() && window.occlusionState().contains(objc2_app_kit::NSWindowOcclusionState::Visible)
+    }
+
     pub fn relabel(&self) {
         for (action, item) in &self.action_items {
             let title = if *action == Action::History { tr(Msg::CaptureHistoryMenu) } else { action.title() };

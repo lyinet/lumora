@@ -260,7 +260,8 @@ impl App {
         }
     }
 
-    pub fn start(mtm: MainThreadMarker, delegate: &AppDelegate) -> Rc<App> {
+    /// `at_login`: launched as a login item (no launch toast then).
+    pub fn start(mtm: MainThreadMarker, delegate: &AppDelegate, at_login: bool) -> Rc<App> {
         let home = system::home_dir();
         let settings_path = Settings::default_path();
         let settings = settings_path.as_deref().map(Settings::load_or_default).unwrap_or_default();
@@ -324,8 +325,56 @@ impl App {
             // presses Grant Access.
             permission::probe_screen_capture(|_| {});
             app.dispatch(Command::ShowOnboarding);
+        } else if !at_login {
+            // Lumora has no window and no Dock icon: without this a launch
+            // with permission granted looks like "nothing happened".
+            app.schedule_launch_feedback();
         }
         app
+    }
+
+    /// Shortly after launch (once the menu bar has laid the item out), say
+    /// that Lumora runs in the menu bar and list the main shortcuts. If the
+    /// status item looks hidden, say where to turn it on and open Settings
+    /// so there is something to click.
+    fn schedule_launch_feedback(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        lumora_ui::util::schedule_timer(1.2, false, move || {
+            if let Some(app) = weak.upgrade() {
+                app.show_launch_feedback();
+            }
+            false
+        });
+    }
+
+    fn show_launch_feedback(self: &Rc<Self>) {
+        let summary = self.settings.borrow().shortcuts.launch_summary();
+        if self.status.appears_visible() {
+            let detail = summary.unwrap_or_else(|| tr(Msg::ToastRunningNoShortcuts).to_string());
+            log::info!("launch toast: running in the menu bar");
+            self.toasts.show_for(ToastKind::Success, tr(Msg::ToastRunningTitle), Some(&detail), 6.0);
+        } else {
+            log::warn!("status item does not appear to be visible");
+            self.toasts.show_for(
+                ToastKind::Warning,
+                tr(Msg::ToastMenuBarHiddenTitle),
+                Some(tr(Msg::ToastMenuBarHiddenDetail)),
+                10.0,
+            );
+            self.show_settings();
+        }
+    }
+
+    /// The user opened Lumora again (Finder, Spotlight, Launchpad) while it
+    /// is running: show the onboarding without permission, Settings with it.
+    pub fn handle_reopen(self: &Rc<Self>) {
+        log::info!("reopen");
+        if permission::has_screen_recording() {
+            self.show_settings();
+            NSApplication::sharedApplication(self.mtm).activate();
+        } else {
+            self.show_onboarding();
+        }
     }
 
     /// Tell the user how something went, with a toast HUD.

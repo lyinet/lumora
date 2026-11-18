@@ -190,6 +190,12 @@ messages! {
     Relaunch => "Relaunch", "重新启动";
     NotNow => "Not Now", "以后再说";
 
+    // -- launch feedback (v0.6.1) ------------------------------------------------
+    ToastRunningTitle => "Lumora is running in the menu bar", "Lumora 正在菜单栏中运行";
+    ToastRunningNoShortcuts => "Click the Lumora icon in the menu bar to capture.", "点击菜单栏中的 Lumora 图标即可截图。";
+    ToastMenuBarHiddenTitle => "Lumora is running, but its menu bar icon is hidden", "Lumora 正在运行，但菜单栏图标被隐藏了";
+    ToastMenuBarHiddenDetail => "Allow Lumora in System Settings → Menu Bar, or use the shortcuts.", "请在“系统设置”→“菜单栏”中允许 Lumora，或直接使用快捷键。";
+
     // -- install location (v0.6.1) ----------------------------------------------
     LocationTitle => "Move Lumora to the Applications folder?", "要将 Lumora 移到“应用程序”文件夹吗？";
     LocationTranslocated => "macOS is running Lumora from a temporary, read-only copy, so the Screen Recording permission may not stick and Lumora may not appear in System Settings.\n\nMove it to Applications and Lumora reopens from there.",
