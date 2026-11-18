@@ -213,6 +213,27 @@ impl Onboarding {
         self.window.orderFrontRegardless();
     }
 
+    /// One log line about the window: `visible=… key=… occluded=… level=…
+    /// frame=… screen=… app_active=…`, for "the window never shows" reports.
+    pub fn diagnostics(&self, mtm: MainThreadMarker) -> String {
+        let w = &self.window;
+        let f = w.frame();
+        let visible_now = w.occlusionState().contains(objc2_app_kit::NSWindowOcclusionState::Visible);
+        format!(
+            "visible={} key={} on_screen_unoccluded={} level={} frame=({:.0},{:.0} {:.0}x{:.0}) screen={} app_active={}",
+            w.isVisible(),
+            w.isKeyWindow(),
+            visible_now,
+            w.level(),
+            f.origin.x,
+            f.origin.y,
+            f.size.width,
+            f.size.height,
+            w.screen().is_some(),
+            objc2_app_kit::NSApplication::sharedApplication(mtm).isActive(),
+        )
+    }
+
     /// Whether the window is on screen.
     pub fn is_visible(&self) -> bool {
         self.window.isVisible()

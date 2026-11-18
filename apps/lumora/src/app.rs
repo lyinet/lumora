@@ -341,11 +341,21 @@ impl App {
         system::clean_temp_dir(app.settings.borrow().save_folder(&app.home));
 
         if !permission::has_screen_recording() {
-            log::info!("screen recording not granted; showing onboarding");
-            // Registers Lumora in the privacy list even if the user never
-            // presses Grant Access.
-            permission::probe_screen_capture(|_| {});
-            app.dispatch(Command::ShowOnboarding);
+            // Ask macOS right away, without depending on any window: the
+            // request plus a real ScreenCaptureKit query make TCC list
+            // Lumora under Screen & System Audio Recording and show its
+            // prompt (macOS 15/26).
+            let requested = permission::request_screen_recording();
+            log::info!("screen recording not granted; CGRequestScreenCaptureAccess -> {requested}; probing SCK");
+            permission::probe_screen_capture(|ok| log::info!("launch SCK probe finished (ok: {ok})"));
+            // Show the onboarding once launching has fully finished.
+            let weak = Rc::downgrade(&app);
+            lumora_ui::util::schedule_timer(0.3, false, move || {
+                if let Some(app) = weak.upgrade() {
+                    app.dispatch(Command::ShowOnboarding);
+                }
+                false
+            });
         } else if !at_login {
             // Lumora has no window and no Dock icon: without this a launch
             // with permission granted looks like "nothing happened".
@@ -845,11 +855,29 @@ impl App {
             // Never return silently: the panel may be behind other apps.
             log::info!("onboarding already open (visible: {}); bringing it to the front", o.is_visible());
             o.bring_to_front(self.mtm);
+            log::info!("onboarding shown, {}", o.diagnostics(self.mtm));
             return;
         }
         let granted = permission::has_screen_recording();
         log::info!("showing onboarding (granted: {granted})");
-        *self.onboarding.borrow_mut() = Some(Onboarding::show(self.mtm, self.sink.clone(), granted));
+        let onboarding = Onboarding::show(self.mtm, self.sink.clone(), granted);
+        log::info!("onboarding shown, {}", onboarding.diagnostics(self.mtm));
+        *self.onboarding.borrow_mut() = Some(onboarding);
+        // Re-check once things settle; if the window still isn't up, push
+        // it to the front again and say so in the log.
+        let weak = Rc::downgrade(self);
+        lumora_ui::util::schedule_timer(1.0, false, move || {
+            if let Some(app) = weak.upgrade() {
+                if let Some(o) = app.onboarding.borrow().as_ref() {
+                    if !o.is_visible() {
+                        log::warn!("onboarding not visible after 1 s; ordering front again");
+                        o.bring_to_front(app.mtm);
+                    }
+                    log::info!("onboarding after 1 s: {}", o.diagnostics(app.mtm));
+                }
+            }
+            false
+        });
         if let Some(t) = self.permission_poll.borrow_mut().take() {
             t.invalidate();
         }
