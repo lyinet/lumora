@@ -658,6 +658,7 @@ messages! {
     ToastScrollCapped => "Scrolling capture reached its height limit", "滚动截图已达到高度上限";
     ToastScrollNoOverlap => "Lost track of the scrolling, so the capture stopped there", "无法衔接滚动内容，截图已在此处停止";
     ToastScrollNoOverlapDetail => "Scroll a little slower next time.", "下次请滚动得慢一些。";
+    ToastScrollStopped => "Scrolling capture stopped: the screen could not be captured", "滚动截图已停止：无法截取屏幕";
 }
 
 #[cfg(test)]

@@ -589,7 +589,7 @@ impl App {
             UiEvent::CountdownFinished => self.on_countdown_finished(),
             UiEvent::CountdownCancelled => self.cancel_recording_setup(),
             UiEvent::StopRecording => self.stop_recording(),
-            UiEvent::ScrollCaptureDone => self.finish_scrolling_capture(),
+            UiEvent::ScrollCaptureDone => self.scroll_done_pressed(),
             UiEvent::ScrollCaptureCancel => self.cancel_scrolling_capture(),
             UiEvent::SettingsChanged(s) => self.apply_settings(*s),
             UiEvent::BeautifyChanged { from, style } => self.on_beautify_changed(from, *style),

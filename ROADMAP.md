@@ -95,6 +95,15 @@
 - ✅ Scrolling capture (⌥⇧S): area screenshots while you scroll, stitched
   with sticky header / footer detection.
 
+## v0.6.2 — real-Mac fixes (2026-11-18)
+
+- ✅ Click ripples drawn at the mirrored y (top-down layer-hosting views for
+  every overlay: ripples, keystroke HUD, recording border, shutter,
+  countdown).
+- ✅ Scrolling capture no longer finishes before you scroll (in-place
+  changes skipped, restart before the first scroll, lost-frame run and
+  retried frame errors after it, every end logged).
+
 ## v0.7 — make it real on hardware, signing
 
 - Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
