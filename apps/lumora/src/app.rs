@@ -319,6 +319,10 @@ impl App {
         system::clean_temp_dir(app.settings.borrow().save_folder(&app.home));
 
         if !permission::has_screen_recording() {
+            log::info!("screen recording not granted; showing onboarding");
+            // Registers Lumora in the privacy list even if the user never
+            // presses Grant Access.
+            permission::probe_screen_capture(|_| {});
             app.dispatch(Command::ShowOnboarding);
         }
         app
@@ -730,9 +734,21 @@ impl App {
     fn on_onboarding(self: &Rc<Self>, action: OnboardingAction) {
         match action {
             OnboardingAction::RequestAccess => {
-                if !permission::request_screen_recording() {
-                    system::open_url(permission::SCREEN_RECORDING_SETTINGS_URL);
+                if permission::request_screen_recording() {
+                    log::info!("screen recording already granted");
+                    return;
                 }
+                // CGRequestScreenCaptureAccess alone may neither prompt nor
+                // list the app on macOS 15/26: also ask ScreenCaptureKit for
+                // content so TCC registers Lumora, then open the pane.
+                log::info!("requesting screen recording access");
+                permission::probe_screen_capture(|ok| {
+                    on_main(move |_| {
+                        if !ok {
+                            system::open_url(permission::SCREEN_RECORDING_SETTINGS_URL);
+                        }
+                    })
+                });
             }
             OnboardingAction::OpenSystemSettings => system::open_url(permission::SCREEN_RECORDING_SETTINGS_URL),
             OnboardingAction::Relaunch => system::relaunch(self.mtm),
