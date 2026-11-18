@@ -47,6 +47,8 @@ pub mod faces;
 #[cfg(target_os = "macos")]
 pub mod image;
 #[cfg(target_os = "macos")]
+pub mod keys;
+#[cfg(target_os = "macos")]
 pub mod mic;
 #[cfg(target_os = "macos")]
 pub mod ocr;

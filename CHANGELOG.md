@@ -26,6 +26,16 @@ All notable changes to Lumora are documented here. The format follows
   Smart Redact / AI Writing when a capture already had it. Thumbnails are
   made off the main thread and cached in `Thumbnails/`; stale ones are
   pruned.
+- **Keystroke HUD for recordings** (Settings → Recording, off by default):
+  a pill inside the recorded area shows shortcuts (`⇧⌘4`, `⌘Z ×3`) and
+  special keys (↩ ⇥ ⌫ ⌦ ⎋ arrows, F1–F12), merges repeats, fades after
+  about 1.2 s and is included in the video like the click ripples.
+  Position: bottom center (default), bottom left, bottom right or top
+  center. Plain typing (letters, digits, space — with or without ⇧) is
+  never shown, events are skipped while secure input is on, and nothing is
+  stored. A listen-only session event tap exists only while recording; it
+  needs Input Monitoring, which is requested when missing — the recording
+  goes ahead without keystrokes and a toast explains how to allow it.
 - Settings → General → **Keep history** (everything / 30 days / 90 days).
   Older captures are only offered for the Trash from a banner in the
   history window, after a confirmation; nothing is ever deleted outright.

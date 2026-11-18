@@ -236,6 +236,11 @@ pub struct Recording {
     pub microphone_device: Option<String>,
     /// Draw a ripple at every click while recording (visible in the video).
     pub show_clicks: bool,
+    /// Show a keystroke HUD (shortcuts and special keys) in the video.
+    /// Missing in pre-v0.6 files (defaults off).
+    pub keystroke_hud: bool,
+    /// Where the keystroke HUD sits inside the recorded area.
+    pub keystroke_hud_position: crate::keystroke::HudPosition,
     /// Countdown before recording starts; 0 disables it.
     pub countdown: u32,
     /// Target video bitrate in Mbit/s at 1080p; scaled by pixel count.
@@ -330,6 +335,8 @@ impl Default for Recording {
             microphone: false,
             microphone_device: None,
             show_clicks: true,
+            keystroke_hud: false,
+            keystroke_hud_position: crate::keystroke::HudPosition::BottomCenter,
             countdown: 3,
             quality_mbps: 12.0,
         }
@@ -508,6 +515,24 @@ mod tests {
     }
 
     #[test]
+    fn keystroke_hud_defaults_off_for_old_files_and_round_trips() {
+        use crate::keystroke::HudPosition;
+        let old = Settings::from_toml("[recording]\nfps = 30\nshow_clicks = false\n").unwrap();
+        assert!(!old.recording.keystroke_hud);
+        assert_eq!(old.recording.keystroke_hud_position, HudPosition::BottomCenter);
+        let mut s = Settings::default();
+        s.recording.keystroke_hud = true;
+        s.recording.keystroke_hud_position = HudPosition::TopCenter;
+        let t = s.to_toml().unwrap();
+        assert!(t.contains("keystroke_hud_position = \"top-center\""));
+        assert_eq!(Settings::from_toml(&t).unwrap(), s);
+        let future =
+            Settings::from_toml("[recording]\nkeystroke_hud = true\nkeystroke_hud_position = \"middle\"\n").unwrap();
+        assert!(future.recording.keystroke_hud);
+        assert_eq!(future.recording.keystroke_hud_position, HudPosition::BottomCenter);
+    }
+
+    #[test]
     fn partial_files_fill_defaults_and_ignore_unknown() {
         let s = Settings::from_toml(
             r#"
@@ -647,7 +672,9 @@ mod tests {
                 && text.contains("output_language = \"zh-Hans\""),
             "{text}"
         );
-        assert!(!text.to_lowercase().contains("key"), "no API key in TOML");
+        // (`keystroke_hud*` in [recording] is a display setting, not a key.)
+        let secrets = text.lines().filter(|l| !l.starts_with("keystroke_hud"));
+        assert!(!secrets.into_iter().any(|l| l.to_lowercase().contains("key")), "no API key in TOML");
         assert_eq!(Settings::from_toml(&text).unwrap(), t);
         let c = Settings::from_toml("[ai]\nprovider = \"ollama\"\ntemperature = 5.0\nbase_url = \"\"\n").unwrap();
         assert_eq!(c.ai.base_url, "http://localhost:11434/v1");

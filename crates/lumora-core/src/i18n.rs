@@ -259,6 +259,15 @@ messages! {
     MicrophoneDevice => "Microphone device:", "麦克风设备：";
     MicrophoneDefault => "System default", "系统默认设备";
     ShowClicks => "Click ripples", "点击涟漪效果";
+    KeystrokeHud => "Keystrokes (shortcuts and special keys)", "按键提示（快捷键与特殊键）";
+    KeystrokePosition => "Keystroke position:", "按键位置：";
+    PositionBottomCenter => "Bottom center", "底部居中";
+    PositionBottomLeft => "Bottom left", "左下角";
+    PositionBottomRight => "Bottom right", "右下角";
+    PositionTopCenter => "Top center", "顶部居中";
+    KeystrokeHudNote => "Shows shortcuts like ⌘⇧4 and keys like ↩ or ⌫ in the video; plain typing is never shown. Needs Input Monitoring permission.", "在视频中显示 ⌘⇧4 等快捷键和 ↩、⌫ 等按键，普通输入的文字永不显示。需要“输入监控”权限。";
+    ToastKeystrokesUnavailable => "Recording without keystrokes", "本次录制不显示按键";
+    KeystrokesAccessDetail => "Allow Lumora in System Settings → Privacy & Security → Input Monitoring, then start a new recording.", "请在“系统设置 → 隐私与安全性 → 输入监控”中允许 Lumora，然后重新开始录制。";
     Visualize => "Show:", "显示：";
     ToastMicUnavailable => "Recording without microphone", "本次录制不含麦克风声音";
     ErrMicPermission => "Allow Lumora in System Settings › Privacy & Security › Microphone.", "请在“系统设置 › 隐私与安全性 › 麦克风”中允许 Lumora。";

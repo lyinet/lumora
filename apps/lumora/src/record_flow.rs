@@ -6,6 +6,11 @@
 //! click overlay (which, unlike the rest of our chrome, is allowed into the
 //! video) and (b) logged; the log is written next to the movie as
 //! `<stem>.events.json` once the file is finalised.
+//!
+//! With the keystroke HUD on (Settings → Recording, off by default), a
+//! listen-only event tap feeds shortcuts and special keys to a pill that is
+//! also allowed into the video. Plain typing is never shown and nothing is
+//! stored; the tap exists only while recording.
 
 use std::cell::{Cell, RefCell};
 use std::path::Path;
@@ -13,6 +18,7 @@ use std::rc::Rc;
 
 use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
 use lumora_capture::content::ShareableContent;
+use lumora_capture::keys::{self, KeyEvent, KeyTap};
 use lumora_capture::mic::{self, MicPermission};
 use lumora_capture::recorder::{self, RecordOptions, Recorder, RecorderEvent};
 use lumora_capture::CaptureError;
@@ -20,16 +26,18 @@ use lumora_core::click_log::{self, AppContext, DisplayGeometry, EventLog, Modifi
 use lumora_core::filename::{render, unique_path, CaptureKind};
 use lumora_core::geometry::{flip_point_y, Point};
 use lumora_core::geometry::{Rect, Size};
+use lumora_core::keystroke::{HudPosition, KeyMods, KeystrokeFeed};
 use lumora_core::recording::{Event, Phase};
 use lumora_core::selection::Target;
 use lumora_ui::click_overlay::{ClickInfo, ClickMonitor, ClickOverlay};
 use lumora_ui::countdown::Countdown;
+use lumora_ui::keystroke_hud::KeystrokeHud;
 use lumora_ui::quick_access::CardContent;
 use lumora_ui::recording_hud::{RecordingBorder, StopControl};
 use lumora_ui::util;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 
-use lumora_core::i18n::Msg;
+use lumora_core::i18n::{tr, Msg};
 
 use crate::app::{on_main, App, CaptureRecord, Mode, Notice, RecordTarget};
 use crate::system;
@@ -39,6 +47,36 @@ pub struct ClickSession {
     _monitor: ClickMonitor,
     overlay: Option<Rc<ClickOverlay>>,
     log: ClickLogData,
+    /// Keystroke HUD + its event tap (when enabled and permitted).
+    keys: Option<KeystrokeSession>,
+}
+
+/// Keystroke HUD for one recording; dropping it removes the tap and panel.
+struct KeystrokeSession {
+    _tap: KeyTap,
+    hud: Rc<KeystrokeHud>,
+}
+
+impl KeystrokeSession {
+    /// `None` when the event tap can't be created (no Input Monitoring).
+    fn start(mtm: objc2::MainThreadMarker, area: Rect, position: HudPosition) -> Option<KeystrokeSession> {
+        let hud = KeystrokeHud::show(mtm, area, position);
+        let feed = RefCell::new(KeystrokeFeed::new());
+        let h = hud.clone();
+        let tap = KeyTap::start(move |e: KeyEvent| {
+            let Ok(mut feed) = feed.try_borrow_mut() else { return };
+            let label = match e {
+                KeyEvent::KeyDown { keycode, flags, .. } => {
+                    feed.key_down(keycode, KeyMods::from_cg_flags(flags), util::now())
+                }
+                KeyEvent::FlagsChanged { flags } => feed.flags_changed(KeyMods::from_cg_flags(flags), util::now()),
+            };
+            if let Some(label) = label {
+                h.display(&label);
+            }
+        })?;
+        Some(KeystrokeSession { _tap: tap, hud })
+    }
 }
 
 impl std::fmt::Debug for ClickSession {
@@ -83,11 +121,15 @@ impl ClickSession {
                 app: app_context_at(point),
             });
         });
-        ClickSession { _monitor: monitor, overlay, log }
+        ClickSession { _monitor: monitor, overlay, log, keys: None }
     }
 
     fn allow_windows(&self) -> Vec<u32> {
-        self.overlay.as_ref().map(|o| o.window_numbers()).unwrap_or_default()
+        let mut v = self.overlay.as_ref().map(|o| o.window_numbers()).unwrap_or_default();
+        if let Some(k) = &self.keys {
+            v.extend(k.hud.window_numbers());
+        }
+        v
     }
 }
 
@@ -203,11 +245,33 @@ impl App {
             true
         });
         self.status.set_recording(Some(0.0));
-        let show = self.settings.borrow().recording.show_clicks;
-        let clicks = Box::new(ClickSession::start(self.mtm, show));
+        let (show, keystrokes, position) = {
+            let r = &self.settings.borrow().recording;
+            (r.show_clicks, r.keystroke_hud, r.keystroke_hud_position)
+        };
+        let mut clicks = Box::new(ClickSession::start(self.mtm, show));
+        if keystrokes {
+            clicks.keys = self.start_keystrokes(target.appkit_frame, position);
+        }
         self.set_mode(Mode::Recording { recorder: None, target, _border: border, stop, timer, clicks });
         // Fetch content *after* our chrome is on screen so it gets excluded.
         ShareableContent::fetch(move |res| on_main(move |app| app.on_content_for_recording(res)));
+    }
+
+    /// Keystroke HUD: needs Input Monitoring. Without it, ask (the system
+    /// prompt appears once) and record without keystrokes — never block.
+    fn start_keystrokes(self: &Rc<Self>, area: Rect, position: HudPosition) -> Option<KeystrokeSession> {
+        let session = if keys::has_input_monitoring() {
+            KeystrokeSession::start(self.mtm, area, position)
+        } else {
+            keys::request_input_monitoring();
+            None
+        };
+        if session.is_none() {
+            log::warn!("keystroke HUD unavailable (Input Monitoring not granted)");
+            self.notify(Notice::Warning(Msg::ToastKeystrokesUnavailable), Some(tr(Msg::KeystrokesAccessDetail).into()));
+        }
+        session
     }
 
     fn on_content_for_recording(self: &Rc<Self>, res: Result<ShareableContent, CaptureError>) {

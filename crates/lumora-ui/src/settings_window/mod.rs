@@ -1042,6 +1042,30 @@ fn build_recording(
         |s| s.recording.show_clicks,
         |s, v| s.recording.show_clicks = v,
     );
+    checkbox(
+        form,
+        targets,
+        state,
+        "",
+        tr(Msg::KeystrokeHud),
+        |s| s.recording.keystroke_hud,
+        |s, v| s.recording.keystroke_hud = v,
+    );
+    popup(
+        form,
+        targets,
+        state,
+        tr(Msg::KeystrokePosition),
+        &[
+            tr(Msg::PositionBottomCenter),
+            tr(Msg::PositionBottomLeft),
+            tr(Msg::PositionBottomRight),
+            tr(Msg::PositionTopCenter),
+        ],
+        |s| s.recording.keystroke_hud_position.index(),
+        |s, i| s.recording.keystroke_hud_position = lumora_core::keystroke::HudPosition::from_index(i),
+    );
+    form.note(tr(Msg::KeystrokeHudNote));
     build_subtitles(form, state, targets);
 }
 
