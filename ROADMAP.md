@@ -81,23 +81,36 @@
   top-anchored Settings tabs; Esc on tutorial / welcome windows; capture
   menu items disabled while recording; localised error details.
 
-## v0.6 — real-Mac bring-up, signing, history, recording extras
+## v0.6 — history, recording extras, scrolling capture (built 2026-11-18, awaiting hardware QA)
 
-- Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
-  for everything v0.1–v0.5 that has only been type-checked (editor,
-  beautify orientation / shadow sign, colour panel, `.lumora` ImageIO /
-  `openURLs` / LaunchServices registration, recording incl. the macOS 14
-  mic path and click overlay, AI sheet and Keychain access, Capture Text
-  panel focus, tutorial keyframes, Speech permission and transcription).
-- Developer ID signing + notarization in CI (stable code identity, so
-  Screen Recording and Keychain trust survive updates).
 - ✅ Capture history window (⌥⇧H): browse, filter, search (file names +
   on-device OCR text), reopen, copy, reveal and trash past captures and
   their `.lumora` documents; optional 30 / 90-day retention that only
-  offers the Trash (built 2026-11-17, awaiting hardware QA).
-- Recording extras: keystroke HUD (needs Input Monitoring / Accessibility
-  permission — opt-in), GIF export and trim on the card, burn-in subtitles.
-- Scrolling capture.
+  offers the Trash.
+- ✅ Keystroke HUD for recordings (opt-in, Input Monitoring, listen-only
+  tap; plain typing and secure input never shown, nothing stored).
+- ✅ Microphone list via `AVCaptureDeviceDiscoverySession`.
+- ✅ Trim (passthrough) and GIF export from the recording card and history.
+- ✅ Burn-in subtitles with size / position / box style kept in Settings.
+- ✅ Scrolling capture (⌥⇧S): area screenshots while you scroll, stitched
+  with sticky header / footer detection.
+
+## v0.7 — make it real on hardware, signing
+
+- Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
+  for everything v0.1–v0.6 that has only been type-checked (editor,
+  beautify orientation / shadow sign, colour panel, `.lumora` ImageIO /
+  `openURLs` / LaunchServices registration, recording incl. the macOS 14
+  mic path, click overlay and keystroke HUD, AI sheet and Keychain access,
+  Capture Text panel focus, tutorial keyframes, Speech permission and
+  transcription, history window, trim / GIF and burn-in exports, scrolling
+  capture stitching).
+- Developer ID signing + notarization in CI (stable code identity, so
+  Screen Recording, Input Monitoring and Keychain trust survive updates).
+- Keyboard-layout-aware keystroke labels (today: US layout only).
+- Scroll-wheel driven scrolling capture (capture on scroll events instead
+  of a fixed 150 ms timer).
+- Live preview of burned-in subtitles in the subtitles window.
 
 ## Later
 

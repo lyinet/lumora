@@ -35,7 +35,7 @@
 <br>
 
 > [!NOTE]
-> **Lumora is in early alpha (v0.5).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested — but it **has not been run on real hardware yet**, so expect rough edges. Hardware bring-up is the next milestone. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
+> **Lumora is in early alpha (v0.6).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested — but it **has not been run on real hardware yet**, so expect rough edges. Hardware bring-up is the next milestone. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
 
 ## Features
 
@@ -228,14 +228,13 @@ Everything below is written, type-checked and unit-tested, but **not yet run on 
 - [x] **v0.5 — AI combo:** Smart Redaction (on-device detection, one-click pixelate / blur, optional AI check); OCR actions panel and screenshot → table / code, local-first; click ripples, click-event log and microphone on macOS 14; recording → step-by-step tutorial; subtitles, summary and chapters (on-device or cloud, SRT / VTT)
 - [x] **v0.5.1 — polish:** PNG clipboard, one OCR pass per capture (AI Writing skips cropped / redacted text), no Keychain prompts on the main thread, sturdier transcript window, clearer subtitle errors, scrollable Settings tabs
 
-**v0.6 — next**
+- [x] **v0.6 — history & recording extras:** capture history window (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>), keystroke HUD, trim + GIF export, burn-in subtitles, scrolling capture (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>S</kbd>)
+
+**v0.7 — next**
 
 - [ ] Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
 - [ ] Developer ID signing + notarization in CI
-- [x] Capture history window (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>) — built, awaiting hardware QA
-- [x] Recording extras: keystroke HUD, trim + GIF export — built, awaiting hardware QA
-- [x] Burn-in subtitles — built, awaiting hardware QA
-- [x] Scrolling capture (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>S</kbd>) — built, awaiting hardware QA
+- [ ] Keyboard-layout-aware keystroke labels, scroll-wheel driven scrolling capture, live preview for burned-in subtitles
 
 **Later**
 

@@ -6,6 +6,8 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-11-18 (prerelease, not yet hardware-tested)
+
 ### Added
 - **Capture history window** (<kbd>⌥⇧H</kbd>, or **Capture History…** in the
   menu bar): a thumbnail grid of the screenshots, recordings and `.lumora`
@@ -411,7 +413,8 @@ All notable changes to Lumora are documented here. The format follows
 - Screen Recording onboarding with live permission polling and relaunch.
 - Universal bundle script (lipo, codesign, notarytool, create-dmg) and CI.
 
-[Unreleased]: https://github.com/lyinet/lumora/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/lyinet/lumora/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/lyinet/lumora/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/lyinet/lumora/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lyinet/lumora/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/lyinet/lumora/compare/v0.3.0...v0.4.0
