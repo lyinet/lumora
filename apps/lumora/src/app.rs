@@ -267,11 +267,15 @@ impl App {
         let settings = settings_path.as_deref().map(Settings::load_or_default).unwrap_or_default();
         let lang = system::apply_language(settings.general.language);
         log::info!(
-            "starting Lumora {} (settings: {:?}, language: {})",
+            "starting Lumora {} (settings: {:?}, language: {}, bundle: {}, log: {:?}, macOS {})",
             env!("CARGO_PKG_VERSION"),
             settings_path,
-            lang.tag()
+            lang.tag(),
+            objc2_foundation::NSBundle::mainBundle().bundlePath(),
+            crate::logger::log_path(),
+            objc2_foundation::NSProcessInfo::processInfo().operatingSystemVersionString(),
         );
+        log::info!("screen recording preflight: {}", permission::has_screen_recording());
 
         let app = Rc::new_cyclic(|weak: &Weak<App>| {
             let w = weak.clone();
