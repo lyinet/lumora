@@ -185,7 +185,7 @@ Lumora is a **menu-bar app**: it has no Dock icon and no main window. When it st
 
 **Capturing does nothing, or macOS keeps refusing although Lumora is switched on.** Pre-release builds are ad-hoc signed, so macOS treats **every update as a new app** and the old grant no longer applies. After installing an update, remove Lumora from Screen & System Audio Recording with “–” (or run the `tccutil` command above), allow it again, and relaunch. Lumora now explains this itself when macOS refuses a capture.
 
-**Don’t start the binary from Terminal** (`Lumora.app/Contents/MacOS/lumora`) to test permissions: macOS then checks *Terminal’s* permission, not Lumora’s. Use `open /Applications/Lumora.app`.
+**Grant the permission with Lumora launched from Finder, Spotlight or Launchpad — not from a terminal.** When Lumora is started from a terminal (running the binary, and in some setups even `open`), macOS treats the terminal as the responsible app: the prompt then asks to let *your terminal* (Terminal, iTerm, XTerminal…) record the screen, and the grant goes to the terminal instead of Lumora. Quit Lumora, open it by double-clicking it in Applications (or via Spotlight / Launchpad), then click **Grant Access**.
 
 **I can’t see the menu-bar icon.** On macOS 26 check System Settings → Menu Bar and allow Lumora; on a crowded menu bar (especially next to the notch) icons can be hidden. The shortcuts (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>4</kbd> and friends) still work.
 
@@ -193,7 +193,7 @@ Lumora is a **menu-bar app**: it has no Dock icon and no main window. When it st
 ```sh
 LUMORA_DEBUG=1 /Applications/Lumora.app/Contents/MacOS/lumora   # or LUMORA_LOG=debug / RUST_LOG=debug
 ```
-(Remember that a Terminal-started copy uses Terminal’s permissions.) Please attach the log when you report a bug.
+Caveat: a copy started from a terminal uses the **terminal’s** Screen Recording permission (see above), so use this for reading logs, not for granting or testing the permission; the log file is written either way, so for permission problems launch normally and read `~/Library/Logs/Lumora/lumora.log` afterwards. Please attach the log when you report a bug.
 
 <details>
 <summary><b>Developing on Linux or in CI</b></summary>

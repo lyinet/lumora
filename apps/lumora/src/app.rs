@@ -292,6 +292,12 @@ impl App {
             objc2_foundation::NSProcessInfo::processInfo().operatingSystemVersionString(),
         );
         log::info!("screen recording preflight: {}", permission::has_screen_recording());
+        if let Some(term) = system::launched_from_terminal() {
+            log::warn!(
+                "launched from a terminal ({term}): macOS attributes Screen Recording requests to the terminal, \
+                 not Lumora; open Lumora from Finder/Spotlight/Launchpad to grant it"
+            );
+        }
 
         let app = Rc::new_cyclic(|weak: &Weak<App>| {
             let w = weak.clone();

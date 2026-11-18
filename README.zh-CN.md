@@ -185,7 +185,7 @@ Lumora 是一个**菜单栏应用**：没有程序坞图标，也没有主窗口
 
 **截图没有反应，或已经打开开关但 macOS 仍然拒绝。** 预发布版本使用 ad-hoc 签名，macOS 会把**每次更新都当作一个新应用**，旧的授权不再生效。安装更新后，请在“屏幕与系统录音”中用“–”删除 Lumora（或运行上面的 `tccutil` 命令），重新允许并重新启动。现在 macOS 拒绝截图时，Lumora 会自己给出这些说明。
 
-**不要从“终端”直接启动可执行文件**（`Lumora.app/Contents/MacOS/lumora`）来测试权限：这时 macOS 检查的是*“终端”*的权限，而不是 Lumora 的。请使用 `open /Applications/Lumora.app`。
+**授予权限时，请从“访达”、“聚焦”或“启动台”打开 Lumora，而不是从终端启动。** 从终端启动时（直接运行可执行文件，某些环境下甚至是 `open`），macOS 会把终端视为负责的应用：弹出的提示会请求让*你的终端*（终端、iTerm、XTerminal 等）录制屏幕，权限也会授予终端而不是 Lumora。请退出 Lumora，在“应用程序”中双击打开它（或通过“聚焦”/“启动台”），再点击 **授予权限**。
 
 **菜单栏里看不到图标。** 在 macOS 26 上请检查“系统设置”→“菜单栏”并允许 Lumora；菜单栏太拥挤时（尤其是刘海附近）图标可能被隐藏。快捷键（<kbd>⌥</kbd><kbd>⇧</kbd><kbd>4</kbd> 等）仍然可用。
 
@@ -193,7 +193,7 @@ Lumora 是一个**菜单栏应用**：没有程序坞图标，也没有主窗口
 ```sh
 LUMORA_DEBUG=1 /Applications/Lumora.app/Contents/MacOS/lumora   # 或 LUMORA_LOG=debug / RUST_LOG=debug
 ```
-（注意：从“终端”启动的副本使用的是“终端”的权限。）报告问题时请附上这份日志。
+注意：从终端启动的副本使用的是**终端**的“屏幕录制”权限（见上文），因此这种方式只适合查看日志，不适合授予或测试权限；无论哪种方式日志文件都会写入，所以遇到权限问题时请正常启动，之后再查看 `~/Library/Logs/Lumora/lumora.log`。报告问题时请附上这份日志。
 
 <details>
 <summary><b>在 Linux 或 CI 中开发</b></summary>
