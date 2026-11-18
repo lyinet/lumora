@@ -199,6 +199,43 @@ pub fn button_row(
     ButtonRow { size, gap: g, x, y }
 }
 
+/// Where the scrolling-capture control goes (AppKit space, y up): outside
+/// the captured `area`, so it never covers what is scrolled. Tried in turn:
+/// centred below the area, above it, beside it (right, then left), then a
+/// corner of `visible` (the screen's visible frame) clear of the area.
+/// Returns the frame and `true` when nothing outside fits (the area covers
+/// the screen) and it had to go inside the area, at its bottom.
+pub fn scroll_control_frame(visible: Rect, area: Rect, size: Size, gap: f64, margin: f64) -> (Rect, bool) {
+    let (w, h) = (size.width, size.height);
+    let fits = |r: &Rect| {
+        r.min_x() >= visible.min_x() + margin - 1e-9
+            && r.max_x() <= visible.max_x() - margin + 1e-9
+            && r.min_y() >= visible.min_y() + margin - 1e-9
+            && r.max_y() <= visible.max_y() - margin + 1e-9
+            && !r.intersects(&area)
+    };
+    let clamp = |v: f64, lo: f64, hi: f64| if hi < lo { lo } else { v.clamp(lo, hi) };
+    let cx = clamp(area.mid().x - w / 2.0, visible.min_x() + margin, visible.max_x() - w - margin);
+    let cy = clamp(area.mid().y - h / 2.0, visible.min_y() + margin, visible.max_y() - h - margin);
+    let candidates = [
+        Rect::new(cx, area.min_y() - gap - h, w, h),
+        Rect::new(cx, area.max_y() + gap, w, h),
+        Rect::new(area.max_x() + gap, cy, w, h),
+        Rect::new(area.min_x() - gap - w, cy, w, h),
+        Rect::new(visible.max_x() - margin - w, visible.min_y() + margin, w, h),
+        Rect::new(visible.min_x() + margin, visible.min_y() + margin, w, h),
+        Rect::new(visible.max_x() - margin - w, visible.max_y() - margin - h, w, h),
+        Rect::new(visible.min_x() + margin, visible.max_y() - margin - h, w, h),
+    ];
+    match candidates.into_iter().find(fits) {
+        Some(r) => (r.rounded(1.0), false),
+        None => {
+            let y = area.min_y().max(visible.min_y()) + 24.0;
+            (Rect::new(cx, y, w, h).rounded(1.0), true)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,5 +345,34 @@ mod tests {
         // No reserved strip: centred.
         let r = button_row(4, Size::new(220.0, 84.0), 30.0, 24.0, 6.0, 8.0, 0.0);
         assert!((r.y - 27.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn scroll_control_stays_outside_the_area() {
+        let visible = Rect::new(0.0, 0.0, 1440.0, 875.0);
+        let size = Size::new(380.0, 44.0);
+        let place = |area: Rect| scroll_control_frame(visible, area, size, 16.0, 8.0);
+        // Room below: centred below.
+        let area = Rect::new(400.0, 300.0, 600.0, 400.0);
+        let (r, inside) = place(area);
+        assert!(!inside && !r.intersects(&area));
+        assert_eq!((r.min_x(), r.max_y()), (510.0, 284.0));
+        // Full height (a browser window): beside it, not inside.
+        let area = Rect::new(0.0, 0.0, 1000.0, 875.0);
+        let (r, inside) = place(area);
+        assert!(!inside && !r.intersects(&area), "{r:?}");
+        assert!(r.min_x() >= 1016.0);
+        // Full height, right side taken too: the left side.
+        let area = Rect::new(420.0, 0.0, 1020.0, 875.0);
+        let (r, inside) = place(area);
+        assert!(!inside && !r.intersects(&area) && r.max_x() <= 404.0, "{r:?}");
+        // Area covering most of the screen but leaving a corner: a corner.
+        let area = Rect::new(0.0, 60.0, 1440.0, 815.0);
+        let (r, inside) = place(area);
+        assert!(!inside && !r.intersects(&area), "{r:?}");
+        // The whole screen: inside, flagged.
+        let (r, inside) = place(visible);
+        assert!(inside);
+        assert!(visible.contains_rect(&r));
     }
 }

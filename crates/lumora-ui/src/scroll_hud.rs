@@ -1,7 +1,9 @@
 //! Scrolling capture control: a small glass pill with "Scroll slowly…", the
 //! number of frames stitched so far, Done and Cancel. Keyable but
 //! non-activating, so ↩ / Esc reach it while the app being scrolled stays
-//! frontmost. It is a Lumora window, so the capture filter leaves it out.
+//! frontmost. It sits outside the captured area when there is any room, and
+//! Lumora is excluded from every capture as an application, so it never
+//! shows up in the stitched image.
 
 use lumora_core::geometry::Rect;
 use objc2::rc::Retained;
@@ -29,6 +31,7 @@ pub struct ScrollControl {
     count: Retained<NSTextField>,
     _targets: [Retained<ActionTarget>; 2],
     _catcher: Retained<KeyCatcherView>,
+    inside: bool,
 }
 
 impl std::fmt::Debug for ScrollControl {
@@ -65,25 +68,28 @@ fn button(mtm: MainThreadMarker, title: &str, target: &ActionTarget, frame: Rect
 }
 
 impl ScrollControl {
-    /// Place the control centred below `area` (AppKit points) when there's
-    /// room in `visible` (the screen's visible frame), else at its bottom.
+    /// Place the control outside `area` (AppKit points): below it, above
+    /// it, beside it, or in a corner of `visible` (the screen's visible
+    /// frame) — see [`lumora_core::layout::scroll_control_frame`]. It never
+    /// takes mouse-moved events; when only a spot inside the area is left
+    /// (the area covers the screen) it ignores the mouse entirely, so the
+    /// scroll wheel always reaches the content underneath (↩ / Esc and the
+    /// shortcut still work).
     pub fn show(mtm: MainThreadMarker, visible: Rect, area: Rect, sink: EventSink) -> Self {
-        let x = (area.mid().x - WIDTH / 2.0).clamp(visible.min_x() + 8.0, (visible.max_x() - WIDTH - 8.0).max(0.0));
-        let below = area.min_y() - HEIGHT - 16.0;
-        let above = area.max_y() + 16.0;
-        let y = if below >= visible.min_y() + 8.0 {
-            below
-        } else if above + HEIGHT <= visible.max_y() - 8.0 {
-            above
-        } else {
-            visible.min_y() + 24.0
-        };
-        let frame = CGRect::new(CGPoint::new(x.round(), y.round()), CGSize::new(WIDTH, HEIGHT));
+        let (placed, inside) = lumora_core::layout::scroll_control_frame(
+            visible,
+            area,
+            lumora_core::geometry::Size::new(WIDTH, HEIGHT),
+            16.0,
+            8.0,
+        );
+        let frame = cg_rect(placed);
         let panel = make_panel(
             mtm,
             frame,
-            PanelSpec { level: NSStatusWindowLevel, keyable: true, shadow: true, ignores_mouse: false },
+            PanelSpec { level: NSStatusWindowLevel, keyable: true, shadow: true, ignores_mouse: inside },
         );
+        panel.setAcceptsMouseMovedEvents(false);
         panel.setMovableByWindowBackground(true);
         let local = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(WIDTH, HEIGHT));
         let glass = glass_view(mtm, local, HEIGHT / 2.0);
@@ -128,7 +134,17 @@ impl ScrollControl {
         if let Some(l) = glass.layer() {
             spring_scalar(&l, "transform.scale", 0.9, 1.0, motion::POP);
         }
-        ScrollControl { panel, count, _targets: [done_t, cancel_t], _catcher: catcher }
+        ScrollControl { panel, count, _targets: [done_t, cancel_t], _catcher: catcher, inside }
+    }
+
+    /// The panel had to go inside the captured area (and ignores the mouse).
+    pub fn is_inside_area(&self) -> bool {
+        self.inside
+    }
+
+    /// The panel's window number (for logs).
+    pub fn window_number(&self) -> isize {
+        self.panel.windowNumber()
     }
 
     /// Show how many frames are stitched so far.
