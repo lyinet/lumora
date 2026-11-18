@@ -6,10 +6,11 @@ use block2::RcBlock;
 use lumora_core::geometry::Rect;
 use lumora_core::snap::WindowInfo;
 use objc2::rc::Retained;
+use objc2::AnyThread;
 use objc2_core_foundation::{CFArray, CGRect};
 use objc2_core_graphics::{CGDisplayCopyDisplayMode, CGDisplayMode, CGWindowListCreate, CGWindowListOption};
 use objc2_foundation::{NSArray, NSError};
-use objc2_screen_capture_kit::{SCDisplay, SCShareableContent, SCWindow};
+use objc2_screen_capture_kit::{SCContentFilter, SCDisplay, SCRunningApplication, SCShareableContent, SCWindow};
 
 use crate::CaptureError;
 
@@ -99,8 +100,13 @@ fn window_z_order() -> Vec<u32> {
 }
 
 impl ShareableContent {
-    /// Fetch on-screen content asynchronously. `completion` runs on an
+    /// Fetch capturable content asynchronously. `completion` runs on an
     /// arbitrary ScreenCaptureKit queue.
+    ///
+    /// Off-screen windows are included too (so Lumora's own panels that are
+    /// created but not yet ordered in, and Lumora itself as an application,
+    /// are in the snapshot and can be excluded); [`Self::windows`] still
+    /// lists on-screen windows only.
     pub fn fetch(completion: impl FnOnce(Result<ShareableContent, CaptureError>) + Send + 'static) {
         // Blocks are `Fn`; stash the `FnOnce` and take it on first call.
         let slot = Mutex::new(Some(completion));
@@ -117,7 +123,7 @@ impl ShareableContent {
         // SAFETY: valid block with the expected signature.
         unsafe {
             SCShareableContent::getShareableContentExcludingDesktopWindows_onScreenWindowsOnly_completionHandler(
-                true, true, &block,
+                true, false, &block,
             );
         }
     }
@@ -171,12 +177,6 @@ impl ShareableContent {
         unsafe { self.inner.windows() }.iter().find(|w| unsafe { w.windowID() } == id)
     }
 
-    /// Our own windows (overlay, HUDs, recording border) so recordings can
-    /// exclude them via `SCContentFilter`.
-    pub(crate) fn own_windows(&self) -> Retained<NSArray<SCWindow>> {
-        self.own_windows_except(&[])
-    }
-
     /// Lumora's windows minus `allow` (window numbers that must stay in the
     /// recording, e.g. the click-ripple overlays).
     pub(crate) fn own_windows_except(&self, allow: &[u32]) -> Retained<NSArray<SCWindow>> {
@@ -187,6 +187,71 @@ impl ShareableContent {
             .filter(|w| !allow.contains(&unsafe { w.windowID() }))
             .collect();
         NSArray::from_retained_slice(&mine)
+    }
+
+    /// Lumora itself as ScreenCaptureKit lists it (`None` when the snapshot
+    /// doesn't list it).
+    fn own_application(&self) -> Option<Retained<SCRunningApplication>> {
+        let pid = std::process::id() as i32;
+        // SAFETY: plain property reads on an immutable snapshot.
+        unsafe { self.inner.applications() }.iter().find(|a| unsafe { a.processID() } == pid)
+    }
+
+    /// Lumora is listed as an application, so captures can exclude all of
+    /// its windows (see [`Self::display_filter`]).
+    pub fn excludes_own_app(&self) -> bool {
+        self.own_application().is_some()
+    }
+
+    /// Window numbers of Lumora's windows in this snapshot (for logs).
+    pub fn own_window_ids(&self) -> Vec<u32> {
+        let pid = std::process::id() as i32;
+        unsafe { self.inner.windows() }
+            .iter()
+            .filter(|w| unsafe { w.owningApplication() }.is_some_and(|a| unsafe { a.processID() } == pid))
+            .map(|w| unsafe { w.windowID() })
+            .collect()
+    }
+
+    /// A filter for `display` that never shows Lumora's own windows (the
+    /// overlay, HUDs, toasts, the recording border, the scrolling control),
+    /// except the window numbers in `allow` (the click ripples a recording
+    /// must show).
+    ///
+    /// Excludes Lumora as an *application*, so windows created or ordered in
+    /// after this snapshot are excluded too. Falls back to excluding the
+    /// windows the snapshot lists when Lumora isn't listed as an application.
+    pub(crate) fn display_filter(&self, display: &SCDisplay, allow: &[u32]) -> Retained<SCContentFilter> {
+        // SAFETY: building a filter from objects of this snapshot.
+        unsafe {
+            match self.own_application() {
+                Some(app) => {
+                    let keep: Vec<Retained<SCWindow>> = self
+                        .inner
+                        .windows()
+                        .iter()
+                        .filter(|w| {
+                            allow.contains(&w.windowID())
+                                && w.owningApplication().is_some_and(|a| a.processID() == app.processID())
+                        })
+                        .collect();
+                    SCContentFilter::initWithDisplay_excludingApplications_exceptingWindows(
+                        SCContentFilter::alloc(),
+                        display,
+                        &NSArray::from_retained_slice(&[app]),
+                        &NSArray::from_retained_slice(&keep),
+                    )
+                }
+                None => {
+                    log::warn!("capture filter: Lumora not listed as an application; excluding its listed windows");
+                    SCContentFilter::initWithDisplay_excludingWindows(
+                        SCContentFilter::alloc(),
+                        display,
+                        &self.own_windows_except(allow),
+                    )
+                }
+            }
+        }
     }
 
     /// The display whose frame contains the centre of `rect` (or the one it

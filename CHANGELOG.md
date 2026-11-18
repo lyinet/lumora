@@ -6,6 +6,41 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-11-18 (prerelease; scrolling-capture fixes)
+
+Scrolling capture (⌥⇧S) still failed on a real Mac (Mac mini M4, macOS
+26.5.2) after 0.6.2: the frame count stayed at 1 while scrolling a chat web
+app, and the saved image showed Lumora's own control panel.
+
+### Fixed
+- **Lumora's own windows could appear in captures.** Area, display and
+  scrolling captures and recordings excluded our windows from a list taken
+  when the capture started, so a panel that wasn't listed yet (the
+  scrolling control, a HUD, a toast, the border) could be captured. Lumora
+  is now excluded as an application, which covers every window it owns
+  whenever it appears; recordings still show the click ripples. Scrolling
+  capture also refetches the screen content once its control is up before
+  taking the first frame.
+- **The scrolling-capture control could sit inside the area** (when the
+  area was full height, like a browser window), covering the content and
+  catching the scroll wheel there. It now goes below, above or beside the
+  area, or in a free corner of the screen; if the area covers the whole
+  screen it ignores the mouse so scrolling always reaches the page.
+- **Scrolling capture didn't stitch real pages; the frame count stayed at
+  1.** Frames were matched by exact pixel rows over the full width and the
+  image only grew downwards, so scrolling up (a chat that opens at its
+  newest message), a fixed sidebar beside the scrolling list, the overlay
+  scrollbar, slight anti-aliasing differences or our own translucent panel
+  in the area meant no frame ever lined up. Matching now tolerates small
+  pixel differences, matches only the scrolling middle between fixed top
+  and bottom bars (which appear once), ignores fixed columns, finds steps of
+  a pixel or two (smooth and momentum scrolling, Retina), skips torn
+  frames, and stitches upwards as well as downwards.
+- **Logs explain a failed stitch.** Each session ends with a summary line
+  in `~/Library/Logs/Lumora/lumora.log`, the first frames that didn't line
+  up are logged with how they were matched, and with debug logging every
+  frame is logged (offset, fixed bands, result).
+
 ## [0.6.2] - 2026-11-18 (prerelease; real-Mac fixes)
 
 Two bugs found on a real Mac (Mac mini M4, macOS 26.5.2).
@@ -487,7 +522,8 @@ First fixes from testing on a real Mac (Mac mini M4, macOS 26 Tahoe).
 - Screen Recording onboarding with live permission polling and relaunch.
 - Universal bundle script (lipo, codesign, notarytool, create-dmg) and CI.
 
-[Unreleased]: https://github.com/lyinet/lumora/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/lyinet/lumora/compare/v0.6.3...HEAD
+[0.6.3]: https://github.com/lyinet/lumora/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/lyinet/lumora/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/lyinet/lumora/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/lyinet/lumora/compare/v0.5.1...v0.6.0

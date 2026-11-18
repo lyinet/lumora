@@ -2,18 +2,49 @@
 //! scrolls, into one tall image.
 //!
 //! Pure pixel logic on tightly packed buffers (any 1–4 byte pixel format, as
-//! long as every frame uses the same one). Each frame is reduced to one hash
-//! per row; the vertical offset between consecutive frames is the shift that
-//! lines the most rows up. Rows that stay put at the top and bottom of both
-//! frames (a sticky header or footer) are left out of the match and kept
-//! once: the header from the first frame, the footer from the last.
+//! long as every frame uses the same one).
+//!
+//! ## Matching
+//!
+//! Each row of a frame is reduced to [`CELLS`] cells: the mean of the pixels
+//! in one horizontal slice of the row. Two cells are the same when their
+//! means are within [`CELL_TOLERANCE`], which absorbs anti-aliasing,
+//! colour-matching and compression noise; real content that moves changes
+//! them by far more.
+//!
+//! Between the last kept frame and a new one:
+//!
+//! 1. **Fixed bands.** Rows at the top and bottom that are the same in both
+//!    frames (a browser toolbar, a fixed nav bar, a sticky input bar at the
+//!    bottom) are the header and footer, at most a third of the frame each.
+//!    Only the band between them is matched.
+//! 2. **Fixed columns.** Cells that did not change down the whole band (a
+//!    sidebar next to a scrolling list, a window edge) say nothing about the
+//!    shift and are left out, so a fixed sidebar can't veto a scroll.
+//! 3. **Shift.** Every vertical shift of the band is scored by the share of
+//!    differing cells over the overlapping rows (rows that are blank in both
+//!    frames don't count either way); the lowest wins, provided it is at most
+//!    [`MATCH_TOLERANCE`], clearly better than not moving, backed by enough
+//!    rows with content, and still matches near the edge where new rows join
+//!    (a frame torn mid-redraw fails that and is skipped). Shifts of a few
+//!    pixels (smooth or momentum scrolling, 2× Retina frames) are found like
+//!    any other.
+//!
+//! ## Composing
+//!
+//! The image is the header once, the stitched middle, the footer once. The
+//! middle grows downwards *and* upwards: a chat that opens at its newest
+//! message is captured by scrolling up. Scrolling back over rows already
+//! stitched moves the view without adding anything.
 //!
 //! Frames that did not scroll never end a session: identical frames and
-//! in-place changes (a caret, a hover, a window turning active) are
-//! [`Push::Unchanged`]; before the first scroll a frame that changed beyond
-//! that becomes the new start ([`Push::Restarted`]); after it, a frame that
-//! lines up with nothing is skipped ([`Push::Lost`]) and only
-//! [`LOST_LIMIT`] of them in a row give up ([`Push::NoOverlap`]).
+//! in-place changes (a caret, a hover, an animation) are [`Push::Unchanged`];
+//! before the first scroll a frame that changed beyond that becomes the new
+//! start ([`Push::Restarted`]); after it, a frame that lines up with nothing
+//! is skipped ([`Push::Lost`]) and only [`LOST_LIMIT`] of them in a row give
+//! up ([`Push::NoOverlap`]).
+
+use std::fmt;
 
 /// Default cap on the stitched height, in pixels.
 pub const MAX_HEIGHT: usize = 20_000;
@@ -22,6 +53,33 @@ pub const MAX_HEIGHT: usize = 20_000;
 /// before the session gives up with [`Push::NoOverlap`]. At one frame every
 /// 0.15 s this is about two seconds.
 pub const LOST_LIMIT: usize = 12;
+
+/// Cells per row signature (fewer when the frame is narrower).
+pub const CELLS: usize = 64;
+
+/// Largest difference between two cell means (0–255) that still counts as
+/// the same: anti-aliasing, colour-space rounding, compression.
+pub const CELL_TOLERANCE: u8 = 6;
+
+/// Largest share of differing cells over the overlap for a shift to match
+/// (a blinking caret, a moving scrollbar thumb, a small animation).
+pub const MATCH_TOLERANCE: f64 = 0.06;
+
+/// Share of differing cells at no shift below which a frame is unchanged
+/// outright.
+const UNCHANGED_TOLERANCE: f64 = 0.005;
+
+/// Share of rows that may change in place for a frame that lines up at no
+/// shift to still count as "not scrolled". Scrolling moves (nearly) every
+/// non-blank row; three quarters of the rows where they were is not a scroll.
+const IN_PLACE_TOLERANCE: f64 = 0.25;
+
+/// A column of cells that is the same in this share of the band's rows is
+/// fixed (a sidebar) and left out of the match.
+const FIXED_COLUMN: f64 = 0.97;
+
+/// Rows with content that must line up for a match, at least.
+const MIN_INFO_ROWS: usize = 3;
 
 /// One captured frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,9 +103,13 @@ impl Frame {
         })
     }
 
-    fn row(&self, y: usize) -> &[u8] {
-        let n = self.width * self.bpp;
-        &self.data[y * n..(y + 1) * n]
+    fn row_bytes(&self) -> usize {
+        self.width * self.bpp
+    }
+
+    fn rows(&self, from: usize, to: usize) -> &[u8] {
+        let n = self.row_bytes();
+        &self.data[from * n..to * n]
     }
 }
 
@@ -63,15 +125,18 @@ pub enum Push {
     /// tweak (the window turned active, a page re-rendered): the stitch
     /// starts over from this frame. Never final.
     Restarted,
-    /// Scrolled back up; dropped (the stitch only grows downwards).
-    ScrolledUp,
-    /// Scrolled down: this many new rows were appended.
+    /// Scrolled down: this many new rows were added at the bottom.
     Appended(usize),
-    /// Appended this many rows and reached the height cap: stop.
+    /// Scrolled up past the top of the stitch: this many new rows were added
+    /// at the top.
+    Prepended(usize),
+    /// Scrolled within what is already stitched; nothing new.
+    Moved,
+    /// Added this many rows and reached the height cap: stop.
     Capped(usize),
     /// After scrolling started, nothing lines up with the last kept frame
-    /// (scrolled too fast, or the content changed); dropped. Carries how
-    /// many frames in a row did this. Not final.
+    /// (scrolled too fast, a torn frame, the content changed); dropped.
+    /// Carries how many frames in a row did this. Not final.
     Lost(usize),
     /// [`LOST_LIMIT`] frames in a row lined up with nothing: stop, keeping
     /// what is stitched.
@@ -92,120 +157,310 @@ impl Push {
 pub struct Offset {
     /// Rows the content moved up (positive: scrolled down; negative: up).
     pub dy: isize,
-    /// Sticky rows at the top of both frames.
+    /// Fixed rows at the top of both frames.
     pub header: usize,
-    /// Sticky rows at the bottom of both frames.
+    /// Fixed rows at the bottom of both frames.
     pub footer: usize,
 }
 
-/// Row signature: a hash of the row's bytes plus whether every pixel in it is
-/// the same (a blank row says nothing about where it belongs).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Row {
-    hash: u64,
-    plain: bool,
+/// How the last frame was matched, for logs.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MatchInfo {
+    /// The shift found (`Some(0)`: not scrolled; `None`: nothing lined up).
+    pub dy: Option<isize>,
+    /// Fixed rows found at the top and bottom of this pair.
+    pub header: usize,
+    pub footer: usize,
+    /// Cells per row, and how many were left out as fixed columns.
+    pub cells: usize,
+    pub fixed_cells: usize,
+    /// Share of cells that differ with no shift (whole frame).
+    pub still: f64,
+    /// Share of rows that differ with no shift.
+    pub rows_changed: f64,
+    /// Share of differing cells at the best shift (`None`: no candidate).
+    pub mismatch: Option<f64>,
+    /// The best candidate shift, even when it was rejected.
+    pub candidate: Option<isize>,
 }
 
-fn rows(f: &Frame) -> Vec<Row> {
-    (0..f.height)
-        .map(|y| {
-            let r = f.row(y);
-            // FNV-1a over 8-byte words (fast enough for a few MB per frame).
-            let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-            for c in r.chunks(8) {
-                let mut w = [0u8; 8];
-                w[..c.len()].copy_from_slice(c);
-                h ^= u64::from_le_bytes(w);
-                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+impl fmt::Display for MatchInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.dy {
+            Some(dy) => write!(f, "dy={dy}")?,
+            None => write!(f, "dy=none")?,
+        }
+        write!(
+            f,
+            " header={} footer={} fixed_cells={}/{} still={:.3} rows_changed={:.3}",
+            self.header, self.footer, self.fixed_cells, self.cells, self.still, self.rows_changed
+        )?;
+        if let (Some(c), Some(m)) = (self.candidate, self.mismatch) {
+            write!(f, " best_shift={c} mismatch={m:.3}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Per-frame cell signatures.
+#[derive(Debug, Clone)]
+struct Sig {
+    height: usize,
+    cells: usize,
+    /// `height × cells` means.
+    data: Vec<u8>,
+}
+
+impl Sig {
+    fn of(f: &Frame) -> Sig {
+        let cells = CELLS.min(f.width);
+        // Leave alpha out of 4-byte pixels (it is constant on screen).
+        let channels = if f.bpp == 4 { 3 } else { f.bpp };
+        let bounds: Vec<(usize, usize)> =
+            (0..cells).map(|c| (c * f.width / cells, (c + 1) * f.width / cells)).collect();
+        let mut data = Vec::with_capacity(f.height * cells);
+        let rb = f.row_bytes();
+        for y in 0..f.height {
+            let row = &f.data[y * rb..(y + 1) * rb];
+            for &(x0, x1) in &bounds {
+                let mut sum: u64 = 0;
+                for px in row[x0 * f.bpp..x1 * f.bpp].chunks_exact(f.bpp) {
+                    for &v in &px[..channels] {
+                        sum += u64::from(v);
+                    }
+                }
+                let n = ((x1 - x0) * channels) as u64;
+                data.push(((sum + n / 2) / n) as u8);
             }
-            let first = &r[..f.bpp];
-            Row { hash: h, plain: r.chunks(f.bpp).all(|p| p == first) }
-        })
-        .collect()
+        }
+        Sig { height: f.height, cells, data }
+    }
+
+    fn row(&self, y: usize) -> &[u8] {
+        &self.data[y * self.cells..(y + 1) * self.cells]
+    }
 }
 
-/// Rows that must line up for a match, at least.
+fn same(a: u8, b: u8) -> bool {
+    a.abs_diff(b) <= CELL_TOLERANCE
+}
+
+fn rows_equal(a: &[u8], b: &[u8]) -> bool {
+    a.iter().zip(b).all(|(&x, &y)| same(x, y))
+}
+
+/// A row is blank (over `cols`) when all its cells are within tolerance.
+fn plain(row: &[u8], cols: &[usize]) -> bool {
+    let (mut lo, mut hi) = (u8::MAX, u8::MIN);
+    for &c in cols {
+        lo = lo.min(row[c]);
+        hi = hi.max(row[c]);
+    }
+    hi.saturating_sub(lo) <= CELL_TOLERANCE
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct Score {
+    bad: usize,
+    total: usize,
+    /// Rows with content that lined up.
+    info: usize,
+}
+
+impl Score {
+    fn ratio(&self) -> f64 {
+        if self.total == 0 {
+            0.0
+        } else {
+            self.bad as f64 / self.total as f64
+        }
+    }
+}
+
+struct Cmp<'a> {
+    a: &'a Sig,
+    b: &'a Sig,
+    cols: &'a [usize],
+    plain_a: Vec<bool>,
+    plain_b: Vec<bool>,
+}
+
+impl Cmp<'_> {
+    /// Score the row pairs `(ya, yb)`; gives up (returning `None`) once more
+    /// than `limit` of the possible cells differ.
+    fn score(&self, pairs: impl Iterator<Item = (usize, usize)> + Clone, limit: f64) -> Option<Score> {
+        let possible = pairs.clone().count() * self.cols.len();
+        let allowed = (possible as f64 * limit) as usize;
+        let mut s = Score::default();
+        for (ya, yb) in pairs {
+            let (ra, rb) = (self.a.row(ya), self.b.row(yb));
+            if self.plain_a[ya] && self.plain_b[yb] && same(ra[self.cols[0]], rb[self.cols[0]]) {
+                continue; // blank in both: no evidence either way
+            }
+            let bad = self.cols.iter().filter(|&&c| !same(ra[c], rb[c])).count();
+            s.bad += bad;
+            s.total += self.cols.len();
+            if bad * 8 <= self.cols.len() && !(self.plain_a[ya] && self.plain_b[yb]) {
+                s.info += 1;
+            }
+            if s.bad > allowed {
+                return None;
+            }
+        }
+        Some(s)
+    }
+}
+
+/// Fixed rows at the top and bottom of a pair.
+fn fixed_bands(a: &Sig, b: &Sig) -> (usize, usize) {
+    let h = a.height;
+    let limit = h / 3;
+    let header = (0..limit).take_while(|&y| rows_equal(a.row(y), b.row(y))).count();
+    let footer = (0..limit).take_while(|&i| rows_equal(a.row(h - 1 - i), b.row(h - 1 - i))).count();
+    (header, footer)
+}
+
+/// Rows that must overlap for a match, at least.
 fn min_overlap(band: usize) -> usize {
     (band / 4).max(8).min(band)
 }
 
-/// Share of the overlapping rows allowed to differ (a blinking caret, a
-/// hover highlight, an animated spinner).
-const MISMATCH_TOLERANCE: f64 = 0.04;
-
-/// Share of rows that may change in place for a frame that lines up at no
-/// shift to still count as "not scrolled". Scrolling moves (nearly) every
-/// non-blank row, so a frame where three quarters of the rows are where
-/// they were has not scrolled.
-const IN_PLACE_TOLERANCE: f64 = 0.25;
-
-/// Sticky bands are at most a third of the frame each.
-fn sticky_limit(h: usize) -> usize {
-    h / 3
-}
-
-fn find_offset_rows(a: &[Row], b: &[Row]) -> Option<Offset> {
-    let h = a.len();
-    if h != b.len() || h == 0 {
-        return None;
+/// Match frame `b` against `a`. `fixed` is the header/footer already known
+/// for the session (the band matched is never larger than it).
+fn match_sigs(a: &Sig, b: &Sig, fixed: Option<(usize, usize)>) -> (Option<Offset>, MatchInfo) {
+    let h = a.height;
+    let all: Vec<usize> = (0..a.cells).collect();
+    let mut info = MatchInfo {
+        dy: None,
+        header: 0,
+        footer: 0,
+        cells: a.cells,
+        fixed_cells: 0,
+        still: 0.0,
+        rows_changed: 0.0,
+        mismatch: None,
+        candidate: None,
+    };
+    let still_offset = Offset { dy: 0, header: 0, footer: 0 };
+    let changed_rows = (0..h).filter(|&y| !rows_equal(a.row(y), b.row(y))).count();
+    let changed_cells: usize =
+        (0..h).map(|y| a.row(y).iter().zip(b.row(y)).filter(|(&x, &z)| !same(x, z)).count()).sum();
+    info.still = changed_cells as f64 / (h * a.cells) as f64;
+    info.rows_changed = changed_rows as f64 / h as f64;
+    if info.still <= UNCHANGED_TOLERANCE {
+        info.dy = Some(0);
+        return (Some(still_offset), info);
     }
-    // Nothing moved, or only a few rows changed in place (a caret blink).
-    let changed = a.iter().zip(b).filter(|(x, y)| x != y).count();
-    if changed as f64 / h as f64 <= MISMATCH_TOLERANCE {
-        return Some(Offset { dy: 0, header: 0, footer: 0 });
+    let in_place = info.rows_changed <= IN_PLACE_TOLERANCE;
+    let fallback = |mut info: MatchInfo| {
+        if in_place {
+            info.dy = Some(0);
+            (Some(still_offset), info)
+        } else {
+            (None, info)
+        }
+    };
+
+    let (mut header, mut footer) = fixed_bands(a, b);
+    if let Some((fh, ff)) = fixed {
+        header = header.max(fh);
+        footer = footer.max(ff);
     }
-    let limit = sticky_limit(h);
-    let header = a.iter().zip(b).take(limit).take_while(|(x, y)| x == y).count();
-    let footer = a.iter().rev().zip(b.iter().rev()).take(limit).take_while(|(x, y)| x == y).count();
-    let (top, bottom) = (header, h - footer);
+    info.header = header;
+    info.footer = footer;
+    let (top, bottom) = (header, h.saturating_sub(footer));
     let band = bottom.saturating_sub(top);
     let need = min_overlap(band);
-    if band < need || band == 0 {
-        return None;
+    if band == 0 || band <= need {
+        return fallback(info);
     }
-    let max_shift = band - need;
-    // (mismatch ratio, informative matches, |dy|) — lower ratio, more
-    // informative matches, smaller shift win.
+
+    // Columns that moved somewhere in the band.
+    let cols: Vec<usize> = all
+        .iter()
+        .copied()
+        .filter(|&c| {
+            let same_rows = (top..bottom).filter(|&y| same(a.row(y)[c], b.row(y)[c])).count();
+            (same_rows as f64) < FIXED_COLUMN * band as f64
+        })
+        .collect();
+    info.fixed_cells = a.cells - cols.len();
+    if cols.is_empty() {
+        // The band didn't move at all; whatever changed is in the bands.
+        return fallback(info);
+    }
+    let cmp = Cmp {
+        a,
+        b,
+        plain_a: (0..h).map(|y| plain(a.row(y), &cols)).collect(),
+        plain_b: (0..h).map(|y| plain(b.row(y), &cols)).collect(),
+        cols: &cols,
+    };
+    let still_band = cmp.score((top..bottom).map(|y| (y, y)), 1.0).unwrap_or_default().ratio();
+
+    // (ratio, info rows, |dy|, dy)
     let mut best: Option<(f64, usize, usize, isize)> = None;
-    for d in 1..=max_shift {
+    for d in 1..=(band - need) {
+        let n = band - d;
         for dy in [d as isize, -(d as isize)] {
-            let n = band - d;
-            let allowed = (n as f64 * MISMATCH_TOLERANCE) as usize;
-            let (mut bad, mut info) = (0usize, 0usize);
-            for i in 0..n {
-                // Scrolled down by d: b[top+i] shows what a[top+i+d] showed.
-                let (ra, rb) = if dy > 0 { (a[top + i + d], b[top + i]) } else { (a[top + i], b[top + i + d]) };
-                if ra.hash == rb.hash {
-                    info += usize::from(!ra.plain);
-                } else {
-                    bad += 1;
-                    if bad > allowed {
-                        break;
-                    }
-                }
+            // Scrolled down by d: b[top+i] shows what a[top+i+d] showed.
+            let pair = move |i: usize| if dy > 0 { (top + i + d, top + i) } else { (top + i, top + i + d) };
+            // A sparse pass first rules out most shifts cheaply.
+            if n > 64 && cmp.score((0..n).step_by(7).map(pair), 2.0 * MATCH_TOLERANCE).is_none() {
+                continue;
             }
-            let ratio = bad as f64 / n as f64;
-            if ratio > MISMATCH_TOLERANCE || info == 0 {
+            let Some(s) = cmp.score((0..n).map(pair), MATCH_TOLERANCE) else { continue };
+            let r = s.ratio();
+            if s.info < MIN_INFO_ROWS || r > MATCH_TOLERANCE {
                 continue;
             }
             let better = match best {
                 None => true,
-                Some((r, i, ad, _)) => {
-                    ratio < r - 1e-9 || ((ratio - r).abs() <= 1e-9 && (info > i || (info == i && d < ad)))
+                Some((br, bi, bd, _)) => {
+                    r < br - 1e-9 || ((r - br).abs() <= 1e-9 && (s.info > bi || (s.info == bi && d < bd)))
                 }
             };
             if better {
-                best = Some((ratio, info, d, dy));
+                best = Some((r, s.info, d, dy));
             }
         }
     }
-    match best {
-        Some((_, _, _, dy)) => Some(Offset { dy, header, footer }),
-        // No shift lines up, but most rows are where they were: something
-        // changed in place (a hover, an animation), nothing scrolled.
-        None if changed as f64 / h as f64 <= IN_PLACE_TOLERANCE => Some(Offset { dy: 0, header: 0, footer: 0 }),
-        None => None,
+    let Some((ratio, _, d, dy)) = best else { return fallback(info) };
+    info.candidate = Some(dy);
+    info.mismatch = Some(ratio);
+    // Clearly better than not moving at all.
+    if ratio > still_band * 0.5 {
+        return fallback(info);
     }
+    // Still lines up next to where the new rows join (a frame torn
+    // mid-redraw lines up at the far end only).
+    let n = band - d;
+    let k = (n / 8).max(16).min(n);
+    let pair = move |i: usize| if dy > 0 { (top + i + d, top + i) } else { (top + i, top + i + d) };
+    let edge = if dy > 0 { cmp.score((n - k..n).map(pair), 1.0) } else { cmp.score((0..k).map(pair), 1.0) };
+    if !matches!(edge, Some(e) if e.ratio() <= MATCH_TOLERANCE) {
+        return fallback(info);
+    }
+    // The rows that would be added must have moved: rows that are where
+    // they were in the last frame are a stale part of a torn frame.
+    let (ext_top, ext_bottom) = match fixed {
+        Some((fh, ff)) => (fh, h - ff),
+        None => (top, bottom),
+    };
+    let fresh = if dy > 0 { ext_bottom.saturating_sub(d)..ext_bottom } else { ext_top..(ext_top + d).min(h) };
+    let (mut content, mut stale) = (0usize, 0usize);
+    for y in fresh {
+        if cmp.plain_a[y] && cmp.plain_b[y] {
+            continue;
+        }
+        content += 1;
+        stale += usize::from(cols.iter().all(|&c| same(a.row(y)[c], b.row(y)[c])));
+    }
+    if content >= 2 && stale * 2 > content {
+        return fallback(info);
+    }
+    info.dy = Some(dy);
+    (Some(Offset { dy, header, footer }), info)
 }
 
 /// The shift from frame `a` to frame `b` (same size). `dy == 0` when the
@@ -214,7 +469,52 @@ pub fn find_offset(a: &Frame, b: &Frame) -> Option<Offset> {
     if a.width != b.width || a.height != b.height || a.bpp != b.bpp {
         return None;
     }
-    find_offset_rows(&rows(a), &rows(b))
+    match_sigs(&Sig::of(a), &Sig::of(b), None).0
+}
+
+/// Counts for the end-of-session log line.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Summary {
+    pub pushed: usize,
+    pub unchanged: usize,
+    pub restarted: usize,
+    pub appended: usize,
+    pub prepended: usize,
+    pub moved: usize,
+    pub lost: usize,
+    pub mismatched: usize,
+    /// Fixed header and footer of the stitch (0 until the first scroll).
+    pub header: usize,
+    pub footer: usize,
+    /// Rows stitched above and below the first frame's view.
+    pub rows_up: usize,
+    pub rows_down: usize,
+    pub width: usize,
+    pub height: usize,
+}
+
+impl fmt::Display for Summary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} frames pushed: {} appended, {} prepended, {} moved, {} unchanged, {} restarted, {} lost, {} mismatched; \
+             header {} px, footer {} px, +{} px above, +{} px below; image {}×{}",
+            self.pushed,
+            self.appended,
+            self.prepended,
+            self.moved,
+            self.unchanged,
+            self.restarted,
+            self.lost,
+            self.mismatched,
+            self.header,
+            self.footer,
+            self.rows_up,
+            self.rows_down,
+            self.width,
+            self.height
+        )
+    }
 }
 
 /// Builds the tall image frame by frame.
@@ -223,15 +523,24 @@ pub struct ScrollStitcher {
     max_height: usize,
     width: usize,
     bpp: usize,
-    /// The stitched rows so far.
-    out: Vec<u8>,
-    /// The last kept frame and its row signatures.
-    last: Option<(Frame, Vec<Row>)>,
-    /// Rows at the end of `out` that are the last frame's bottom rows.
-    tail: usize,
+    /// Fixed bands, known once the content first scrolled (`None` before).
+    bands: Option<(usize, usize)>,
+    header: Vec<u8>,
+    footer: Vec<u8>,
+    /// Rows above the first frame's view, nearest first (reversed).
+    up: Vec<u8>,
+    /// The first frame's view and every row below it.
+    down: Vec<u8>,
+    /// Where the last kept frame's band starts, in rows from the top of
+    /// `down` (negative: inside `up`).
+    view: isize,
+    /// The last kept frame and its signature.
+    last: Option<(Frame, Sig)>,
     frames: usize,
     /// Frames in a row that lined up with nothing.
     lost: usize,
+    match_info: Option<MatchInfo>,
+    summary: Summary,
 }
 
 impl ScrollStitcher {
@@ -241,11 +550,17 @@ impl ScrollStitcher {
             max_height: max_height.max(1),
             width: 0,
             bpp: 0,
-            out: Vec::new(),
+            bands: None,
+            header: Vec::new(),
+            footer: Vec::new(),
+            up: Vec::new(),
+            down: Vec::new(),
+            view: 0,
             last: None,
-            tail: 0,
             frames: 0,
             lost: 0,
+            match_info: None,
+            summary: Summary::default(),
         }
     }
 
@@ -263,99 +578,186 @@ impl ScrollStitcher {
         self.width
     }
 
+    fn row_bytes(&self) -> usize {
+        self.width * self.bpp
+    }
+
+    fn rows_of(&self, v: &[u8]) -> usize {
+        v.len().checked_div(self.row_bytes()).unwrap_or(0)
+    }
+
+    fn total_rows(&self) -> usize {
+        self.rows_of(&self.header) + self.rows_of(&self.up) + self.rows_of(&self.down) + self.rows_of(&self.footer)
+    }
+
     pub fn height(&self) -> usize {
-        if self.width == 0 {
-            0
-        } else {
-            self.out.len() / (self.width * self.bpp)
-        }
+        self.total_rows().min(self.max_height)
     }
 
     pub fn bytes_per_pixel(&self) -> usize {
         self.bpp
     }
 
-    /// The stitched pixels: `height()` rows of `width() × bpp` bytes.
-    pub fn pixels(&self) -> &[u8] {
-        &self.out
+    /// How the last pushed frame was matched (for logs).
+    pub fn last_match(&self) -> Option<&MatchInfo> {
+        self.match_info.as_ref()
+    }
+
+    /// Counts so far (for the end-of-session log line).
+    pub fn summary(&self) -> Summary {
+        let mut s = self.summary;
+        let (h, f) = self.bands.unwrap_or((0, 0));
+        s.header = h;
+        s.footer = f;
+        s.rows_up = self.rows_of(&self.up);
+        s.rows_down = self.rows_of(&self.down).saturating_sub(self.last.as_ref().map_or(0, |l| l.0.height - h - f));
+        s.width = self.width;
+        s.height = self.height();
+        s
+    }
+
+    /// The stitched pixels: header, rows above, first view and rows below,
+    /// footer; `height()` rows of `width() × bpp` bytes.
+    pub fn image(&self) -> Vec<u8> {
+        let rb = self.row_bytes();
+        let mut out = Vec::with_capacity(self.height() * rb);
+        out.extend_from_slice(&self.header);
+        for row in self.up.chunks_exact(rb.max(1)).rev() {
+            out.extend_from_slice(row);
+        }
+        out.extend_from_slice(&self.down);
+        out.extend_from_slice(&self.footer);
+        out.truncate(self.max_height * rb);
+        out
     }
 
     /// Consume the stitcher, returning `(width, height, pixels)`.
     pub fn into_image(self) -> (usize, usize, Vec<u8>) {
-        let h = self.height();
-        (self.width, h, self.out)
+        let px = self.image();
+        (self.width, self.height(), px)
     }
 
     /// Start (or restart) the stitch from `frame`.
     fn start(&mut self, frame: Frame) -> Push {
-        let row_bytes = frame.width * frame.bpp;
-        {
-            self.width = frame.width;
-            self.bpp = frame.bpp;
-            let keep = frame.height.min(self.max_height);
-            self.out = frame.data[..keep * row_bytes].to_vec();
-            self.tail = keep;
-            self.frames = 1;
-            let rows = rows(&frame);
-            self.last = Some((frame, rows));
-            self.lost = 0;
-            if keep < self.last.as_ref().map_or(0, |l| l.0.height) {
-                Push::Capped(keep)
-            } else {
-                Push::Started
-            }
+        self.width = frame.width;
+        self.bpp = frame.bpp;
+        self.bands = None;
+        self.header.clear();
+        self.footer.clear();
+        self.up.clear();
+        self.down = frame.data.clone();
+        self.view = 0;
+        self.frames = 1;
+        self.lost = 0;
+        let capped = frame.height >= self.max_height;
+        let sig = Sig::of(&frame);
+        self.last = Some((frame, sig));
+        if capped {
+            Push::Capped(self.height())
+        } else {
+            Push::Started
         }
     }
 
     pub fn push(&mut self, frame: Frame) -> Push {
-        let row_bytes = frame.width * frame.bpp;
-        let Some((last, last_rows)) = &self.last else {
+        self.summary.pushed += 1;
+        let Some((last, last_sig)) = &self.last else {
+            self.match_info = None;
             return self.start(frame);
         };
         if frame.width != last.width || frame.height != last.height || frame.bpp != last.bpp {
+            self.summary.mismatched += 1;
             return Push::Mismatch;
         }
-        let new_rows = rows(&frame);
-        let Some(off) = find_offset_rows(last_rows, &new_rows) else {
+        if self.total_rows() >= self.max_height {
+            return Push::Capped(0);
+        }
+        let sig = Sig::of(&frame);
+        let (off, info) = match_sigs(last_sig, &sig, self.bands);
+        self.match_info = Some(info);
+        let Some(off) = off else {
             if !self.scrolled() {
                 // Nothing stitched beyond the first frame: the newest
                 // state is the better start (the user sees it now).
+                self.summary.restarted += 1;
                 self.start(frame);
                 return Push::Restarted;
             }
             self.lost += 1;
+            self.summary.lost += 1;
             return if self.lost >= LOST_LIMIT { Push::NoOverlap } else { Push::Lost(self.lost) };
         };
         self.lost = 0;
-        let h = frame.height;
         if off.dy == 0 {
             // Identical, or changed in place (a caret, a hover): keep
-            // comparing with the last kept frame, so a change that goes
-            // away again costs nothing.
+            // comparing with the last kept frame, so small scroll steps add
+            // up and a change that goes away again costs nothing.
+            self.summary.unchanged += 1;
             return Push::Unchanged;
         }
-        if off.dy < 0 {
-            return Push::ScrolledUp;
-        }
-        let d = off.dy as usize;
-        // The footer currently ends `out`; drop it, add the d new rows of
-        // the scrolling band, then the footer again (from the new frame).
-        let footer = off.footer.min(self.tail);
-        self.out.truncate(self.out.len() - footer * row_bytes);
-        let band_end = h - off.footer;
-        let room = self.max_height.saturating_sub(self.height() + footer);
-        let take = d.min(room);
-        let start = band_end - d;
-        self.out.extend_from_slice(&frame.data[start * row_bytes..(start + take) * row_bytes]);
-        self.out.extend_from_slice(&frame.data[(h - footer) * row_bytes..h * row_bytes]);
-        self.tail = (self.tail + d).min(h - off.header);
-        self.frames += 1;
-        self.last = Some((frame, new_rows));
-        if take < d || self.height() >= self.max_height {
-            Push::Capped(take)
+        self.apply(frame, sig, off)
+    }
+
+    /// Fit `frame`, shifted by `off.dy` from the last kept frame, into the
+    /// stitch.
+    fn apply(&mut self, frame: Frame, sig: Sig, off: Offset) -> Push {
+        let h = frame.height;
+        let rb = frame.row_bytes();
+        let (hd, ft) = match self.bands {
+            Some(b) => b,
+            None => {
+                // First scroll: fix the bands and split the first frame.
+                let (hd, ft) = (off.header, off.footer);
+                let first = std::mem::take(&mut self.down);
+                self.header = first[..hd * rb].to_vec();
+                self.footer = first[(h - ft) * rb..].to_vec();
+                self.down = first[hd * rb..(h - ft) * rb].to_vec();
+                self.bands = Some((hd, ft));
+                (hd, ft)
+            }
+        };
+        let band = h - hd - ft;
+        let new_view = self.view + off.dy;
+        let down_rows = self.rows_of(&self.down) as isize;
+        let up_rows = self.rows_of(&self.up) as isize;
+        let room = self.max_height.saturating_sub(self.total_rows());
+        let result = if new_view + band as isize > down_rows {
+            // New rows below. The footer comes from the lowest view.
+            let new = (new_view + band as isize - down_rows) as usize;
+            let take = new.min(room);
+            let from = hd + (down_rows - new_view) as usize;
+            self.down.extend_from_slice(frame.rows(from, from + take));
+            self.footer = frame.rows(h - ft, h).to_vec();
+            self.summary.appended += 1;
+            self.frames += 1;
+            if take < new || take == room {
+                Push::Capped(take)
+            } else {
+                Push::Appended(take)
+            }
+        } else if new_view < -up_rows {
+            // New rows above. The header comes from the highest view.
+            let new = (-up_rows - new_view) as usize;
+            let take = new.min(room);
+            for k in 0..take {
+                let y = hd + (-up_rows - 1 - k as isize - new_view) as usize;
+                self.up.extend_from_slice(frame.rows(y, y + 1));
+            }
+            self.header = frame.rows(0, hd).to_vec();
+            self.summary.prepended += 1;
+            self.frames += 1;
+            if take < new || take == room {
+                Push::Capped(take)
+            } else {
+                Push::Prepended(take)
+            }
         } else {
-            Push::Appended(take)
-        }
+            self.summary.moved += 1;
+            Push::Moved
+        };
+        self.view = new_view;
+        self.last = Some((frame, sig));
+        result
     }
 }
 
@@ -381,6 +783,16 @@ mod tests {
             .collect()
     }
 
+    /// A sticky header row `y`: a bar with a few "icons" (not blank).
+    fn header_row(y: usize, w: usize) -> Vec<u8> {
+        (0..w).map(|x| if x % 9 < 2 { 230 } else { 20 + y as u8 }).collect()
+    }
+
+    /// A sticky footer row, `i` rows from the bottom (an input bar).
+    fn footer_row(i: usize, w: usize) -> Vec<u8> {
+        (0..w).map(|x| (x % 3) as u8 * 40 + i as u8).collect()
+    }
+
     /// The viewport of `page` scrolled to `scroll`, with sticky `header` and
     /// `footer` rows of their own.
     fn view(page: &[Vec<u8>], scroll: usize, h: usize, header: usize, footer: usize) -> Frame {
@@ -388,9 +800,9 @@ mod tests {
         let mut data = Vec::new();
         for y in 0..h {
             if y < header {
-                data.extend(std::iter::repeat_n(10 + y as u8, w));
+                data.extend(header_row(y, w));
             } else if y >= h - footer {
-                data.extend((0..w).map(|x| (x % 3) as u8 * 40 + (h - y) as u8));
+                data.extend(footer_row(h - y, w));
             } else {
                 data.extend_from_slice(&page[scroll + y - header]);
             }
@@ -398,16 +810,33 @@ mod tests {
         Frame::new(w, h, 1, data).unwrap()
     }
 
-    fn expected(page: &[Vec<u8>], scroll_end: usize, h: usize, header: usize, footer: usize) -> Vec<u8> {
+    /// Header once, page rows `from..to + band`, footer once.
+    fn expected(page: &[Vec<u8>], from: usize, to: usize, h: usize, header: usize, footer: usize) -> Vec<u8> {
         let w = page[0].len();
-        let first = view(page, 0, h, header, footer);
-        let mut out = first.data[..header * w].to_vec();
-        for row in &page[..scroll_end + h - header - footer] {
+        let mut out = Vec::new();
+        for y in 0..header {
+            out.extend(header_row(y, w));
+        }
+        for row in &page[from..to + h - header - footer] {
             out.extend_from_slice(row);
         }
-        let last = view(page, scroll_end, h, header, footer);
-        out.extend_from_slice(&last.data[(h - footer) * w..]);
+        for y in h - footer..h {
+            out.extend(footer_row(h - y, w));
+        }
         out
+    }
+
+    /// Deterministic ±`amp` noise on every byte (anti-aliasing, compression).
+    fn noisy(mut f: Frame, seed: u32, amp: u8) -> Frame {
+        let mut s = seed.wrapping_mul(2_654_435_761).wrapping_add(1);
+        for v in &mut f.data {
+            s ^= s << 13;
+            s ^= s >> 17;
+            s ^= s << 5;
+            let n = (s % (2 * u32::from(amp) + 1)) as i32 - i32::from(amp);
+            *v = (i32::from(*v) + n).clamp(0, 255) as u8;
+        }
+        f
     }
 
     #[test]
@@ -421,7 +850,7 @@ mod tests {
         assert_eq!(s.push(view(&p, 160, 100, 0, 0)), Push::Appended(70));
         assert_eq!(s.frames(), 4);
         assert_eq!(s.height(), 260);
-        assert_eq!(s.pixels(), &expected(&p, 160, 100, 0, 0)[..]);
+        assert_eq!(s.image(), expected(&p, 0, 160, 100, 0, 0));
     }
 
     #[test]
@@ -435,7 +864,188 @@ mod tests {
         assert_eq!(s.push(view(&p, 25, h, hd, ft)), Push::Appended(25));
         assert_eq!(s.push(view(&p, 60, h, hd, ft)), Push::Appended(35));
         assert_eq!(s.height(), h + 60);
-        assert_eq!(s.pixels(), &expected(&p, 60, h, hd, ft)[..]);
+        assert_eq!(s.image(), expected(&p, 0, 60, h, hd, ft));
+        let sum = s.summary();
+        assert_eq!((sum.header, sum.footer, sum.rows_down, sum.appended), (hd, ft, 60, 2));
+    }
+
+    #[test]
+    fn sticky_bands_with_many_offsets_including_tiny_ones() {
+        // A chat page: fixed top nav (30 rows), fixed input bar at the
+        // bottom (40 rows), a scrolling list between. Momentum scrolling
+        // delivers steps of a few pixels, then bigger ones, then a coast.
+        let p = page(1200, 48);
+        let (h, hd, ft) = (200, 30, 40);
+        let steps = [1usize, 2, 3, 1, 5, 8, 13, 40, 90, 97, 60, 21, 7, 3, 2, 1, 1];
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(view(&p, 0, h, hd, ft));
+        let mut at = 0;
+        for d in steps {
+            at += d;
+            assert_eq!(s.push(view(&p, at, h, hd, ft)), Push::Appended(d), "step {d} to {at}");
+        }
+        assert_eq!(s.image(), expected(&p, 0, at, h, hd, ft));
+        assert_eq!(s.frames(), steps.len() + 1);
+    }
+
+    #[test]
+    fn noise_from_antialiasing_or_compression_is_tolerated() {
+        let p = page(800, 48);
+        let (h, hd, ft) = (160, 20, 24);
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(noisy(view(&p, 0, h, hd, ft), 1, 2));
+        let mut at = 0;
+        for (i, d) in [3usize, 17, 44, 2, 61].into_iter().enumerate() {
+            at += d;
+            let r = s.push(noisy(view(&p, at, h, hd, ft), i as u32 + 2, 2));
+            assert_eq!(r, Push::Appended(d), "step {i}: {:?}", s.last_match());
+        }
+        // Noise only, no scroll: unchanged.
+        assert_eq!(s.push(noisy(view(&p, at, h, hd, ft), 99, 2)), Push::Unchanged);
+        assert_eq!(s.height(), h + at);
+    }
+
+    #[test]
+    fn chat_opened_at_its_newest_message_is_captured_by_scrolling_up() {
+        // The user's case: a chat web app opens scrolled to the bottom;
+        // the history is above. v0.6.2 dropped every upward frame
+        // (ScrolledUp), so the count stayed at 1.
+        let p = page(900, 40);
+        let (h, hd, ft) = (180, 24, 36);
+        let bottom = 900 - (h - hd - ft);
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(view(&p, bottom, h, hd, ft));
+        let mut at = bottom;
+        for d in [4usize, 30, 75, 2, 88, 51] {
+            at -= d;
+            assert_eq!(s.push(view(&p, at, h, hd, ft)), Push::Prepended(d), "to {at}");
+        }
+        assert_eq!(s.frames(), 7);
+        assert_eq!(s.image(), expected(&p, at, bottom, h, hd, ft));
+    }
+
+    #[test]
+    fn scrolling_back_over_stitched_rows_adds_nothing() {
+        let p = page(600, 32);
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(view(&p, 100, 100, 10, 10));
+        assert_eq!(s.push(view(&p, 140, 100, 10, 10)), Push::Appended(40));
+        assert_eq!(s.push(view(&p, 120, 100, 10, 10)), Push::Moved);
+        assert_eq!(s.push(view(&p, 105, 100, 10, 10)), Push::Moved);
+        assert_eq!(s.push(view(&p, 80, 100, 10, 10)), Push::Prepended(20));
+        assert_eq!(s.push(view(&p, 140, 100, 10, 10)), Push::Moved);
+        assert_eq!(s.push(view(&p, 200, 100, 10, 10)), Push::Appended(60));
+        assert_eq!(s.image(), expected(&p, 80, 200, 100, 10, 10));
+    }
+
+    #[test]
+    fn retina_frames_with_odd_pixel_offsets() {
+        // 2× frames: every logical row is two device rows, and scroll steps
+        // land on any device row.
+        let logical = page(500, 30);
+        let p: Vec<Vec<u8>> = logical
+            .iter()
+            .flat_map(|r| {
+                let wide: Vec<u8> = r.iter().flat_map(|&v| [v, v]).collect();
+                [wide.clone(), wide]
+            })
+            .collect();
+        let (h, hd, ft) = (240, 28, 44);
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(view(&p, 0, h, hd, ft));
+        let mut at = 0;
+        for d in [1usize, 3, 7, 2, 33, 101, 5] {
+            at += d;
+            assert_eq!(s.push(view(&p, at, h, hd, ft)), Push::Appended(d), "to {at}: {:?}", s.last_match());
+        }
+        assert_eq!(s.image(), expected(&p, 0, at, h, hd, ft));
+    }
+
+    #[test]
+    fn a_fixed_sidebar_does_not_block_the_match() {
+        // A chat web app captured with its sidebar: the left quarter (a
+        // conversation list) never moves while the messages scroll.
+        let p = page(700, 48);
+        let w = 64;
+        let side = |y: usize| -> Vec<u8> { (0..16).map(|x| ((y * 13 + x * 5) % 200) as u8 + 30).collect() };
+        let frame = |at: usize| {
+            let f = view(&p, at, 150, 20, 30);
+            let mut data = Vec::new();
+            for y in 0..150 {
+                data.extend(side(y));
+                data.extend_from_slice(&f.data[y * 48..(y + 1) * 48]);
+            }
+            Frame::new(w, 150, 1, data).unwrap()
+        };
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(frame(0));
+        let mut at = 0;
+        for d in [2usize, 25, 60, 4] {
+            at += d;
+            assert_eq!(s.push(frame(at)), Push::Appended(d), "to {at}: {:?}", s.last_match());
+        }
+        assert!(s.last_match().unwrap().fixed_cells >= 16);
+        // The message column is exact.
+        let img = s.image();
+        let exp = expected(&p, 0, at, 150, 20, 30);
+        for y in 0..s.height() {
+            assert_eq!(&img[y * w + 16..(y + 1) * w], &exp[y * 48..(y + 1) * 48], "row {y}");
+        }
+    }
+
+    #[test]
+    fn overlay_scrollbar_appearing_and_moving_is_tolerated() {
+        // macOS overlay scrollbars fade in when scrolling starts and the
+        // thumb moves with the content: the rightmost columns differ on
+        // many rows of every pair.
+        let p = page(900, 64);
+        let frame = |at: usize, bar: bool| {
+            let mut f = view(&p, at, 200, 20, 20);
+            if bar {
+                let thumb = 20 + at * 160 / 900;
+                for y in 20..180 {
+                    let v = if (thumb..thumb + 40).contains(&y) { 90 } else { 200 };
+                    f.data[y * 64 + 62..y * 64 + 64].fill(v);
+                }
+            }
+            f
+        };
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(frame(0, false));
+        let mut at = 0;
+        for d in [6usize, 30, 3, 80] {
+            at += d;
+            assert_eq!(s.push(frame(at, true)), Push::Appended(d), "to {at}: {:?}", s.last_match());
+        }
+        assert_eq!(s.height(), 200 + at);
+    }
+
+    #[test]
+    fn hud_free_frames_stitch_exactly() {
+        // With Lumora excluded from the capture, frames carry only the
+        // page; nothing of ours ends up in the image.
+        let p = page(500, 40);
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(view(&p, 0, 120, 16, 24));
+        for at in [10usize, 45, 90] {
+            assert!(matches!(s.push(view(&p, at, 120, 16, 24)), Push::Appended(_)));
+        }
+        assert_eq!(s.image(), expected(&p, 0, 90, 120, 16, 24));
+    }
+
+    #[test]
+    fn a_torn_frame_is_skipped() {
+        let p = page(800, 32);
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(view(&p, 0, 160, 0, 0));
+        assert_eq!(s.push(view(&p, 40, 160, 0, 0)), Push::Appended(40));
+        // Top half already at 80, bottom half still at 40 (mid-redraw).
+        let mut torn = view(&p, 80, 160, 0, 0);
+        let old = view(&p, 40, 160, 0, 0);
+        torn.data[80 * 32..].copy_from_slice(&old.data[80 * 32..]);
+        assert!(matches!(s.push(torn), Push::Lost(1) | Push::Unchanged), "{:?}", s.last_match());
+        assert_eq!(s.push(view(&p, 80, 160, 0, 0)), Push::Appended(40));
+        assert_eq!(s.image(), expected(&p, 0, 80, 160, 0, 0));
     }
 
     #[test]
@@ -453,14 +1063,14 @@ mod tests {
     }
 
     #[test]
-    fn scrolling_up_is_ignored() {
+    fn scrolling_up_from_the_start_prepends() {
         let p = page(300, 16);
         let mut s = ScrollStitcher::new(MAX_HEIGHT);
         s.push(view(&p, 50, 100, 0, 0));
         assert_eq!(find_offset(&view(&p, 50, 100, 0, 0), &view(&p, 20, 100, 0, 0)).map(|o| o.dy), Some(-30));
-        assert_eq!(s.push(view(&p, 20, 100, 0, 0)), Push::ScrolledUp);
-        // Still compared against the last kept frame.
+        assert_eq!(s.push(view(&p, 20, 100, 0, 0)), Push::Prepended(30));
         assert_eq!(s.push(view(&p, 80, 100, 0, 0)), Push::Appended(30));
+        assert_eq!(s.image(), expected(&p, 20, 80, 100, 0, 0));
     }
 
     #[test]
@@ -469,7 +1079,7 @@ mod tests {
         let mut s = ScrollStitcher::new(MAX_HEIGHT);
         s.push(view(&p, 0, 100, 0, 0));
         s.push(view(&p, 40, 100, 0, 0));
-        let before = s.pixels().to_vec();
+        let before = s.image();
         // Skipped while it might still line up again…
         for n in 1..LOST_LIMIT {
             let r = s.push(view(&p, 400, 100, 0, 0));
@@ -480,7 +1090,7 @@ mod tests {
         let r = s.push(view(&p, 400, 100, 0, 0));
         assert_eq!(r, Push::NoOverlap);
         assert!(r.is_final());
-        assert_eq!(s.pixels(), &before[..]);
+        assert_eq!(s.image(), before);
         assert_eq!(s.height(), 140);
     }
 
@@ -494,7 +1104,7 @@ mod tests {
         assert_eq!(s.push(view(&p, 500, 100, 0, 0)), Push::Lost(1));
         // …and the next good one lines up with the last kept frame.
         assert_eq!(s.push(view(&p, 70, 100, 0, 0)), Push::Appended(40));
-        assert_eq!(s.pixels(), &expected(&p, 70, 100, 0, 0)[..]);
+        assert_eq!(s.image(), expected(&p, 0, 70, 100, 0, 0));
         // The run of lost frames was reset.
         assert_eq!(s.push(view(&p, 500, 100, 0, 0)), Push::Lost(1));
     }
@@ -566,7 +1176,7 @@ mod tests {
         assert_eq!(r, Push::Restarted);
         assert!(!r.is_final());
         assert!(!s.scrolled());
-        assert_eq!(s.pixels(), &active.data[..]);
+        assert_eq!(s.image(), active.data);
         // Then the user scrolls the (now active) window: it stitches.
         assert_eq!(s.push(tint(view(&p, 30, 100, 0, 0), 90)), Push::Appended(30));
         assert_eq!(s.height(), 130);
@@ -584,8 +1194,8 @@ mod tests {
         let blank = Frame::new(8, 60, 1, vec![255; 480]).unwrap();
         let mut other = blank.clone();
         other.data[..8 * 20].fill(0);
-        // Only plain rows line up at every shift: no evidence, no match.
-        assert_eq!(find_offset_rows(&rows(&blank), &rows(&other)), None);
+        // Only blank rows line up at every shift: no evidence, no match.
+        assert_eq!(find_offset(&blank, &other), None);
     }
 
     #[test]
@@ -598,7 +1208,7 @@ mod tests {
         assert_eq!(r, Push::Capped(30));
         assert!(r.is_final());
         assert_eq!(s.height(), 180);
-        assert_eq!(s.pixels(), &expected(&p, 100, 100, 0, 0)[..180 * 8]);
+        assert_eq!(s.image(), expected(&p, 0, 100, 100, 0, 0)[..180 * 8]);
     }
 
     #[test]
@@ -615,5 +1225,23 @@ mod tests {
         let (w, h, px) = s.into_image();
         assert_eq!((w, h, px.len()), (10, 113, 10 * 113 * 4));
         assert!(Frame::new(3, 3, 4, vec![0; 5]).is_none());
+    }
+
+    #[test]
+    fn match_info_and_summary_describe_the_session() {
+        let p = page(400, 32);
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(view(&p, 0, 100, 12, 8));
+        s.push(view(&p, 30, 100, 12, 8));
+        let m = *s.last_match().unwrap();
+        assert_eq!((m.dy, m.header), (Some(30), 12));
+        // A blank page row right above the input bar is the same in both
+        // frames too; it may count as footer (harmless: it is shown once).
+        assert!((8..=9).contains(&m.footer));
+        assert!(m.to_string().starts_with("dy=30 header=12 footer="));
+        s.push(view(&p, 30, 100, 12, 8));
+        let sum = s.summary();
+        assert_eq!((sum.pushed, sum.appended, sum.unchanged, sum.height), (3, 1, 1, 130));
+        assert!(sum.to_string().contains("1 appended"));
     }
 }

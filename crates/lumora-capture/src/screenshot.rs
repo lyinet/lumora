@@ -111,11 +111,8 @@ fn prepare(content: &ShareableContent, target: ShotTarget, opts: ShotOptions) ->
                 }
                 .ok_or(CaptureError::TargetGone("display"))?;
                 let display = content.sc_display(display_info.id).ok_or(CaptureError::TargetGone("display"))?;
-                let filter = SCContentFilter::initWithDisplay_excludingWindows(
-                    SCContentFilter::alloc(),
-                    &display,
-                    &content.own_windows(),
-                );
+                // Never Lumora's own windows (HUDs, toasts, border, controls).
+                let filter = content.display_filter(&display, &[]);
                 let scale = if opts.retina { display_info.scale } else { 1.0 };
                 let frame = match target {
                     ShotTarget::Area(r) => {
