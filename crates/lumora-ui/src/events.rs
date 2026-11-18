@@ -35,6 +35,8 @@ pub enum OverlayMode {
     Record,
     /// Choose a region to read text from (OCR): frozen backdrop, no loupe.
     Text,
+    /// Choose a region for scrolling capture: live backdrop, no loupe.
+    Scroll,
 }
 
 /// Buttons and gestures on a Quick Access card.
@@ -282,6 +284,10 @@ pub enum UiEvent {
     CountdownFinished,
     CountdownCancelled,
     StopRecording,
+    /// Scrolling capture control: Done (or ↩) finishes, Cancel (or Esc)
+    /// throws the frames away.
+    ScrollCaptureDone,
+    ScrollCaptureCancel,
     SettingsChanged(Box<Settings>),
     /// An editor's beautify panel changed the style ("remember last"): the
     /// app stores it in `Settings::beautify`, saves, and pushes it to the

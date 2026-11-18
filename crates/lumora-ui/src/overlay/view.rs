@@ -368,7 +368,7 @@ fn build_layers(
 ) -> Layers {
     let bounds = Rect::new(0.0, 0.0, screen.width(), screen.height());
     let accent = match mode {
-        OverlayMode::Capture | OverlayMode::Text => color::ACCENT,
+        OverlayMode::Capture | OverlayMode::Text | OverlayMode::Scroll => color::ACCENT,
         OverlayMode::Record => color::RECORD,
     };
 

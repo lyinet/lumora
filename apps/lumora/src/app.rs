@@ -104,6 +104,8 @@ pub enum Mode {
     },
     /// The writer is finalising the file.
     Finishing,
+    /// Scrolling capture: frames are being taken and stitched.
+    Scrolling(Box<crate::scroll_flow::ScrollSession>),
 }
 
 impl Mode {
@@ -375,6 +377,7 @@ impl App {
                 system::open_folder(&folder);
             }
             Command::ShowHistory => self.show_history(),
+            Command::ScrollingCapture => self.toggle_scrolling_capture(),
             Command::OpenDocument => self.open_document_panel(),
             Command::MakeTutorial => self.choose_recording_for_tutorial(),
             Command::Transcribe => self.choose_recording_for_transcript(),
@@ -432,6 +435,8 @@ impl App {
             UiEvent::CountdownFinished => self.on_countdown_finished(),
             UiEvent::CountdownCancelled => self.cancel_recording_setup(),
             UiEvent::StopRecording => self.stop_recording(),
+            UiEvent::ScrollCaptureDone => self.finish_scrolling_capture(),
+            UiEvent::ScrollCaptureCancel => self.cancel_scrolling_capture(),
             UiEvent::SettingsChanged(s) => self.apply_settings(*s),
             UiEvent::BeautifyChanged { from, style } => self.on_beautify_changed(from, *style),
             UiEvent::ShortcutRecording(on) => self.hotkeys.borrow_mut().suspend(on),

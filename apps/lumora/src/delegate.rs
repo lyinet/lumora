@@ -91,6 +91,11 @@ define_class!(
             post_command(Command::OpenFolder);
         }
 
+        #[unsafe(method(scrollingCapture:))]
+        fn scrolling_capture(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::ScrollingCapture);
+        }
+
         #[unsafe(method(showHistory:))]
         fn show_history(&self, _sender: Option<&AnyObject>) {
             post_command(Command::ShowHistory);

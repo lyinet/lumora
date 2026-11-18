@@ -71,6 +71,64 @@ pub fn stitch(width: u32, height: u32, parts: &[StitchPart<'_>]) -> Result<CFRet
     CGBitmapContextCreateImage(Some(&ctx)).ok_or(CaptureError::Empty)
 }
 
+/// 8-bit premultiplied BGRA bitmap context of `width`×`height` (sRGB) with a
+/// buffer CG allocates.
+fn bgra_context(width: usize, height: usize) -> Result<CFRetained<objc2_core_graphics::CGContext>, CaptureError> {
+    use objc2_core_graphics::{CGBitmapContextCreate, CGColorSpace, CGImageAlphaInfo};
+    let space = CGColorSpace::with_name(Some(unsafe { objc2_core_graphics::kCGColorSpaceSRGB }))
+        .or_else(CGColorSpace::new_device_rgb)
+        .ok_or_else(|| CaptureError::Framework("no colour space".into()))?;
+    let info = CGImageAlphaInfo::PremultipliedFirst.0 | CGImageByteOrderInfo::Order32Little.0;
+    // SAFETY: null data lets CG allocate; CG computes the row bytes.
+    unsafe { CGBitmapContextCreate(std::ptr::null_mut(), width, height, 8, 0, Some(&space), info) }
+        .ok_or_else(|| CaptureError::Framework("could not create bitmap context".into()))
+}
+
+/// The image's pixels as tightly packed 8-bit BGRA rows (scrolling capture
+/// compares and stitches these). `None` for an empty image.
+pub fn bgra_pixels(image: &CGImage) -> Option<(usize, usize, Vec<u8>)> {
+    use objc2_core_graphics::{CGBitmapContextGetBytesPerRow, CGBitmapContextGetData, CGContext};
+    let (w, h) = pixel_size(image);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let ctx = bgra_context(w, h).ok()?;
+    CGContext::draw_image(Some(&ctx), rect_to_cg(Rect::new(0.0, 0.0, w as f64, h as f64)), Some(image));
+    let base = CGBitmapContextGetData(Some(&ctx)) as *const u8;
+    let stride = CGBitmapContextGetBytesPerRow(Some(&ctx));
+    if base.is_null() || stride < w * 4 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        // SAFETY: the context owns `h × stride` bytes at `base`; each row
+        // slice stays inside it. Bitmap rows run top to bottom in memory.
+        out.extend_from_slice(unsafe { std::slice::from_raw_parts(base.add(y * stride), w * 4) });
+    }
+    Some((w, h, out))
+}
+
+/// An image from tightly packed 8-bit premultiplied BGRA rows (the
+/// [`bgra_pixels`] layout).
+pub fn from_bgra(width: usize, height: usize, data: &[u8]) -> Result<CFRetained<CGImage>, CaptureError> {
+    use objc2_core_graphics::{CGBitmapContextCreateImage, CGBitmapContextGetBytesPerRow, CGBitmapContextGetData};
+    if width == 0 || height == 0 || data.len() != width * height * 4 {
+        return Err(CaptureError::Empty);
+    }
+    // CG owns the buffer, so the image's copy-on-write stays valid.
+    let ctx = bgra_context(width, height)?;
+    let base = CGBitmapContextGetData(Some(&ctx)) as *mut u8;
+    let stride = CGBitmapContextGetBytesPerRow(Some(&ctx));
+    if base.is_null() || stride < width * 4 {
+        return Err(CaptureError::Empty);
+    }
+    for (y, row) in data.chunks_exact(width * 4).enumerate() {
+        // SAFETY: row `y` of the context's `height × stride` buffer.
+        unsafe { std::ptr::copy_nonoverlapping(row.as_ptr(), base.add(y * stride), width * 4) };
+    }
+    CGBitmapContextCreateImage(Some(&ctx)).ok_or(CaptureError::Empty)
+}
+
 /// A CPU copy of an image's pixels, used to read colours under the loupe.
 pub struct PixelBuffer {
     data: CFRetained<CFData>,

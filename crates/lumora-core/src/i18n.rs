@@ -618,6 +618,17 @@ messages! {
     ToastSubtitlesBurned => "Subtitled recording saved", "已保存带字幕的录屏";
     ToastSubtitlesBurnFailed => "Couldn’t burn in the subtitles", "无法烧录字幕";
     ToastSubtitlesNone => "There are no subtitles to burn in", "没有可烧录的字幕";
+
+    // -- scrolling capture (v0.6) -------------------------------------------------
+    ScrollingCapture => "Scrolling Capture", "滚动截图";
+    HintScroll => "Drag to choose the area to scroll through  ·  Esc to cancel", "拖动选择要滚动截取的区域  ·  按 Esc 取消";
+    ScrollPrompt => "Scroll slowly…", "请缓慢滚动…";
+    ScrollFrames => "{0} frames", "已截取 {0} 帧";
+    ScrollDone => "Done", "完成";
+    ScrollCancel => "Cancel", "取消";
+    ToastScrollCapped => "Scrolling capture reached its height limit", "滚动截图已达到高度上限";
+    ToastScrollNoOverlap => "Lost track of the scrolling, so the capture stopped there", "无法衔接滚动内容，截图已在此处停止";
+    ToastScrollNoOverlapDetail => "Scroll a little slower next time.", "下次请滚动得慢一些。";
 }
 
 #[cfg(test)]

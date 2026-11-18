@@ -87,11 +87,12 @@ impl StatusBar {
 
         let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str("Lumora"));
         menu.setAutoenablesItems(false);
-        let entries: [(Action, Sel); 5] = [
+        let entries: [(Action, Sel); 6] = [
             (Action::CaptureArea, sel!(captureArea:)),
             (Action::CaptureFullscreen, sel!(captureFullscreen:)),
             (Action::CaptureWindow, sel!(captureWindow:)),
             (Action::CaptureText, sel!(captureText:)),
+            (Action::ScrollingCapture, sel!(scrollingCapture:)),
             (Action::RecordScreen, sel!(toggleRecording:)),
         ];
         let mut action_items = Vec::new();

@@ -199,6 +199,9 @@ pub struct Shortcuts {
     /// Capture history window (v0.6). Missing in older files → ⌥⇧H.
     #[serde(with = "shortcut_slot")]
     pub history: Option<Hotkey>,
+    /// Scrolling capture (v0.6). Missing in older files → ⌥⇧S.
+    #[serde(with = "shortcut_slot")]
+    pub scrolling_capture: Option<Hotkey>,
 }
 
 /// A cleared shortcut is written as `""`, so it stays cleared: an omitted
@@ -300,6 +303,7 @@ impl Default for Shortcuts {
             record_screen: d(Action::RecordScreen),
             open_folder: d(Action::OpenFolder),
             history: d(Action::History),
+            scrolling_capture: d(Action::ScrollingCapture),
         }
     }
 }
@@ -314,6 +318,7 @@ impl Shortcuts {
             Action::RecordScreen => self.record_screen,
             Action::OpenFolder => self.open_folder,
             Action::History => self.history,
+            Action::ScrollingCapture => self.scrolling_capture,
         }
     }
 
@@ -326,6 +331,7 @@ impl Shortcuts {
             Action::RecordScreen => &mut self.record_screen,
             Action::OpenFolder => &mut self.open_folder,
             Action::History => &mut self.history,
+            Action::ScrollingCapture => &mut self.scrolling_capture,
         };
         *slot = h;
     }
@@ -637,10 +643,10 @@ mod tests {
     #[test]
     fn shortcuts_accessors() {
         let mut s = Shortcuts::default();
-        assert_eq!(s.bound().len(), 7);
+        assert_eq!(s.bound().len(), 8);
         s.set(Action::OpenFolder, None);
         assert_eq!(s.get(Action::OpenFolder), None);
-        assert_eq!(s.bound().len(), 6);
+        assert_eq!(s.bound().len(), 7);
     }
 
     #[test]
@@ -729,6 +735,7 @@ mod tests {
         let s = Settings::from_toml("[shortcuts]\nopen_folder = \"⌥⇧O\"\n[recording]\nfps = 30\n").unwrap();
         assert_eq!(s.history.retention, Retention::KeepAll);
         assert_eq!(s.shortcuts.history, "⌥⇧H".parse().ok());
+        assert_eq!(s.shortcuts.scrolling_capture, "⌥⇧S".parse().ok());
         let mut t = Settings::default();
         t.history.retention = Retention::Days30;
         t.shortcuts.history = None;

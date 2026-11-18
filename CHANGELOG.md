@@ -63,6 +63,16 @@ All notable changes to Lumora are documented here. The format follows
   rounded semi-black background box (default Medium, Bottom, box on); white
   text, at most two lines per cue (CJK-aware wrapping; longer lines become
   timed sub-cues).
+- **Scrolling capture** (<kbd>⌥⇧S</kbd>, or **Scrolling Capture** in the
+  menu bar): choose an area on the live screen, then scroll slowly. The
+  area is screenshotted every 150 ms and frames that moved are stitched
+  (row-hash matching over the overlap; sticky headers / footers detected
+  and kept once; scrolling up ignored). A non-activating control panel,
+  left out of the frames, shows the frame count with Done (↩, or the
+  shortcut again) and Cancel (Esc). Losing track of the scroll or reaching
+  20,000 px stops with a toast and keeps what was stitched. No synthetic
+  scroll events, so no Accessibility permission. The result goes through
+  the normal capture pipeline (Quick Access, save / copy, history, editor).
 - Settings → General → **Keep history** (everything / 30 days / 90 days).
   Older captures are only offered for the Trash from a banner in the
   history window, after a confirmation; nothing is ever deleted outright.
