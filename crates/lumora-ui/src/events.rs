@@ -81,6 +81,12 @@ pub enum TranscriptAction {
     ExportVtt(Box<lumora_core::transcript::Transcript>),
     CopyChapters(Box<lumora_core::transcript::Transcript>),
     CopySummary(Box<lumora_core::transcript::Transcript>),
+    /// Burn the subtitles into a copy of the movie with this style.
+    BurnIn(Box<lumora_core::transcript::Transcript>, lumora_core::transcript::burn::SubtitleStyle),
+    /// Cancel the running burn-in.
+    CancelBurn,
+    /// The burn-in style controls changed (the app saves them).
+    SubtitleStyle(lumora_core::transcript::burn::SubtitleStyle),
     /// The window closed (the app saves `.transcript.json` and drops it).
     Closed(Box<lumora_core::transcript::Transcript>),
 }

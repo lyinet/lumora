@@ -17,6 +17,7 @@ use crate::beautify::BeautifyStyle;
 use crate::hotkey::Hotkey;
 use crate::i18n::LanguagePref;
 use crate::redact::RedactSettings;
+use crate::transcript::burn::{SubtitlePosition, SubtitleSize, SubtitleStyle};
 
 /// Errors from loading or saving settings.
 #[derive(Debug, Error)]
@@ -116,6 +117,12 @@ pub struct Transcribe {
     /// On-device engine: refuse (instead of using Apple's servers) when the
     /// recogniser can't run locally for the language.
     pub strict_on_device: bool,
+    /// Burned-in subtitle text size (v0.6).
+    pub subtitle_size: SubtitleSize,
+    /// Burned-in subtitles at the bottom or top (v0.6).
+    pub subtitle_position: SubtitlePosition,
+    /// Burned-in subtitles get a semi-black box behind them (v0.6).
+    pub subtitle_box: bool,
 }
 
 /// Default cloud transcription model.
@@ -129,7 +136,24 @@ impl Default for Transcribe {
             audio_source: TranscribeAudio::Mixed,
             cloud_model: DEFAULT_CLOUD_MODEL.to_string(),
             strict_on_device: true,
+            subtitle_size: SubtitleSize::Medium,
+            subtitle_position: SubtitlePosition::Bottom,
+            subtitle_box: true,
         }
+    }
+}
+
+impl Transcribe {
+    /// The burn-in style these settings describe.
+    pub fn subtitle_style(&self) -> SubtitleStyle {
+        SubtitleStyle { size: self.subtitle_size, position: self.subtitle_position, background: self.subtitle_box }
+    }
+
+    /// Remember `style` for the next burn-in.
+    pub fn set_subtitle_style(&mut self, style: SubtitleStyle) {
+        self.subtitle_size = style.size;
+        self.subtitle_position = style.position;
+        self.subtitle_box = style.background;
     }
 }
 
@@ -477,6 +501,23 @@ mod tests {
         let blank = Settings::from_toml("[transcribe]\ncloud_model = \"  \"\nlanguage = \"en-US\"\n").unwrap();
         assert_eq!(blank.transcribe.cloud_model, "whisper-1");
         assert_eq!(blank.transcribe.language, TranscribeLanguage::EnUs);
+    }
+
+    #[test]
+    fn subtitle_style_defaults_and_round_trips() {
+        let old = Settings::from_toml("[transcribe]\nengine = \"cloud\"\n").unwrap();
+        assert_eq!(old.transcribe.subtitle_style(), SubtitleStyle::default());
+        let mut s = Settings::default();
+        s.transcribe.set_subtitle_style(SubtitleStyle {
+            size: SubtitleSize::Large,
+            position: SubtitlePosition::Top,
+            background: false,
+        });
+        let t = s.to_toml().unwrap();
+        assert!(t.contains("subtitle_size = \"large\"") && t.contains("subtitle_position = \"top\""));
+        let back = Settings::from_toml(&t).unwrap();
+        assert_eq!(back.transcribe.subtitle_style(), s.transcribe.subtitle_style());
+        assert!(!back.transcribe.subtitle_box);
     }
 
     #[test]

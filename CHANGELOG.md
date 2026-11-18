@@ -50,6 +50,19 @@ All notable changes to Lumora are documented here. The format follows
   `AVAssetImageGenerator` and are written by ImageIO (loops forever,
   drift-free per-frame delays, at most 1200 frames). Both exports run off
   the main thread with a progress bar and Cancel.
+- **Burn In Subtitles…** in the subtitles window (enabled when there are
+  subtitle lines): writes `<name> (subtitled).<ext>` next to the recording
+  (the captures folder for a temporary one) with the edited subtitles drawn
+  into the video, then shows it in Quick Access. Built with an
+  `AVMutableComposition` and a Core Animation overlay
+  (`AVVideoCompositionCoreAnimationTool`: one text layer per cue, shown only
+  during its time), exported at the highest quality with the audio kept;
+  runs off the main thread with a progress bar, Cancel and toasts. Style in
+  the window's bottom bar, remembered in `[transcribe]`: size Small /
+  Medium / Large (scaled to the video), position Bottom / Top, and a
+  rounded semi-black background box (default Medium, Bottom, box on); white
+  text, at most two lines per cue (CJK-aware wrapping; longer lines become
+  timed sub-cues).
 - Settings → General → **Keep history** (everything / 30 days / 90 days).
   Older captures are only offered for the Trash from a banner in the
   history window, after a confirmation; nothing is ever deleted outright.

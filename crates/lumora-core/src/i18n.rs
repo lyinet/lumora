@@ -605,6 +605,19 @@ messages! {
     ToastGifFailed => "Couldn’t make the GIF", "无法生成 GIF";
     ToastClipCancelled => "Export cancelled", "已取消导出";
     ToastClipBusy => "Wait for the current export to finish", "请等待当前导出完成";
+    TranscriptBurnIn => "Burn In Subtitles…", "烧录字幕…";
+    SubtitleSizeLabel => "Size:", "字号：";
+    SubtitleSizeSmall => "Small", "小";
+    SubtitleSizeMedium => "Medium", "中";
+    SubtitleSizeLarge => "Large", "大";
+    SubtitlePositionLabel => "Position:", "位置：";
+    SubtitlePositionBottom => "Bottom", "底部";
+    SubtitlePositionTop => "Top", "顶部";
+    SubtitleBackgroundBox => "Background box", "背景框";
+    ClipBurningSubtitles => "Burning in subtitles…", "正在烧录字幕…";
+    ToastSubtitlesBurned => "Subtitled recording saved", "已保存带字幕的录屏";
+    ToastSubtitlesBurnFailed => "Couldn’t burn in the subtitles", "无法烧录字幕";
+    ToastSubtitlesNone => "There are no subtitles to burn in", "没有可烧录的字幕";
 }
 
 #[cfg(test)]

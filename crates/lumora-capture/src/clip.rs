@@ -33,7 +33,7 @@ pub struct MovieInfo {
     pub height: u32,
 }
 
-fn asset_for(path: &Path) -> Result<objc2::rc::Retained<AVAsset>, CaptureError> {
+pub(crate) fn asset_for(path: &Path) -> Result<objc2::rc::Retained<AVAsset>, CaptureError> {
     let url = crate::clipboard::file_url(path).ok_or_else(|| CaptureError::Framework("invalid movie path".into()))?;
     // SAFETY: opening a local file asset.
     Ok(unsafe { AVAsset::assetWithURL(&url) })

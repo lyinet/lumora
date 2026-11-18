@@ -187,7 +187,7 @@ impl Editable {
 pub struct App {
     pub mtm: MainThreadMarker,
     pub settings: RefCell<Settings>,
-    settings_path: Option<PathBuf>,
+    pub(crate) settings_path: Option<PathBuf>,
     pub home: PathBuf,
     pub status: StatusBar,
     hotkeys: RefCell<HotkeyManager>,

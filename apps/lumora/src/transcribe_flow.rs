@@ -39,6 +39,8 @@ pub struct OpenTranscript {
     pub window: TranscriptWindow,
     /// Where the movie is now (updated when Save moves it).
     pub movie: PathBuf,
+    /// The running burn-in's cancel flag.
+    pub burn: Option<Arc<AtomicBool>>,
 }
 
 /// How the background run ended.
@@ -404,8 +406,9 @@ impl App {
             return;
         }
         let id = self.next_id();
-        let window = TranscriptWindow::show(self.mtm, id, t, &stem(&movie), self.sink.clone());
-        self.transcripts.borrow_mut().insert(id, OpenTranscript { window, movie });
+        let style = self.settings.borrow().transcribe.subtitle_style();
+        let window = TranscriptWindow::show(self.mtm, id, t, &stem(&movie), style, self.sink.clone());
+        self.transcripts.borrow_mut().insert(id, OpenTranscript { window, movie, burn: None });
     }
 
     pub fn on_transcript(self: &Rc<Self>, id: u64, action: TranscriptAction) {
@@ -438,8 +441,15 @@ impl App {
                 lumora_capture::clipboard::copy_text(&md);
                 self.notify_text(ToastKind::Success, tr(Msg::ToastSummaryCopied), None);
             }
+            TranscriptAction::BurnIn(t, style) => {
+                save_transcript(&movie, &t);
+                self.burn_subtitles(id, &t, style);
+            }
+            TranscriptAction::CancelBurn => self.cancel_burn(id),
+            TranscriptAction::SubtitleStyle(style) => self.subtitle_style_changed(style),
             TranscriptAction::Closed(t) => {
                 save_transcript(&movie, &t);
+                self.cancel_burn(id);
                 // Drop the window after this event (its delegate is mid-close).
                 let removed = self.transcripts.borrow_mut().remove(&id);
                 drop(removed);

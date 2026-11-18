@@ -94,6 +94,11 @@ pub fn trimmed_path(movie: &Path, exists: impl Fn(&Path) -> bool) -> PathBuf {
     sibling(movie, "trimmed", None, exists)
 }
 
+/// `<stem> (subtitled).<ext>` next to `movie`, numbered when taken.
+pub fn subtitled_path(movie: &Path, exists: impl Fn(&Path) -> bool) -> PathBuf {
+    sibling(movie, "subtitled", None, exists)
+}
+
 /// `<stem>.gif` next to `movie` (`<stem> (trimmed).gif` for a part of it),
 /// numbered when taken.
 pub fn gif_path(movie: &Path, trimmed: bool, exists: impl Fn(&Path) -> bool) -> PathBuf {
@@ -289,6 +294,9 @@ mod tests {
         assert_eq!(trimmed_path(movie, |p| p == taken), PathBuf::from("/caps/Rec 1 (trimmed) (2).mp4"));
         assert_eq!(gif_path(movie, false, |_| false), PathBuf::from("/caps/Rec 1.gif"));
         assert_eq!(gif_path(movie, true, |_| false), PathBuf::from("/caps/Rec 1 (trimmed).gif"));
+        assert_eq!(subtitled_path(movie, |_| false), PathBuf::from("/caps/Rec 1 (subtitled).mp4"));
+        let taken = PathBuf::from("/caps/Rec 1 (subtitled).mp4");
+        assert_eq!(subtitled_path(movie, |p| p == taken), PathBuf::from("/caps/Rec 1 (subtitled) (2).mp4"));
     }
 
     fn click(t: f64) -> ClickEvent {
