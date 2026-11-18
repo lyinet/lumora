@@ -27,6 +27,7 @@ pub mod geometry;
 pub mod history;
 pub mod hotkey;
 pub mod i18n;
+pub mod install;
 pub mod keystroke;
 pub mod layout;
 pub mod lumora_doc;

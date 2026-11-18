@@ -31,6 +31,10 @@ define_class!(
     unsafe impl NSApplicationDelegate for AppDelegate {
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn did_finish_launching(&self, _notification: &NSNotification) {
+            // Translocated / DMG copy: offer to move first (quits on success).
+            if crate::relocate::check(self.mtm()) {
+                return;
+            }
             let app = App::start(self.mtm(), self);
             *self.ivars().app.borrow_mut() = Some(app);
             let pending = std::mem::take(&mut *self.ivars().pending.borrow_mut());

@@ -190,6 +190,17 @@ messages! {
     Relaunch => "Relaunch", "重新启动";
     NotNow => "Not Now", "以后再说";
 
+    // -- install location (v0.6.1) ----------------------------------------------
+    LocationTitle => "Move Lumora to the Applications folder?", "要将 Lumora 移到“应用程序”文件夹吗？";
+    LocationTranslocated => "macOS is running Lumora from a temporary, read-only copy, so the Screen Recording permission may not stick and Lumora may not appear in System Settings.\n\nMove it to Applications and Lumora reopens from there.",
+        "macOS 正从一个临时的只读副本运行 Lumora，因此“屏幕录制”权限可能无法保留，Lumora 也可能不会出现在“系统设置”中。\n\n移到“应用程序”后，Lumora 会从那里重新打开。";
+    LocationDiskImage => "Lumora is running from the disk image. Permissions granted now won’t carry over to the copy you install, and the disk image goes away when ejected.\n\nMove it to Applications and Lumora reopens from there.",
+        "Lumora 正从磁盘映像中运行。现在授予的权限不会转移到你安装的副本，推出磁盘映像后它也会消失。\n\n移到“应用程序”后，Lumora 会从那里重新打开。";
+    MoveToApplications => "Move to Applications", "移到“应用程序”";
+    LocationMoveFailed => "Couldn’t move Lumora to Applications", "无法将 Lumora 移到“应用程序”";
+    LocationMoveFailedDetail => "{0}\n\nDrag Lumora into the Applications folder in Finder yourself, then open it from there.",
+        "{0}\n\n请在“访达”中手动将 Lumora 拖到“应用程序”文件夹，然后从那里打开。";
+
     // -- settings -----------------------------------------------------------------
     SettingsTitle => "Lumora Settings", "Lumora 设置";
     TabGeneral => "General", "通用";
