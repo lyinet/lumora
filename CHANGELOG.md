@@ -36,6 +36,20 @@ All notable changes to Lumora are documented here. The format follows
   stored. A listen-only session event tap exists only while recording; it
   needs Input Monitoring, which is requested when missing — the recording
   goes ahead without keystrokes and a toast explains how to allow it.
+- **Trim and GIF export for recordings** — **Trim / GIF…** on a
+  recording's Quick Access card and in the capture history opens a trim
+  window: a preview frame, Start / End sliders with times, and the clip
+  length. **Save Trimmed** exports the range with `AVAssetExportSession`
+  (passthrough, so no re-encode; highest quality when passthrough isn't
+  offered) to `<name> (trimmed).<ext>` next to a saved recording, or
+  replaces a temporary one in place. The click log (`.events.json`) and
+  transcript are shifted to the new timeline (segments and chapters
+  clipped to the range); tutorial steps are not carried over. **Export
+  GIF…** uses the same range at 480 / 640 / 800 px or the original width
+  and 10 / 15 / 20 fps, with a size estimate; frames come from
+  `AVAssetImageGenerator` and are written by ImageIO (loops forever,
+  drift-free per-frame delays, at most 1200 frames). Both exports run off
+  the main thread with a progress bar and Cancel.
 - Settings → General → **Keep history** (everything / 30 days / 90 days).
   Older captures are only offered for the Trash from a banner in the
   history window, after a confirmation; nothing is ever deleted outright.

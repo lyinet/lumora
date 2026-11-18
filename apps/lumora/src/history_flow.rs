@@ -357,6 +357,11 @@ impl App {
                 }
             }
             HistoryAction::Delete(path) => self.history_delete(&path),
+            HistoryAction::Trim(path) => {
+                if self.history_check_exists(&path) {
+                    self.open_trim(path, false, None);
+                }
+            }
             HistoryAction::TrashExpired => self.history_trash_expired(),
         }
     }

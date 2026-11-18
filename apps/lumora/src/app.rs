@@ -226,6 +226,8 @@ pub struct App {
     pub transcribe_jobs: RefCell<HashMap<PathBuf, std::sync::Arc<std::sync::atomic::AtomicBool>>>,
     /// Capture history: index, window and thumbnail cache.
     pub history: RefCell<crate::history_flow::HistoryState>,
+    /// Open trim / GIF windows, by id.
+    pub trims: RefCell<crate::clip_flow::Trims>,
 }
 
 impl App {
@@ -307,6 +309,7 @@ impl App {
                 transcripts: RefCell::new(HashMap::new()),
                 transcribe_jobs: RefCell::new(HashMap::new()),
                 history: RefCell::new(Default::default()),
+                trims: RefCell::new(HashMap::new()),
             }
         });
         APP.with(|a| *a.borrow_mut() = Rc::downgrade(&app));
@@ -437,6 +440,7 @@ impl App {
             UiEvent::Tutorial { id, action } => self.on_tutorial(id, action),
             UiEvent::Transcript { id, action } => self.on_transcript(id, action),
             UiEvent::History(action) => self.on_history(action),
+            UiEvent::Trim { id, action } => self.on_trim(id, action),
             UiEvent::AiKeyRequested(provider) => self.on_ai_key_requested(provider),
             UiEvent::AiKeySave { provider, key } => self.on_ai_key_save(provider, key),
             UiEvent::AiTestConnection { id, settings, key } => self.on_ai_test_connection(id, *settings, key),
@@ -559,6 +563,13 @@ impl App {
                 let movie = self.captures.borrow().get(&id).map(|rec| rec.file.clone());
                 if let Some(movie) = movie {
                     self.open_or_transcribe(movie);
+                }
+                self.quick.dismiss(id);
+            }
+            CardAction::Trim => {
+                let rec = self.captures.borrow().get(&id).map(|rec| (rec.file.clone(), rec.temp, rec.frame));
+                if let Some((movie, temp, frame)) = rec {
+                    self.open_trim(movie, temp, Some(frame));
                 }
                 self.quick.dismiss(id);
             }

@@ -18,6 +18,7 @@ pub mod annotate;
 pub mod beautify;
 pub mod cleanup;
 pub mod click_log;
+pub mod clip;
 pub mod color;
 pub mod extract;
 pub mod filename;

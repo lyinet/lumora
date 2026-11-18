@@ -54,6 +54,23 @@ pub enum CardAction {
     Tutorial,
     /// "Subtitles" (recordings): transcribe, or reopen the transcript.
     Subtitles,
+    /// "Trim / GIF…" (recordings): open the trim window.
+    Trim,
+}
+
+/// What the trim window tells the app.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TrimAction {
+    /// A slider moved: show the frame at this time (seconds).
+    Preview(f64),
+    /// "Save Trimmed".
+    Save(lumora_core::clip::TrimRange),
+    /// "Export GIF…" with the window's options.
+    ExportGif { range: lumora_core::clip::TrimRange, width: lumora_core::clip::GifWidth, fps: u32 },
+    /// Cancel the running export.
+    Cancel,
+    /// The window closed (the app cancels any export and drops it).
+    Closed,
 }
 
 /// What the transcript window tells the app. Each carries the transcript
@@ -217,6 +234,8 @@ pub enum HistoryAction {
     Reveal(std::path::PathBuf),
     /// Move to the Trash (the app confirms first).
     Delete(std::path::PathBuf),
+    /// Open the trim / GIF window (recordings).
+    Trim(std::path::PathBuf),
     /// Move everything older than the retention setting to the Trash (the
     /// app confirms first).
     TrashExpired,
@@ -280,6 +299,11 @@ pub enum UiEvent {
     Transcript {
         id: u64,
         action: TranscriptAction,
+    },
+    /// A trim window (`id` from `TrimWindow::show`).
+    Trim {
+        id: u64,
+        action: TrimAction,
     },
     /// The capture history window.
     History(HistoryAction),

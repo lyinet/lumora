@@ -16,30 +16,28 @@ use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
 
-use dispatch2::{DispatchQoS, DispatchQueue, GlobalQueueIdentifier};
 use lumora_capture::content::ShareableContent;
 use lumora_capture::keys::{self, KeyEvent, KeyTap};
 use lumora_capture::mic::{self, MicPermission};
-use lumora_capture::recorder::{self, RecordOptions, Recorder, RecorderEvent};
+use lumora_capture::recorder::{RecordOptions, Recorder, RecorderEvent};
 use lumora_capture::CaptureError;
 use lumora_core::click_log::{self, AppContext, DisplayGeometry, EventLog, Modifiers, RawClick, RecordingGeometry};
 use lumora_core::filename::{render, unique_path, CaptureKind};
+use lumora_core::geometry::Rect;
 use lumora_core::geometry::{flip_point_y, Point};
-use lumora_core::geometry::{Rect, Size};
 use lumora_core::keystroke::{HudPosition, KeyMods, KeystrokeFeed};
 use lumora_core::recording::{Event, Phase};
 use lumora_core::selection::Target;
 use lumora_ui::click_overlay::{ClickInfo, ClickMonitor, ClickOverlay};
 use lumora_ui::countdown::Countdown;
 use lumora_ui::keystroke_hud::KeystrokeHud;
-use lumora_ui::quick_access::CardContent;
 use lumora_ui::recording_hud::{RecordingBorder, StopControl};
 use lumora_ui::util;
 use objc2_app_kit::{NSRunningApplication, NSWorkspace};
 
 use lumora_core::i18n::{tr, Msg};
 
-use crate::app::{on_main, App, CaptureRecord, Mode, Notice, RecordTarget};
+use crate::app::{on_main, App, Mode, Notice, RecordTarget};
 use crate::system;
 
 /// Click visualisation and logging for one recording.
@@ -416,40 +414,9 @@ impl App {
         if s.general.copy_to_clipboard {
             lumora_capture::clipboard::copy_file(&path);
         }
-        let id = self.next_id();
         let frame: Rect = target.area.unwrap_or_else(|| util::flip(target.appkit_frame, self.mtm));
         let temp = !s.general.save_to_disk;
-        let show_card = s.general.show_quick_access;
         // Poster frame off the main thread, then show the card.
-        DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
-            move || {
-                let thumb = recorder::thumbnail(&path, 640.0);
-                let tutorial = App::can_make_tutorial(&path);
-                on_main(move |app| {
-                    app.captures.borrow_mut().insert(
-                        id,
-                        CaptureRecord {
-                            image: thumb.clone(),
-                            scale: 2.0,
-                            frame,
-                            file: path.clone(),
-                            temp,
-                            video: true,
-                            editable: None,
-                        },
-                    );
-                    if show_card {
-                        app.quick.push(CardContent {
-                            id,
-                            image: thumb,
-                            point_size: Size::new(frame.width(), frame.height()),
-                            file: path,
-                            video_duration: Some(duration),
-                            tutorial,
-                        });
-                    }
-                });
-            },
-        );
+        self.show_recording_card(path, temp, Some(frame), duration);
     }
 }

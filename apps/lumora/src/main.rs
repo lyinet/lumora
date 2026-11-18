@@ -13,6 +13,8 @@ mod ai_write_flow;
 mod app;
 #[cfg(target_os = "macos")]
 mod capture_flow;
+#[cfg(target_os = "macos")]
+mod clip_flow;
 mod command;
 #[cfg(target_os = "macos")]
 mod delegate;

@@ -363,15 +363,18 @@ impl State {
             meta.setFrame(cg_rect(Rect::new(0.0, thumb_h + 25.0, cw, 16.0)));
             cell.addSubview(&meta);
 
-            // Buttons: reopen / play, copy, show in Finder, trash.
+            // Buttons: reopen / play, copy, show in Finder, [trim / GIF], trash.
             let reopen_symbol = if item.is_editable() { "square.and.pencil" } else { "play.circle" };
             type Make = fn(PathBuf) -> HistoryAction;
-            let buttons: [(&str, &str, Make); 4] = [
+            let mut buttons: Vec<(&str, &str, Make)> = vec![
                 (reopen_symbol, open_tip, HistoryAction::Reopen),
                 ("doc.on.doc", tr(Msg::Copy), HistoryAction::Copy),
                 ("folder", tr(Msg::HistoryShowInFinder), HistoryAction::Reveal),
                 ("trash", tr(Msg::HistoryMoveToTrash), HistoryAction::Delete),
             ];
+            if item.kind == ItemKind::Recording {
+                buttons.insert(3, ("scissors", tr(Msg::HistoryTrim), HistoryAction::Trim));
+            }
             let mut bx = 0.0;
             for (symbol, tip, make) in buttons {
                 let path = item.path.clone();

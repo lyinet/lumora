@@ -561,6 +561,8 @@ fn build_buttons(
     if is_video {
         let at = actions.len() - 1; // before Delete, after Tutorial
         actions.insert(at, ("captions.bubble", tr(Msg::MakeSubtitles), CardAction::Subtitles));
+        let at = actions.len() - 1; // before Delete
+        actions.insert(at, ("scissors", tr(Msg::CardTrim), CardAction::Trim));
     }
     // Recordings carry a duration badge along the bottom (8 + 20 pt): keep
     // the row clear of it on short cards, and shrink the row rather than

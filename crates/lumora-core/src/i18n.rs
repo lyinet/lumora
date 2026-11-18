@@ -579,6 +579,32 @@ messages! {
     HistoryTrashFailedDetail => "{0} could not be moved. Nothing was deleted.", "无法移动 {0}，没有删除任何文件。";
     HistoryMissingFile => "That file is no longer there", "该文件已不存在";
     HistoryCancel => "Cancel", "取消";
+
+    // -- trim & GIF ---------------------------------------------------------------
+    CardTrim => "Trim / GIF…", "剪辑 / GIF…";
+    HistoryTrim => "Trim or Export GIF…", "剪辑或导出 GIF…";
+    TrimWindowTitle => "Trim Recording", "剪辑录屏";
+    TrimStart => "Start:", "开始：";
+    TrimEnd => "End:", "结束：";
+    TrimLength => "Length: {0} of {1}", "时长：{0}（共 {1}）";
+    TrimSave => "Save Trimmed", "保存剪辑";
+    GifWidthLabel => "GIF width:", "GIF 宽度：";
+    GifWidthOriginal => "Original", "原始尺寸";
+    GifFpsLabel => "Frame rate:", "帧率：";
+    GifFps => "{0} fps", "{0} 帧/秒";
+    GifEstimate => "About {0} · {1} frames · {2}", "约 {0} · {1} 帧 · {2}";
+    GifCapped => "only the first {0} frames", "仅前 {0} 帧";
+    GifExport => "Export GIF…", "导出 GIF…";
+    ClipTrimming => "Trimming…", "正在剪辑…";
+    ClipMakingGif => "Making GIF…", "正在生成 GIF…";
+    ToastTrimDone => "Recording trimmed", "录屏已剪辑";
+    ToastTrimStepsDropped => "{0} — tutorial steps weren’t kept; make them again from the trimmed recording.", "{0} — 教程步骤未保留，请用剪辑后的录屏重新生成。";
+    ToastTrimFailed => "Couldn’t trim the recording", "无法剪辑录屏";
+    ToastTrimNothing => "Move Start or End to choose a shorter part first", "请先拖动开始或结束，选择更短的片段";
+    ToastGifSaved => "GIF saved", "GIF 已保存";
+    ToastGifFailed => "Couldn’t make the GIF", "无法生成 GIF";
+    ToastClipCancelled => "Export cancelled", "已取消导出";
+    ToastClipBusy => "Wait for the current export to finish", "请等待当前导出完成";
 }
 
 #[cfg(test)]
