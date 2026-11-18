@@ -37,6 +37,10 @@ use crate::app::{on_main, App, Mode, Notice};
 /// Seconds between frames.
 const TICK: f64 = 0.15;
 
+/// Seconds after the first content fetch before the one frames use, so the
+/// control and border are on screen in it.
+const CONTENT_REFETCH: f64 = 0.12;
+
 /// Failed screenshots in a row before the session stops.
 const MAX_FRAME_ERRORS: u32 = 3;
 
@@ -60,7 +64,8 @@ struct Shared {
     busy: AtomicBool,
     /// Done or cancelled: late frames are ignored.
     stopped: AtomicBool,
-    /// Fetched after our chrome is on screen, so it is excluded.
+    /// Fetched after our chrome is on screen (refetched once), so it is
+    /// excluded.
     content: Mutex<Option<Arc<ShareableContent>>>,
 }
 
@@ -133,15 +138,46 @@ impl App {
             started: std::time::Instant::now(),
             errors: Cell::new(0),
         })));
-        // Fetch content *after* our chrome is on screen so it gets excluded.
+        // Frames start once content is fetched with our chrome on screen.
+        // Captures exclude Lumora as an application, so its windows never
+        // show; the snapshot is still refetched once the control and border
+        // have been ordered in, so the window-list fallback (Lumora not
+        // listed as an application) covers them too.
+        self.fetch_scroll_content(true);
+    }
+
+    /// Fetch the content frames are taken from. `first`: refetch once more
+    /// after a short delay, once the control and border are surely on screen.
+    fn fetch_scroll_content(self: &Rc<Self>, first: bool) {
         ShareableContent::fetch(move |res| {
             on_main(move |app| match res {
                 Ok(c) => {
-                    if let Mode::Scrolling(s) = &*app.mode.borrow() {
-                        if let Ok(mut slot) = s.shared.content.lock() {
-                            *slot = Some(Arc::new(c));
-                        }
+                    let mode = app.mode.borrow();
+                    let Mode::Scrolling(s) = &*mode else { return };
+                    if first {
+                        let weak = Rc::downgrade(app);
+                        let _ = util::schedule_timer(CONTENT_REFETCH, false, move || {
+                            if let Some(app) = weak.upgrade() {
+                                if matches!(*app.mode.borrow(), Mode::Scrolling(_)) {
+                                    app.fetch_scroll_content(false);
+                                }
+                            }
+                            false
+                        });
+                        return;
                     }
+                    let own = c.own_window_ids();
+                    let control = s.control.window_number();
+                    log::info!(
+                        "scrolling capture: content ready; Lumora excluded as an app: {}; own windows {:?} (control {}{})",
+                        c.excludes_own_app(),
+                        own,
+                        control,
+                        if s.control.is_inside_area() { ", inside the area, ignoring the mouse" } else { ", outside the area" },
+                    );
+                    if let Ok(mut slot) = s.shared.content.lock() {
+                        *slot = Some(Arc::new(c));
+                    };
                 }
                 Err(e) => {
                     if app.end_scrolling().is_some() {

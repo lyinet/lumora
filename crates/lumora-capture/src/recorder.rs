@@ -12,9 +12,11 @@
 //! stop, strictly after the stream has stopped delivering), which is what
 //! makes the `SendBox` wrappers sound.
 //!
-//! Our own windows (recording border, stop control, HUDs) are excluded with
-//! `SCContentFilter(display:excludingWindows:)`, so they are visible to the
-//! user but never appear in the video — except the window numbers listed in
+//! Our own windows (recording border, stop control, HUDs) are excluded by
+//! excluding Lumora as an application
+//! (`SCContentFilter(display:excludingApplications:exceptingWindows:)`), so
+//! they are visible to the user but never appear in the video — except the
+//! window numbers listed in
 //! [`RecordOptions::allow_windows`] (the click-ripple overlays), which must.
 //!
 //! Microphone: on macOS 15+ ScreenCaptureKit delivers it; on macOS 14 an
@@ -41,8 +43,8 @@ use objc2_av_foundation::{
 use objc2_core_media::{CMSampleBuffer, CMTime};
 use objc2_foundation::{NSArray, NSDictionary, NSError, NSNumber, NSObject, NSString};
 use objc2_screen_capture_kit::{
-    SCContentFilter, SCFrameStatus, SCStream, SCStreamConfiguration, SCStreamDelegate, SCStreamFrameInfoStatus,
-    SCStreamOutput, SCStreamOutputType,
+    SCFrameStatus, SCStream, SCStreamConfiguration, SCStreamDelegate, SCStreamFrameInfoStatus, SCStreamOutput,
+    SCStreamOutputType,
 };
 
 use crate::content::{ns_error, rect_to_cg, ShareableContent};
@@ -387,11 +389,7 @@ impl Recorder {
 
         // SAFETY: configuring fresh objects, then handing them to SCStream.
         let stream = unsafe {
-            let filter = SCContentFilter::initWithDisplay_excludingWindows(
-                SCContentFilter::alloc(),
-                &display,
-                &content.own_windows_except(&opts.allow_windows),
-            );
+            let filter = content.display_filter(&display, &opts.allow_windows);
             let config = SCStreamConfiguration::new();
             config.setWidth(width as usize);
             config.setHeight(height as usize);
