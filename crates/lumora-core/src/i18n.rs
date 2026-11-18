@@ -196,6 +196,18 @@ messages! {
     ToastMenuBarHiddenTitle => "Lumora is running, but its menu bar icon is hidden", "Lumora 正在运行，但菜单栏图标被隐藏了";
     ToastMenuBarHiddenDetail => "Allow Lumora in System Settings → Menu Bar, or use the shortcuts.", "请在“系统设置”→“菜单栏”中允许 Lumora，或直接使用快捷键。";
 
+    // -- capture diagnostics (v0.6.1) --------------------------------------------
+    ToastBusy => "Lumora is still busy with another capture", "Lumora 仍在进行另一个截图任务";
+    ToastBusyDetail => "Finish or cancel it first (Esc), then try again.", "请先完成或取消它（Esc），然后再试。";
+    ToastCaptureStalled => "Screen capture didn’t respond", "屏幕捕获没有响应";
+    ToastCaptureStalledDetail => "If this keeps happening, reset the Screen Recording permission.", "如果反复出现，请重置“屏幕录制”权限。";
+    ToastPermissionMissing => "Screen Recording permission is needed", "需要“屏幕录制”权限";
+    ToastPermissionMissingDetail => "Allow Lumora in the window that just opened.", "请在刚打开的窗口中允许 Lumora。";
+    ResetPermissionTitle => "macOS blocked the screen capture", "macOS 阻止了屏幕捕获";
+    ResetPermissionBody => "Lumora shows as allowed, but macOS still refuses to capture. This happens when the permission belongs to an older build of Lumora (each unsigned update counts as a new app).\n\nTo fix it: in System Settings → Privacy & Security → Screen & System Audio Recording, select Lumora and remove it with “–”, then add it again with “+” (or run tccutil reset ScreenCapture com.lumora.app in Terminal), and relaunch Lumora.",
+        "Lumora 显示为已允许，但 macOS 仍拒绝捕获屏幕。这通常是因为该权限属于旧版本的 Lumora（每次未签名的更新都会被视为新应用）。\n\n解决方法：在“系统设置”→“隐私与安全性”→“屏幕与系统录音”中选中 Lumora，用“–”删除，再用“+”重新添加（或在“终端”中运行 tccutil reset ScreenCapture com.lumora.app），然后重新启动 Lumora。";
+    ResetPermissionClose => "Close", "关闭";
+
     // -- install location (v0.6.1) ----------------------------------------------
     LocationTitle => "Move Lumora to the Applications folder?", "要将 Lumora 移到“应用程序”文件夹吗？";
     LocationTranslocated => "macOS is running Lumora from a temporary, read-only copy, so the Screen Recording permission may not stick and Lumora may not appear in System Settings.\n\nMove it to Applications and Lumora reopens from there.",

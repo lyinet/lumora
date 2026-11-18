@@ -2,8 +2,9 @@
 //! `~/Library/Logs/Lumora/lumora.log` so a user can send a trace after
 //! "nothing happened" or a crash.
 //!
-//! Level: `LUMORA_LOG` (`error|warn|info|debug|trace`) wins; otherwise
-//! `debug` when `LUMORA_DEBUG=1` or `RUST_LOG` is set; otherwise `info`.
+//! Level: `LUMORA_LOG` (`error|warn|info|debug|trace`) wins; then
+//! `RUST_LOG` (a plain level as is, any other value = `debug`); then
+//! `debug` when `LUMORA_DEBUG=1`; otherwise `info`.
 //! The file is rotated to `lumora.log.1` once it passes 5 MB at launch.
 //! [`init`] also installs a panic hook that writes the panic (with a
 //! backtrace) to the same file before the process aborts.
@@ -56,17 +57,26 @@ impl Log for Logger {
 }
 
 /// Pick the level from the environment (see the module docs).
-fn level_from(lumora_log: Option<&str>, lumora_debug: Option<&str>, rust_log: bool) -> LevelFilter {
-    match lumora_log {
-        Some("error") => return LevelFilter::Error,
-        Some("warn") => return LevelFilter::Warn,
-        Some("info") => return LevelFilter::Info,
-        Some("debug") => return LevelFilter::Debug,
-        Some("trace") => return LevelFilter::Trace,
-        _ => {}
+fn level_from(lumora_log: Option<&str>, lumora_debug: Option<&str>, rust_log: Option<&str>) -> LevelFilter {
+    fn parse(v: &str) -> Option<LevelFilter> {
+        match v.trim().to_ascii_lowercase().as_str() {
+            "error" => Some(LevelFilter::Error),
+            "warn" => Some(LevelFilter::Warn),
+            "info" => Some(LevelFilter::Info),
+            "debug" => Some(LevelFilter::Debug),
+            "trace" => Some(LevelFilter::Trace),
+            _ => None,
+        }
     }
-    let debug_flag = lumora_debug.is_some_and(|v| !v.is_empty() && v != "0");
-    if debug_flag || rust_log {
+    if let Some(l) = lumora_log.and_then(parse) {
+        return l;
+    }
+    // RUST_LOG: a plain level is used as is; anything else set
+    // (`lumora=debug`, `1`) means debug.
+    if let Some(r) = rust_log.filter(|r| !r.trim().is_empty()) {
+        return parse(r).unwrap_or(LevelFilter::Debug);
+    }
+    if lumora_debug.is_some_and(|v| !v.is_empty() && v != "0") {
         LevelFilter::Debug
     } else {
         LevelFilter::Info
@@ -123,7 +133,7 @@ pub fn init() {
     let level = level_from(
         std::env::var("LUMORA_LOG").ok().as_deref(),
         std::env::var("LUMORA_DEBUG").ok().as_deref(),
-        std::env::var_os("RUST_LOG").is_some(),
+        std::env::var("RUST_LOG").ok().as_deref(),
     );
     let file = open_log_file().map(Mutex::new);
     let has_file = file.is_some();
@@ -161,13 +171,16 @@ mod tests {
 
     #[test]
     fn level_selection() {
-        assert_eq!(level_from(None, None, false), LevelFilter::Info);
-        assert_eq!(level_from(None, Some("1"), false), LevelFilter::Debug);
-        assert_eq!(level_from(None, Some("0"), false), LevelFilter::Info);
-        assert_eq!(level_from(None, None, true), LevelFilter::Debug);
-        assert_eq!(level_from(Some("warn"), Some("1"), true), LevelFilter::Warn);
-        assert_eq!(level_from(Some("trace"), None, false), LevelFilter::Trace);
-        assert_eq!(level_from(Some("bogus"), None, false), LevelFilter::Info);
+        assert_eq!(level_from(None, None, None), LevelFilter::Info);
+        assert_eq!(level_from(None, Some("1"), None), LevelFilter::Debug);
+        assert_eq!(level_from(None, Some("0"), None), LevelFilter::Info);
+        assert_eq!(level_from(None, None, Some("lumora=debug")), LevelFilter::Debug);
+        assert_eq!(level_from(None, None, Some("TRACE")), LevelFilter::Trace);
+        assert_eq!(level_from(None, Some("1"), Some("warn")), LevelFilter::Warn);
+        assert_eq!(level_from(None, None, Some("")), LevelFilter::Info);
+        assert_eq!(level_from(Some("warn"), Some("1"), Some("trace")), LevelFilter::Warn);
+        assert_eq!(level_from(Some("trace"), None, None), LevelFilter::Trace);
+        assert_eq!(level_from(Some("bogus"), None, None), LevelFilter::Info);
     }
 
     #[test]

@@ -55,10 +55,10 @@ impl App {
 
     /// Start an overlay session (capture or record).
     pub fn begin_selection(self: &Rc<Self>, mode: OverlayMode, window_only: bool) {
-        if !self.mode.borrow().is_idle() || !self.require_permission() {
+        if !self.ready_for_capture(&format!("selection {mode:?}{}", if window_only { " (window)" } else { "" })) {
             return;
         }
-        self.set_mode(Mode::Preparing);
+        self.begin_preparing("selection");
         ShareableContent::fetch(move |res| on_main(move |app| app.on_content_for_selection(res, mode, window_only)));
     }
 
@@ -68,10 +68,22 @@ impl App {
         mode: OverlayMode,
         window_only: bool,
     ) {
+        if !matches!(*self.mode.borrow(), Mode::Preparing) {
+            log::warn!("shareable content arrived after the capture was reset ({})", self.mode.borrow().name());
+            return;
+        }
         let content = match res {
             Ok(c) => Arc::new(c),
-            Err(e) => return self.fail(e),
+            Err(e) => {
+                log::error!("SCShareableContent failed: {e}");
+                return self.fail(e);
+            }
         };
+        log::debug!(
+            "shareable content: {} display(s), {} window(s)",
+            content.displays().len(),
+            content.windows().len()
+        );
         if matches!(mode, OverlayMode::Record | OverlayMode::Scroll) {
             return self.open_overlay(mode, window_only, content, Vec::new());
         }
@@ -98,6 +110,9 @@ impl App {
                 if slot.1 == 0 {
                     let shots: Vec<(u32, Shot)> = slot.0.drain(..).flatten().collect();
                     let err = slot.2.take();
+                    if let Some(e) = &err {
+                        log::warn!("freezing a display failed: {e} ({} display(s) captured)", shots.len());
+                    }
                     on_main(move |app| match (shots.is_empty(), err) {
                         (true, Some(e)) => app.fail(e),
                         _ => app.open_overlay(mode, window_only, content_for_done, shots),
@@ -115,8 +130,10 @@ impl App {
         shots: Vec<(u32, Shot)>,
     ) {
         if !matches!(*self.mode.borrow(), Mode::Preparing) {
-            return; // cancelled meanwhile
+            log::warn!("overlay not shown: capture was reset meanwhile ({})", self.mode.borrow().name());
+            return;
         }
+        log::debug!("showing overlay {mode:?} over {} frozen display(s)", shots.len());
         let frozen: Rc<Vec<FrozenDisplay>> = Rc::new(
             shots
                 .into_iter()
@@ -139,10 +156,12 @@ impl App {
 
     pub fn on_overlay_confirmed(self: &Rc<Self>, mode: OverlayMode, target: Target) {
         if !matches!(*self.mode.borrow(), Mode::Selecting { .. }) {
+            log::warn!("overlay confirmed while {}; ignored", self.mode.borrow().name());
             return;
         }
         let Mode::Selecting { overlay, content, frozen } = self.mode.replace(Mode::Preparing) else { return };
         drop(overlay);
+        log::debug!("overlay confirmed: {mode:?}");
         if mode == OverlayMode::Record {
             return self.on_record_target(&content, target);
         }
@@ -165,6 +184,7 @@ impl App {
                 }
             }
             Target::Window(w) => {
+                self.arm_prepare_watchdog("window capture");
                 screenshot::capture(&content, ShotTarget::Window(w.id), self.shot_options(), move |res| {
                     on_main(move |app| {
                         app.set_mode(Mode::Idle);
@@ -197,10 +217,10 @@ impl App {
     }
 
     pub fn capture_fullscreen(self: &Rc<Self>) {
-        if !self.mode.borrow().is_idle() || !self.require_permission() {
+        if !self.ready_for_capture("fullscreen capture") {
             return;
         }
-        self.set_mode(Mode::Preparing);
+        self.begin_preparing("fullscreen capture");
         let display_id = util::screen_under_mouse(self.mtm).map(|s| util::screen_id(&s)).unwrap_or(0);
         let opts = self.shot_options();
         ShareableContent::fetch(move |res| match res {
@@ -405,7 +425,17 @@ impl App {
         log::error!("{}: {e}", tr(title));
         self.set_mode(Mode::Idle);
         if e == CaptureError::PermissionDenied {
-            self.dispatch(crate::command::Command::ShowOnboarding);
+            if lumora_capture::permission::has_screen_recording() {
+                // Allowed on paper, refused in practice: stale grant.
+                self.notify(Notice::Error(title), Some(error_text(&e)));
+                self.show_reset_permission_help();
+            } else {
+                self.notify(
+                    Notice::Warning(Msg::ToastPermissionMissing),
+                    Some(tr(Msg::ToastPermissionMissingDetail).into()),
+                );
+                self.dispatch(crate::command::Command::ShowOnboarding);
+            }
         } else {
             self.notify(Notice::Error(title), Some(error_text(&e)));
         }

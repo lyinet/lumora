@@ -57,13 +57,19 @@ pub(crate) fn ns_error(error: *mut NSError) -> CaptureError {
     match unsafe { error.as_ref() } {
         Some(e) => {
             // SCStreamErrorUserDeclined = -3801.
-            if e.code() == -3801 {
+            let (domain, code) = (e.domain().to_string(), e.code());
+            log::warn!("framework error {domain} {code}: {}", e.localizedDescription());
+            // SCStreamErrorUserDeclined: TCC refused (missing or stale grant).
+            if code == -3801 {
                 CaptureError::PermissionDenied
             } else {
                 CaptureError::Framework(e.localizedDescription().to_string())
             }
         }
-        None => CaptureError::Framework("unknown error".into()),
+        None => {
+            log::warn!("framework call failed without an NSError");
+            CaptureError::Framework("unknown error".into())
+        }
     }
 }
 
@@ -99,7 +105,7 @@ impl ShareableContent {
         // Blocks are `Fn`; stash the `FnOnce` and take it on first call.
         let slot = Mutex::new(Some(completion));
         let block = RcBlock::new(move |content: *mut SCShareableContent, error: *mut NSError| {
-            let Some(cb) = slot.lock().ok().and_then(|mut s| s.take()) else { return };
+            let Some(cb) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() else { return };
             // SAFETY: `content` is null or a valid object for this call; we
             // retain it to extend its lifetime.
             let result = match unsafe { Retained::retain(content) } {

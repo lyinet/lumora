@@ -2,15 +2,18 @@
 //! asks for it, and offers a relaunch once granted (macOS only applies the
 //! permission to new processes).
 
+use std::cell::RefCell;
+
 use objc2::rc::Retained;
-use objc2::{MainThreadMarker, MainThreadOnly};
+use objc2::runtime::ProtocolObject;
+use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSApplication, NSBezelStyle, NSButton, NSFont, NSImageView, NSTextAlignment, NSTextField,
-    NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindow,
-    NSWindowStyleMask, NSWindowTitleVisibility,
+    NSBezelStyle, NSButton, NSFont, NSImageView, NSTextAlignment, NSTextField, NSVisualEffectBlendingMode,
+    NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
+    NSWindowTitleVisibility,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
-use objc2_foundation::NSString;
+use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSString};
 
 use lumora_core::i18n::{tr, trf, Msg};
 
@@ -22,9 +25,44 @@ use lumora_core::geometry::Rect;
 const W: f64 = 440.0;
 const H: f64 = 400.0;
 
+struct DelegateIvars {
+    sink: RefCell<Option<EventSink>>,
+}
+
+define_class!(
+    /// Closing the window (red button, Esc, ⌘W) counts as "Not Now", so the
+    /// app forgets the panel and shows a fresh one next time.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "LumoraOnboardingWindowDelegate"]
+    #[ivars = DelegateIvars]
+    struct WindowDelegate;
+
+    unsafe impl NSObjectProtocol for WindowDelegate {}
+
+    unsafe impl NSWindowDelegate for WindowDelegate {
+        #[unsafe(method(windowWillClose:))]
+        fn window_will_close(&self, _notification: &NSNotification) {
+            let sink = self.ivars().sink.borrow().clone();
+            if let Some(sink) = sink {
+                sink(UiEvent::Onboarding(OnboardingAction::Dismiss));
+            }
+        }
+    }
+);
+
+impl WindowDelegate {
+    fn new(mtm: MainThreadMarker, sink: EventSink) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(DelegateIvars { sink: RefCell::new(Some(sink)) });
+        // SAFETY: NSObject's designated initialiser.
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
 /// The onboarding window.
 pub struct Onboarding {
     window: Retained<NSWindow>,
+    delegate: Retained<WindowDelegate>,
     body: Retained<NSTextField>,
     primary: Retained<NSButton>,
     secondary: Retained<NSButton>,
@@ -127,10 +165,24 @@ impl Onboarding {
         targets.push(later);
 
         window.setContentView(Some(&bg));
+        let delegate = WindowDelegate::new(mtm, sink.clone());
+        window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
         window.center();
-        NSApplication::sharedApplication(mtm).activate();
+        // Float above other apps' windows: Lumora has no Dock icon, so a
+        // panel left behind the frontmost app is as good as invisible.
+        window.setLevel(objc2_app_kit::NSFloatingWindowLevel);
+        crate::util::force_activate(mtm);
         window.makeKeyAndOrderFront(None);
-        Onboarding { window, body, primary, secondary, _targets: targets, granted: std::cell::Cell::new(granted) }
+        window.orderFrontRegardless();
+        Onboarding {
+            window,
+            delegate,
+            body,
+            primary,
+            secondary,
+            _targets: targets,
+            granted: std::cell::Cell::new(granted),
+        }
     }
 
     /// Switch to the "granted — relaunch" state.
@@ -150,6 +202,22 @@ impl Onboarding {
         Some(t)
     }
 
+    /// Show the window again (it may have been closed with its close button
+    /// or Esc, or be hidden behind other windows).
+    pub fn bring_to_front(&self, mtm: MainThreadMarker) {
+        if !self.window.isVisible() {
+            self.window.center();
+        }
+        crate::util::force_activate(mtm);
+        self.window.makeKeyAndOrderFront(None);
+        self.window.orderFrontRegardless();
+    }
+
+    /// Whether the window is on screen.
+    pub fn is_visible(&self) -> bool {
+        self.window.isVisible()
+    }
+
     pub fn close(&self) {
         self.window.orderOut(None);
     }
@@ -157,6 +225,8 @@ impl Onboarding {
 
 impl Drop for Onboarding {
     fn drop(&mut self) {
+        self.delegate.ivars().sink.borrow_mut().take();
+        self.window.setDelegate(None);
         self.window.orderOut(None);
     }
 }

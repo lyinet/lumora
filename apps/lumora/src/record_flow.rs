@@ -174,7 +174,13 @@ impl App {
             0 => self.begin_selection(lumora_ui::events::OverlayMode::Record, false),
             1 => self.stop_recording(),
             2 => self.cancel_recording_setup(),
-            _ => {}
+            _ => {
+                log::info!("record toggle refused: busy ({})", self.mode.borrow().name());
+                self.notify(
+                    crate::app::Notice::Warning(lumora_core::i18n::Msg::ToastBusy),
+                    Some(lumora_core::i18n::tr(lumora_core::i18n::Msg::ToastBusyDetail).into()),
+                );
+            }
         }
     }
 
