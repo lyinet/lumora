@@ -6,6 +6,32 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-18 (prerelease; real-Mac fixes)
+
+Two bugs found on a real Mac (Mac mini M4, macOS 26.5.2).
+
+### Fixed
+- **Click ripples appeared mirrored vertically** while recording: a click
+  near the bottom of the screen (e.g. on the stop button) rippled near the
+  top. The overlay's layer tree is y-down but was hosted in a bottom-up
+  view, so macOS reset its flip. Overlays now use a top-down
+  layer-hosting view; the same fix applies to the keystroke HUD (top /
+  bottom positions were swapped), the recording border, the shutter flash
+  and flight, and the countdown ring (now starts at 12 o'clock).
+- **Scrolling capture (⌥⇧S) finished as soon as you clicked**, before any
+  scrolling. The click that focuses the window re-tints it, nothing lined
+  up with the first frame, and the first "no overlap" ended the session
+  and saved a single frame. Now the session never ends on its own before
+  you scroll: identical frames and in-place changes (focus, hover, a
+  caret, small animations) are skipped, and a big change before the first
+  scroll simply restarts from the newest frame. After scrolling started,
+  only about two seconds of frames that line up with nothing stop it
+  (with the existing note); a single failed screenshot is retried instead
+  of ending silently (three in a row stop with a note, or, before any
+  scroll, an error without saving). ↩ held from confirming the selection
+  no longer finishes it, and every way a session ends is logged with its
+  reason.
+
 ## [0.6.1] - 2026-11-18 (prerelease; first real-Mac fixes)
 
 First fixes from testing on a real Mac (Mac mini M4, macOS 26 Tahoe).
@@ -461,7 +487,8 @@ First fixes from testing on a real Mac (Mac mini M4, macOS 26 Tahoe).
 - Screen Recording onboarding with live permission polling and relaunch.
 - Universal bundle script (lipo, codesign, notarytool, create-dmg) and CI.
 
-[Unreleased]: https://github.com/lyinet/lumora/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/lyinet/lumora/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/lyinet/lumora/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/lyinet/lumora/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/lyinet/lumora/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/lyinet/lumora/compare/v0.5.0...v0.5.1

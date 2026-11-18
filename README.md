@@ -35,7 +35,7 @@
 <br>
 
 > [!NOTE]
-> **Lumora is in early alpha (v0.6.1).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested. Testing on real Macs has just started (v0.6.1 fixes the first-run permission and launch issues it found), so expect rough edges. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
+> **Lumora is in early alpha (v0.6.2).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested. Testing on real Macs has just started (v0.6.1 and v0.6.2 fix the first-run permission, launch, click-ripple and scrolling-capture issues it found), so expect rough edges. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
 
 ## Features
 
