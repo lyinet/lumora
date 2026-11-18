@@ -4,7 +4,16 @@
 //! scroll events, so no Accessibility permission. Done / ↩ (or the shortcut
 //! again) hands the tall image to the normal capture pipeline; Cancel / Esc
 //! drops it.
+//!
+//! The session never ends on its own before the content has scrolled:
+//! identical frames, in-place changes (a click that focuses the window, a
+//! hover, a caret) and single failed frames are skipped. After scrolling
+//! started it stops by itself only at the height cap, after
+//! [`LOST_LIMIT`] frames in a row that line up with nothing, or after
+//! [`MAX_FRAME_ERRORS`] failed screenshots in a row. Every end is logged at
+//! info with its reason.
 
+use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -15,7 +24,7 @@ use lumora_capture::screenshot::{self, ShotTarget};
 use lumora_capture::CaptureError;
 use lumora_core::geometry::Rect;
 use lumora_core::i18n::{tr, Msg};
-use lumora_core::scroll_capture::{Frame, Push, ScrollStitcher, MAX_HEIGHT};
+use lumora_core::scroll_capture::{Frame, Push, ScrollStitcher, LOST_LIMIT, MAX_HEIGHT};
 use lumora_core::selection::Target;
 use lumora_ui::recording_hud::RecordingBorder;
 use lumora_ui::scroll_hud::ScrollControl;
@@ -27,6 +36,21 @@ use crate::app::{on_main, App, Mode, Notice};
 
 /// Seconds between frames.
 const TICK: f64 = 0.15;
+
+/// Failed screenshots in a row before the session stops.
+const MAX_FRAME_ERRORS: u32 = 3;
+
+/// Done arriving sooner than this after the control appeared is the tail of
+/// the selection gesture (a held ↩, a double-click's second up), not the
+/// user finishing: ignored.
+const DONE_ARMING: f64 = 0.35;
+
+/// What one frame did, reported to the main thread.
+struct FrameOutcome {
+    push: Push,
+    frames: usize,
+    scrolled: bool,
+}
 
 /// State the capture callbacks (any queue) share with the main thread.
 struct Shared {
@@ -48,6 +72,9 @@ pub struct ScrollSession {
     shared: Arc<Shared>,
     /// The captured area, global top-left points, whole pixels.
     area: Rect,
+    started: std::time::Instant,
+    /// Failed screenshots in a row.
+    errors: Cell<u32>,
 }
 
 impl std::fmt::Debug for ScrollSession {
@@ -61,7 +88,7 @@ impl App {
     pub fn toggle_scrolling_capture(self: &Rc<Self>) {
         let scrolling = matches!(*self.mode.borrow(), Mode::Scrolling(_));
         if scrolling {
-            self.finish_scrolling_capture();
+            self.finish_scrolling_capture("shortcut or menu pressed again");
         } else {
             self.begin_selection(lumora_ui::events::OverlayMode::Scroll, false);
         }
@@ -69,10 +96,10 @@ impl App {
 
     /// The overlay chose `target`: show the control and start taking frames.
     pub fn begin_scrolling(self: &Rc<Self>, content: &ShareableContent, target: Target) {
-        let wanted = match target {
-            Target::Area(r) => r,
-            Target::Window(w) => w.frame,
-            Target::Display(frame) => frame,
+        let (wanted, kind) = match target {
+            Target::Area(r) => (r, "area"),
+            Target::Window(w) => (w.frame, "window"),
+            Target::Display(frame) => (frame, "display"),
         };
         // One display per capture (the frames come from one display's stream).
         let Some((area, _)) = content
@@ -96,7 +123,16 @@ impl App {
             let Some(app) = weak.upgrade() else { return false };
             app.scroll_tick()
         });
-        self.set_mode(Mode::Scrolling(Box::new(ScrollSession { control, _border: border, timer, shared, area })));
+        log::info!("scrolling capture started on a {kind}: {area:?}");
+        self.set_mode(Mode::Scrolling(Box::new(ScrollSession {
+            control,
+            _border: border,
+            timer,
+            shared,
+            area,
+            started: std::time::Instant::now(),
+            errors: Cell::new(0),
+        })));
         // Fetch content *after* our chrome is on screen so it gets excluded.
         ShareableContent::fetch(move |res| {
             on_main(move |app| match res {
@@ -108,8 +144,11 @@ impl App {
                     }
                 }
                 Err(e) => {
-                    app.end_scrolling();
-                    app.fail(e);
+                    if app.end_scrolling().is_some() {
+                        log::info!("scrolling capture ended: shareable content failed: {e}");
+                        app.set_mode(Mode::Idle);
+                        app.fail(e);
+                    }
                 }
             })
         });
@@ -138,8 +177,8 @@ impl App {
                         Some(frame) => match shared.stitch.lock() {
                             Ok(mut st) => {
                                 st.1 = shot.scale;
-                                let r = st.0.push(frame);
-                                Some(Ok((r, st.0.frames())))
+                                let push = st.0.push(frame);
+                                Some(Ok(FrameOutcome { push, frames: st.0.frames(), scrolled: st.0.scrolled() }))
                             }
                             Err(_) => None,
                         },
@@ -157,35 +196,80 @@ impl App {
         true
     }
 
-    fn on_scroll_frame(self: &Rc<Self>, outcome: Result<(Push, usize), CaptureError>) {
-        let (push, frames) = match outcome {
-            Ok(o) => o,
-            Err(e) => {
-                // A frame failed (display gone, permission revoked): keep
-                // what is stitched.
-                log::warn!("scrolling capture frame failed: {e}");
-                return self.finish_scrolling_capture();
+    fn on_scroll_frame(self: &Rc<Self>, outcome: Result<FrameOutcome, CaptureError>) {
+        let outcome = {
+            let mode = self.mode.borrow();
+            let Mode::Scrolling(s) = &*mode else { return };
+            match outcome {
+                Ok(o) => {
+                    s.errors.set(0);
+                    s.control.set_frames(o.frames);
+                    Ok(o)
+                }
+                Err(e) => {
+                    let n = s.errors.get() + 1;
+                    s.errors.set(n);
+                    let scrolled = s.shared.stitch.lock().map(|st| st.0.scrolled()).unwrap_or(false);
+                    Err((e, n, scrolled))
+                }
             }
         };
-        if let Mode::Scrolling(s) = &*self.mode.borrow() {
-            s.control.set_frames(frames);
-        } else {
+        match outcome {
+            Err((e, n, _)) if n < MAX_FRAME_ERRORS => {
+                log::info!("scrolling capture: frame failed ({n} in a row), still going: {e}");
+            }
+            Err((e, n, true)) => {
+                log::info!("scrolling capture ended: {n} failed frames in a row, keeping the stitch: {e}");
+                self.notify(Notice::Warning(Msg::ToastScrollStopped), Some(e.to_string()));
+                self.finish_scrolling_capture("frames kept failing");
+            }
+            Err((e, n, false)) => {
+                // Nothing scrolled yet: don't save a single frame the user
+                // never asked for.
+                log::info!("scrolling capture ended before any scroll: {n} failed frames in a row: {e}");
+                if self.end_scrolling().is_some() {
+                    self.set_mode(Mode::Idle);
+                    self.fail(e);
+                }
+            }
+            Ok(FrameOutcome { push, frames, scrolled }) => match push {
+                Push::Capped(_) if scrolled => {
+                    self.notify(Notice::Warning(Msg::ToastScrollCapped), None);
+                    self.finish_scrolling_capture("height cap reached");
+                }
+                Push::Capped(_) => {
+                    log::info!("scrolling capture: the area alone reaches the height cap; waiting for Done");
+                }
+                Push::NoOverlap => {
+                    self.notify(
+                        Notice::Warning(Msg::ToastScrollNoOverlap),
+                        Some(tr(Msg::ToastScrollNoOverlapDetail).into()),
+                    );
+                    self.finish_scrolling_capture(&format!("{LOST_LIMIT} frames in a row lined up with nothing"));
+                }
+                Push::Restarted => {
+                    log::info!("scrolling capture: content changed before any scroll (focus click?); restarted");
+                }
+                Push::Lost(n) => log::debug!("scrolling capture: frame lined up with nothing ({n} in a row)"),
+                Push::Mismatch => log::info!("scrolling capture: frame of another size skipped"),
+                Push::Appended(rows) => log::debug!("scrolling capture: +{rows} rows ({frames} frames)"),
+                Push::Started | Push::Unchanged | Push::ScrolledUp => {}
+            },
+        }
+    }
+
+    /// Done / ↩ on the control. Ignored in the first [`DONE_ARMING`]
+    /// seconds (the tail of the selection gesture).
+    pub fn scroll_done_pressed(self: &Rc<Self>) {
+        let age = match &*self.mode.borrow() {
+            Mode::Scrolling(s) => s.started.elapsed().as_secs_f64(),
+            _ => return,
+        };
+        if age < DONE_ARMING {
+            log::info!("scrolling capture: Done {age:.2} s after the control appeared; ignored (selection gesture)");
             return;
         }
-        match push {
-            Push::Capped(_) => {
-                self.notify(Notice::Warning(Msg::ToastScrollCapped), None);
-                self.finish_scrolling_capture();
-            }
-            Push::NoOverlap => {
-                self.notify(
-                    Notice::Warning(Msg::ToastScrollNoOverlap),
-                    Some(tr(Msg::ToastScrollNoOverlapDetail).into()),
-                );
-                self.finish_scrolling_capture();
-            }
-            _ => {}
-        }
+        self.finish_scrolling_capture("Done or ↩ pressed");
     }
 
     /// Stop taking frames and close the chrome; returns the session.
@@ -199,10 +283,16 @@ impl App {
         Some(s)
     }
 
-    /// Done / ↩: stitch what we have and send it down the capture pipeline.
-    pub fn finish_scrolling_capture(self: &Rc<Self>) {
+    /// Stitch what we have and send it down the capture pipeline. `reason`
+    /// is logged.
+    pub fn finish_scrolling_capture(self: &Rc<Self>, reason: &str) {
         let Some(session) = self.end_scrolling() else { return };
-        let ScrollSession { shared, area, .. } = *session;
+        let ScrollSession { shared, area, started, .. } = *session;
+        let (frames, height) = shared.stitch.lock().map(|st| (st.0.frames(), st.0.height())).unwrap_or((0, 0));
+        log::info!(
+            "scrolling capture finished after {:.1} s: {reason} ({frames} frame(s), {height} px)",
+            started.elapsed().as_secs_f64()
+        );
         DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
             move || {
                 // Waits for a frame still being stitched.
@@ -236,6 +326,7 @@ impl App {
     /// Cancel / Esc: throw the frames away.
     pub fn cancel_scrolling_capture(self: &Rc<Self>) {
         if self.end_scrolling().is_some() {
+            log::info!("scrolling capture cancelled (Cancel or Esc)");
             self.set_mode(Mode::Idle);
         }
     }

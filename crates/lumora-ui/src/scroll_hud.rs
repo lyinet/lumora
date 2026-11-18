@@ -111,10 +111,13 @@ impl ScrollControl {
         let by = (HEIGHT - 28.0) / 2.0;
         let cancel =
             button(mtm, tr(Msg::ScrollCancel), &cancel_t, Rect::new(WIDTH - 2.0 * BUTTON_W - 14.0, by, BUTTON_W, 28.0));
-        cancel.setKeyEquivalent(&NSString::from_str("\u{1b}"));
         glass.addSubview(&cancel);
         let done = button(mtm, tr(Msg::ScrollDone), &done_t, Rect::new(WIDTH - BUTTON_W - 10.0, by, BUTTON_W, 28.0));
-        done.setKeyEquivalent(&NSString::from_str("\r"));
+        // ↩ / Esc go through the key catcher, which ignores auto-repeat (a
+        // ↩ still held from confirming the selection must not finish). A
+        // button key equivalent would fire on repeats, so Done is only
+        // tinted like the default button.
+        done.setBezelColor(Some(&NSColor::controlAccentColor()));
         glass.addSubview(&done);
 
         panel.setContentView(Some(&glass));
