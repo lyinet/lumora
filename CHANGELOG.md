@@ -40,6 +40,11 @@ All notable changes to Lumora are documented here. The format follows
   Older captures are only offered for the Trash from a banner in the
   history window, after a confirmation; nothing is ever deleted outright.
 
+### Changed
+- The microphone list (Settings → Recording) comes from
+  `AVCaptureDeviceDiscoverySession` (built-in / Continuity microphones,
+  then external ones) instead of the deprecated `devicesWithMediaType:`.
+
 ### Fixed
 - A shortcut cleared in Settings → Shortcuts came back as the default on
   the next launch (the cleared key was omitted from `settings.toml`); it is
