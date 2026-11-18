@@ -39,6 +39,9 @@ impl App {
                 log::error!("saving settings failed: {e}");
             }
         }
+        if let Some(w) = self.settings_window.borrow().as_ref() {
+            w.set_subtitle_style(style);
+        }
     }
 
     /// Cancel the burn-in running for transcript window `id`.

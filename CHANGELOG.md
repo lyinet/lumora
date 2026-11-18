@@ -83,6 +83,8 @@ All notable changes to Lumora are documented here. The format follows
   then external ones) instead of the deprecated `devicesWithMediaType:`.
 
 ### Fixed
+- An open Settings window no longer overwrites the subtitle burn-in style
+  chosen in a subtitles window (it now gets the new style, like beautify).
 - A shortcut cleared in Settings → Shortcuts came back as the default on
   the next launch (the cleared key was omitted from `settings.toml`); it is
   now saved as `""` and stays cleared.

@@ -446,6 +446,12 @@ impl SettingsWindow {
         self.state.settings.borrow_mut().beautify = style;
     }
 
+    /// Keep the snapshot in step with the subtitle burn-in style changed in
+    /// a subtitles window, so the next edit here doesn't revert it.
+    pub fn set_subtitle_style(&self, style: lumora_core::transcript::burn::SubtitleStyle) {
+        self.state.settings.borrow_mut().transcribe.set_subtitle_style(style);
+    }
+
     /// Mark shortcuts another app already holds: red field outline plus an
     /// explanation under the list.
     pub fn set_unavailable(&self, taken: &[Action]) {
