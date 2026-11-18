@@ -44,6 +44,8 @@ pub struct Settings {
     pub redact: RedactSettings,
     /// Subtitles / transcription (v0.5). Missing in older files.
     pub transcribe: Transcribe,
+    /// Capture history (v0.6). Missing in older files.
+    pub history: crate::history::HistorySettings,
 }
 
 /// Which recogniser turns a recording's speech into text.
@@ -158,12 +160,44 @@ pub struct General {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Shortcuts {
+    #[serde(with = "shortcut_slot")]
     pub capture_area: Option<Hotkey>,
+    #[serde(with = "shortcut_slot")]
     pub capture_fullscreen: Option<Hotkey>,
+    #[serde(with = "shortcut_slot")]
     pub capture_window: Option<Hotkey>,
+    #[serde(with = "shortcut_slot")]
     pub capture_text: Option<Hotkey>,
+    #[serde(with = "shortcut_slot")]
     pub record_screen: Option<Hotkey>,
+    #[serde(with = "shortcut_slot")]
     pub open_folder: Option<Hotkey>,
+    /// Capture history window (v0.6). Missing in older files → ⌥⇧H.
+    #[serde(with = "shortcut_slot")]
+    pub history: Option<Hotkey>,
+}
+
+/// A cleared shortcut is written as `""`, so it stays cleared: an omitted
+/// key would come back as the default on the next launch.
+mod shortcut_slot {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use crate::hotkey::Hotkey;
+
+    pub fn serialize<S: Serializer>(v: &Option<Hotkey>, s: S) -> Result<S::Ok, S::Error> {
+        match v {
+            Some(h) => h.serialize(s),
+            None => s.serialize_str(""),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Hotkey>, D::Error> {
+        let s = String::deserialize(d)?;
+        if s.trim().is_empty() {
+            return Ok(None);
+        }
+        s.parse().map(Some).map_err(serde::de::Error::custom)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -236,6 +270,7 @@ impl Default for Shortcuts {
             capture_text: d(Action::CaptureText),
             record_screen: d(Action::RecordScreen),
             open_folder: d(Action::OpenFolder),
+            history: d(Action::History),
         }
     }
 }
@@ -249,6 +284,7 @@ impl Shortcuts {
             Action::CaptureText => self.capture_text,
             Action::RecordScreen => self.record_screen,
             Action::OpenFolder => self.open_folder,
+            Action::History => self.history,
         }
     }
 
@@ -260,6 +296,7 @@ impl Shortcuts {
             Action::CaptureText => &mut self.capture_text,
             Action::RecordScreen => &mut self.record_screen,
             Action::OpenFolder => &mut self.open_folder,
+            Action::History => &mut self.history,
         };
         *slot = h;
     }
@@ -534,10 +571,10 @@ mod tests {
     #[test]
     fn shortcuts_accessors() {
         let mut s = Shortcuts::default();
-        assert_eq!(s.bound().len(), 6);
+        assert_eq!(s.bound().len(), 7);
         s.set(Action::OpenFolder, None);
         assert_eq!(s.get(Action::OpenFolder), None);
-        assert_eq!(s.bound().len(), 5);
+        assert_eq!(s.bound().len(), 6);
     }
 
     #[test]
@@ -616,6 +653,21 @@ mod tests {
         assert_eq!(c.ai.base_url, "http://localhost:11434/v1");
         assert_eq!(c.ai.model, "llama3.2");
         assert_eq!(c.ai.temperature, 2.0);
+    }
+
+    #[test]
+    fn v05_files_gain_history_defaults() {
+        use crate::history::Retention;
+        let s = Settings::from_toml("[shortcuts]\nopen_folder = \"⌥⇧O\"\n[recording]\nfps = 30\n").unwrap();
+        assert_eq!(s.history.retention, Retention::KeepAll);
+        assert_eq!(s.shortcuts.history, "⌥⇧H".parse().ok());
+        let mut t = Settings::default();
+        t.history.retention = Retention::Days30;
+        t.shortcuts.history = None;
+        let text = t.to_toml().unwrap();
+        assert!(text.contains("[history]") && text.contains("retention = \"30d\""), "{text}");
+        assert!(text.contains("history = \"\""), "a cleared shortcut stays cleared: {text}");
+        assert_eq!(Settings::from_toml(&text).unwrap(), t);
     }
 
     #[test]

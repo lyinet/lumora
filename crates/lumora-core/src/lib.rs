@@ -23,6 +23,7 @@ pub mod extract;
 pub mod filename;
 pub mod format;
 pub mod geometry;
+pub mod history;
 pub mod hotkey;
 pub mod i18n;
 pub mod layout;

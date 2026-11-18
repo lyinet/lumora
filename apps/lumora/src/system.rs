@@ -119,6 +119,13 @@ pub fn open_url(s: &str) {
     }
 }
 
+/// Move a file or folder to the Trash. Never deletes: `false` when the
+/// Trash refused it (another volume without a Trash, permissions…).
+pub fn move_to_trash(path: &Path) -> bool {
+    lumora_capture::clipboard::file_url(path)
+        .is_some_and(|url| NSFileManager::defaultManager().trashItemAtURL_resultingItemURL_error(&url, None).is_ok())
+}
+
 /// Move a file to the Trash (recoverable), falling back to deletion.
 pub fn trash(path: &Path) {
     if let Some(url) = lumora_capture::clipboard::file_url(path) {

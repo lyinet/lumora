@@ -781,6 +781,20 @@ fn build_general(
         |s| s.general.launch_at_login,
         |s, v| s.general.launch_at_login = v,
     );
+    {
+        use lumora_core::history::Retention;
+        let labels: Vec<&str> = Retention::ALL.iter().map(|r| tr(r.msg())).collect();
+        popup(
+            form,
+            targets,
+            state,
+            tr(Msg::HistoryRetentionLabel),
+            &labels,
+            |s| Retention::ALL.iter().position(|r| *r == s.history.retention).unwrap_or(0),
+            |s, i| s.history.retention = Retention::ALL[i.min(Retention::ALL.len() - 1)],
+        );
+        form.note(tr(Msg::HistoryRetentionNote));
+    }
     let labels: Vec<&str> = LanguagePref::ALL.iter().map(|l| l.label()).collect();
     popup(
         form,

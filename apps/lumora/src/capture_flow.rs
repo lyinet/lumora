@@ -373,7 +373,10 @@ impl App {
                 }
             }
             on_main(move |app| match result {
-                Ok(()) => log::info!("saved {}", file.display()),
+                Ok(()) => {
+                    log::info!("saved {}", file.display());
+                    app.history_note(file);
+                }
                 Err(e) => {
                     log::error!("{e}");
                     // Drop the dangling file URL, unless the user has copied

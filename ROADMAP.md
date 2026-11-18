@@ -91,8 +91,10 @@
   panel focus, tutorial keyframes, Speech permission and transcription).
 - Developer ID signing + notarization in CI (stable code identity, so
   Screen Recording and Keychain trust survive updates).
-- Capture history window (⌥⇧H): browse, reopen, copy and delete past
-  captures and their `.lumora` documents.
+- ✅ Capture history window (⌥⇧H): browse, filter, search (file names +
+  on-device OCR text), reopen, copy, reveal and trash past captures and
+  their `.lumora` documents; optional 30 / 90-day retention that only
+  offers the Trash (built 2026-11-17, awaiting hardware QA).
 - Recording extras: keystroke HUD (needs Input Monitoring / Accessibility
   permission — opt-in), GIF export and trim on the card, burn-in subtitles.
 - Scrolling capture.

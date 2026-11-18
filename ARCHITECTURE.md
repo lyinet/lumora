@@ -33,11 +33,11 @@ apps/lumora        binary: NSApplication, status item, hidden main menu, hotkeys
                                               beautify model, .lumora document format,
                                               ai (settings, prompts, SSE parsing, errors),
                                               redact, extract, click_log, tutorial,
-                                              transcript, cleanup
+                                              transcript, cleanup, history
 ```
 | Crate | macOS-only? | Tests | What it owns |
 |---|---|---|---|
-| `lumora-core` | no | 365 unit tests | `ai` (provider presets, `AiSettings`, prompt building per writing task incl. extract table / code / checklist, SSE/stream parsing, `AiError` with localised messages, settings-form helpers, `KeyStore` trait, local OCR-action results), `redact` (detectors for emails, phones, Chinese ID / bank cards, keys and tokens, IPv4, URL secrets; CJK-aware glyph-width mapping of hits onto OCR boxes; AI-check prompt + parser), `extract` (table / code / checklist recovery from OCR boxes; Markdown, CSV, TSV), `click_log` (`.events.json` sidecar: timing, display → video pixel mapping), `tutorial` (steps from a click log, merge / collapse rules, crop and OCR rects, local titles, AI prompt + tolerant parser, `.steps.json`, Markdown / HTML export, safe relative paths), `transcript` (segments, `.transcript.json`, CJK-aware SRT / WebVTT, chapters and summary with local fallback), `cleanup` (stale `$TMPDIR/Lumora` entries), `beautify` (style model, presets, layout, auto-balance), `lumora_doc` (`.lumora` container, DTO layer, schema migrations), `annotate` (paths, shapes, display list, command-pattern document, editor FSM), `i18n` (en + zh-Hans table, language resolution), `ocr` (reading-order assembly), `stitch` (multi-display plans), `geometry` (Rect/Point/Size, handles, pixel alignment, Quartz⇄AppKit flip), `spring` (closed-form damped oscillator + retargetable animator), `selection` (overlay interaction FSM), `snap` (window hit-testing, edge snapping), `settings` (serde/TOML model with validation), `filename` (templates, unique paths), `hotkey` (parse/format/Carbon codes/conflicts), `layout` (card stack, pill, loupe, fly transform), `recording` (lifecycle FSM), `color`, `format`, `action` |
+| `lumora-core` | no | 394 unit tests | `history` (capture-history index: scan + template name matcher, versioned `history.json` with migrations, merge/refresh, retention, search/filter, thumbnail keys + pruning, grid layout), `ai` (provider presets, `AiSettings`, prompt building per writing task incl. extract table / code / checklist, SSE/stream parsing, `AiError` with localised messages, settings-form helpers, `KeyStore` trait, local OCR-action results), `redact` (detectors for emails, phones, Chinese ID / bank cards, keys and tokens, IPv4, URL secrets; CJK-aware glyph-width mapping of hits onto OCR boxes; AI-check prompt + parser), `extract` (table / code / checklist recovery from OCR boxes; Markdown, CSV, TSV), `click_log` (`.events.json` sidecar: timing, display → video pixel mapping), `tutorial` (steps from a click log, merge / collapse rules, crop and OCR rects, local titles, AI prompt + tolerant parser, `.steps.json`, Markdown / HTML export, safe relative paths), `transcript` (segments, `.transcript.json`, CJK-aware SRT / WebVTT, chapters and summary with local fallback), `cleanup` (stale `$TMPDIR/Lumora` entries), `beautify` (style model, presets, layout, auto-balance), `lumora_doc` (`.lumora` container, DTO layer, schema migrations), `annotate` (paths, shapes, display list, command-pattern document, editor FSM), `i18n` (en + zh-Hans table, language resolution), `ocr` (reading-order assembly), `stitch` (multi-display plans), `geometry` (Rect/Point/Size, handles, pixel alignment, Quartz⇄AppKit flip), `spring` (closed-form damped oscillator + retargetable animator), `selection` (overlay interaction FSM), `snap` (window hit-testing, edge snapping), `settings` (serde/TOML model with validation), `filename` (templates, unique paths), `hotkey` (parse/format/Carbon codes/conflicts), `layout` (card stack, pill, loupe, fly transform), `recording` (lifecycle FSM), `color`, `format`, `action` |
 | `lumora-capture` | yes (error type and `words` are portable) | 6 (+1 mac) | `content` (SCShareableContent → displays + z-ordered windows), `screenshot` (SCScreenshotManager), `image` (crop, stitch, pixel reads, PNG+DPI via ImageIO), `ocr` (VNRecognizeTextRequest, boxes per run), `faces` (VNDetectFaceRectanglesRequest), `beautify_render` (CoreGraphics background/shadow/frame compositing), `clipboard`, `recorder` (SCStream → AVAssetWriter), `mic` (device list, permission, `AVCaptureSession` path on macOS 14), `tutorial` (`AVAssetImageGenerator` keyframes, ring, crop, OCR hint), `transcribe` (audio export, `SFSpeechRecognizer`), `words` (word → subtitle segment grouping), `permission` |
 | `lumora-ai` | client portable, Keychain macOS-only | 19 | `client` (blocking chat completions over `ureq`, SSE streaming with deltas, cancel flag, connection test, HTTP → `AiError`), `transcribe` (`POST /audio/transcriptions`, 25 MB limit, verbose-JSON segments), `multipart` (form-data builder), `keychain` (`KeyStore` on the macOS Keychain, service `app.lumora.ai`); re-exports `lumora_core::ai` |
 | `lumora-ui` | yes (`tokens` is portable) | 3 (tokens) | All windows, views, layers and motion (incl. `editor`, `editor::beautify_panel`, `ai_sheet`, `text_result`, `click_overlay`, `tutorial_window`, `transcript_window`, `settings_window::{ai, redact}`, `toast`); emits `UiEvent`s |
@@ -251,6 +251,24 @@ poster frame via `AVAssetImageGenerator` → Quick Access card.
   volumes) and go to the Trash with it on Delete. At launch,
   `lumora_core::cleanup` removes `$TMPDIR/Lumora` entries untouched for
   7 days (never when that folder overlaps the save folder).
+
+### Capture history
+
+```
+⌥⇧H / status menu ─▶ apps/lumora::history_flow::show_history ─▶ lumora_ui::history_window
+background (utility): history::scan_folder(save folder, NameMatcher(template))
+   ─▶ HistoryIndex::refresh (keeps OCR text / dimensions of unchanged files,
+      re-stats entries outside the folder) ─▶ PNG IHDR / .lumora header /
+      AVAssetTrack dimensions ─▶ history.json (atomic) ─▶ on_main: set_items
+window asks for thumbnails ─▶ background: Thumbnails/<key>.png or ImageIO
+   thumbnail / .lumora PNG / first movie frame ─▶ disk + memory cache ─▶ set_thumbnail
+window open ─▶ OCR backfill in batches of 12 (Vision, newest first) ─▶ history.json
+captures, editor saves, .lumora writes, recordings, Quick Access Save ─▶ history_note
+```
+
+The index sits behind a mutex and is only touched off the main thread.
+Deleting moves files (and a recording's sidecars) to the Trash after a
+confirmation; it never falls back to deleting.
 
 ### Recording → tutorial
 

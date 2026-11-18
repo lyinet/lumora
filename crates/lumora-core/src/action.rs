@@ -15,16 +15,19 @@ pub enum Action {
     CaptureText,
     RecordScreen,
     OpenFolder,
+    /// The capture history window.
+    History,
 }
 
 impl Action {
-    pub const ALL: [Action; 6] = [
+    pub const ALL: [Action; 7] = [
         Action::CaptureArea,
         Action::CaptureFullscreen,
         Action::CaptureWindow,
         Action::CaptureText,
         Action::RecordScreen,
         Action::OpenFolder,
+        Action::History,
     ];
 
     /// The localisation key of the title.
@@ -36,6 +39,7 @@ impl Action {
             Action::CaptureText => Msg::CaptureText,
             Action::RecordScreen => Msg::RecordScreen,
             Action::OpenFolder => Msg::OpenCapturesFolder,
+            Action::History => Msg::CaptureHistory,
         }
     }
 
@@ -53,6 +57,7 @@ impl Action {
             Action::CaptureText => "⌥⇧2",
             Action::RecordScreen => "⌥⇧R",
             Action::OpenFolder => "⌥⇧O",
+            Action::History => "⌥⇧H",
         }
     }
 
@@ -85,5 +90,8 @@ mod tests {
             assert!(!a.msg().text(crate::i18n::Language::ZhHans).is_empty());
         }
         assert_eq!(Action::CaptureText.msg().text(crate::i18n::Language::En), "Capture Text");
+        assert_eq!(Action::History.default_shortcut(), "⌥⇧H");
+        // Appended last, so earlier actions keep their Carbon hotkey ids.
+        assert_eq!(Action::History.id(), 7);
     }
 }

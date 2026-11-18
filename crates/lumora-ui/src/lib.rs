@@ -30,6 +30,8 @@ mod esc_window;
 #[cfg(target_os = "macos")]
 pub mod events;
 #[cfg(target_os = "macos")]
+pub mod history_window;
+#[cfg(target_os = "macos")]
 pub mod icon;
 #[cfg(target_os = "macos")]
 pub mod onboarding;

@@ -561,6 +561,28 @@ pub fn read(path: &Path) -> Result<LumoraDoc, DocError> {
     LumoraDoc::decode(&bytes)
 }
 
+/// Read only the JSON header of a `.lumora` file (not the embedded PNG):
+/// enough for the history window's dimensions and dates.
+pub fn read_header(path: &Path) -> Result<Header, DocError> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).map_err(|e| DocError::Io(e.to_string()))?;
+    let mut prefix = [0u8; PREFIX_LEN];
+    f.read_exact(&mut prefix).map_err(|_| DocError::Truncated)?;
+    if prefix[..7] != MAGIC[..7] {
+        return Err(DocError::BadMagic);
+    }
+    if prefix[7] != MAGIC[7] {
+        return Err(DocError::UnsupportedContainer(prefix[7]));
+    }
+    let len = u32::from_le_bytes([prefix[8], prefix[9], prefix[10], prefix[11]]) as usize;
+    if len > MAX_HEADER_LEN {
+        return Err(DocError::HeaderTooLarge(len));
+    }
+    let mut json = vec![0u8; len];
+    f.read_exact(&mut json).map_err(|_| DocError::Truncated)?;
+    parse_header(&json)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -866,12 +888,19 @@ mod tests {
         let file = LumoraDoc::from_editor_state(&d, PNG.to_vec(), IMAGE, None, 7);
         write_atomic(&path, &file.encode()).unwrap();
         assert_eq!(read(&path).unwrap(), file);
+        assert_eq!(read_header(&path).unwrap(), file.header, "header without the PNG");
         // Overwrite in place; no temp file is left behind.
         write_atomic(&path, b"garbage").unwrap();
         assert_eq!(read(&path), Err(DocError::BadMagic));
+        assert_eq!(read_header(&path), Err(DocError::Truncated));
+        std::fs::write(&path, b"garbage garbage garbage").unwrap();
+        assert_eq!(read_header(&path), Err(DocError::BadMagic));
         let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap()).unwrap().flatten().collect();
         assert_eq!(leftovers.len(), 1);
         assert!(matches!(read(&dir.join("missing.lumora")), Err(DocError::Io(_))));
+        assert!(matches!(read_header(&dir.join("missing.lumora")), Err(DocError::Io(_))));
+        std::fs::write(&path, &MAGIC[..5]).unwrap();
+        assert_eq!(read_header(&path), Err(DocError::Truncated));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

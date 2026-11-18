@@ -344,6 +344,7 @@ impl App {
             Err(e) => return self.fail(e),
         };
         log::info!("recorded {} ({duration:.1}s)", path.display());
+        self.history_note(path.clone());
         if let Some(data) = click_log {
             write_event_log(&path, &data, duration);
         }

@@ -192,3 +192,66 @@ pub fn decode_image(bytes: &[u8]) -> Option<CFRetained<CGImage>> {
     // SAFETY: index 0 of a valid source; options may be NULL.
     unsafe { source.image_at_index(0, None) }
 }
+
+/// ImageIO options for a thumbnail at most `max_px` on its longer side
+/// (always decoded from the full image, EXIF orientation applied).
+fn thumbnail_options(max_px: u32) -> CFRetained<CFDictionary<CFString, CFType>> {
+    use objc2_core_foundation::CFBoolean;
+    use objc2_image_io::{
+        kCGImageSourceCreateThumbnailFromImageAlways, kCGImageSourceCreateThumbnailWithTransform,
+        kCGImageSourceThumbnailMaxPixelSize,
+    };
+    let size = CFNumber::new_i32(max_px.clamp(16, 8192) as i32);
+    let yes: &CFType = CFBoolean::new(true);
+    // SAFETY: the ImageIO option keys are valid static CFStrings.
+    let keys: [&CFString; 3] = unsafe {
+        [
+            kCGImageSourceCreateThumbnailFromImageAlways,
+            kCGImageSourceThumbnailMaxPixelSize,
+            kCGImageSourceCreateThumbnailWithTransform,
+        ]
+    };
+    let values: [&CFType; 3] = [yes, &size, yes];
+    CFDictionary::<CFString, CFType>::from_slices(&keys, &values)
+}
+
+/// A downscaled copy of the image file at `path` (PNG, JPEG, …), at most
+/// `max_px` on its longer side, without decoding the full image first.
+pub fn thumbnail_file(path: &Path, max_px: u32) -> Option<CFRetained<CGImage>> {
+    let url = CFURL::from_file_path(path)?;
+    // SAFETY: valid URL; options may be NULL.
+    let source = unsafe { CGImageSource::with_url(&url, None) }?;
+    let opts = thumbnail_options(max_px);
+    // SAFETY: index 0 of a valid source; the options dictionary holds the
+    // documented key/value types.
+    unsafe { source.thumbnail_at_index(0, Some(opts.as_opaque())) }
+}
+
+/// Like [`thumbnail_file`], from encoded bytes (a `.lumora`'s PNG).
+pub fn thumbnail_data(bytes: &[u8], max_px: u32) -> Option<CFRetained<CGImage>> {
+    let data = CFData::from_bytes(bytes);
+    // SAFETY: valid data; options may be NULL.
+    let source = unsafe { CGImageSource::with_data(&data, None) }?;
+    let opts = thumbnail_options(max_px);
+    // SAFETY: as in `thumbnail_file`.
+    unsafe { source.thumbnail_at_index(0, Some(opts.as_opaque())) }
+}
+
+/// Decode the image file at `path` with its backing scale, read from the
+/// DPI Lumora writes (`72 × scale`); 1× when the file has none.
+pub fn read_file(path: &Path) -> Option<(CFRetained<CGImage>, f64)> {
+    let url = CFURL::from_file_path(path)?;
+    // SAFETY: valid URL; options may be NULL.
+    let source = unsafe { CGImageSource::with_url(&url, None) }?;
+    // SAFETY: index 0 of a valid source; options may be NULL.
+    let image = unsafe { source.image_at_index(0, None) }?;
+    // SAFETY: as above.
+    let dpi = unsafe { source.properties_at_index(0, None) }.and_then(|props| {
+        // SAFETY: image properties are a CFString-keyed dictionary.
+        let props = unsafe { CFRetained::cast_unchecked::<CFDictionary<CFString, CFType>>(props) };
+        // SAFETY: valid static key.
+        let v = props.get(unsafe { kCGImagePropertyDPIWidth })?;
+        v.downcast_ref::<CFNumber>()?.as_f64()
+    });
+    Some((image, lumora_core::history::scale_for_dpi(dpi)))
+}

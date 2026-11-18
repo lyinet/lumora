@@ -108,6 +108,9 @@ impl StatusBar {
         let open = menu_item(mtm, Action::OpenFolder.title(), sel!(openFolder:), target);
         menu.addItem(&open);
         action_items.push((Action::OpenFolder, open));
+        let history = menu_item(mtm, tr(Msg::CaptureHistoryMenu), sel!(showHistory:), target);
+        menu.addItem(&history);
+        action_items.push((Action::History, history));
         let open_doc = menu_item(mtm, tr(Msg::OpenDocumentMenu), sel!(openLumoraDocument:), target);
         open_doc.setKeyEquivalent(&NSString::from_str("o"));
         menu.addItem(&open_doc);
@@ -153,7 +156,8 @@ impl StatusBar {
     /// Re-title every item after a language change.
     pub fn relabel(&self) {
         for (action, item) in &self.action_items {
-            item.setTitle(&NSString::from_str(action.title()));
+            let title = if *action == Action::History { tr(Msg::CaptureHistoryMenu) } else { action.title() };
+            item.setTitle(&NSString::from_str(title));
         }
         for (msg, item) in &self.fixed_items {
             item.setTitle(&NSString::from_str(tr(*msg)));

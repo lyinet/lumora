@@ -81,6 +81,7 @@
 - **点击涟漪** —— 录屏时，每次点击都会出现一个带弹性的圆环（左键蓝色、右键橙色）并录进视频，而边框、停止按钮和提示浮窗依然不会出现在画面里。可在“设置 → 录屏”中开关。每次点击还会连同时间、位置和所在应用一起记录到视频旁的 `<视频名>.events.json` 文件中，方便后续生成分步教程。
 - **录屏转教程** —— 在录屏的快速访问卡片上点“生成教程”（或在菜单栏选择“从录屏生成教程…”），Lumora 会把每次点击变成分步指南：取点击后一刻的画面并画上高亮圆环、围绕指针裁切，再根据指针旁的文字（在本机识别）生成标题。开启 AI 后，步骤由你的服务商撰写，只发送文字——应用名、窗口标题和附近的文字，绝不发送画面。可以编辑或删除步骤，然后导出 Markdown、单文件自包含 HTML（支持浅色与深色），或直接拷贝 Markdown。
 - **字幕、摘要与章节** —— 在录屏的快速访问卡片上点“字幕”（或在菜单栏选择“转写录屏…”）。默认在本机用 Apple 语音识别（除非你允许，否则绝不使用 Apple 服务器），也可以改用 AI 服务商的 Whisper 兼容接口（音频不超过 25 MB）。在“设置 → 录制”中选择语音语言（中文、英语或跟随应用语言）和音频来源（麦克风、系统声音或两者混合）。随后 Lumora 生成简短摘要和章节——开启 AI 时由 AI 撰写（仅发送文字），否则根据停顿和点击在本机生成。可以逐句修改（按 <kbd>Esc</kbd> 结束编辑，再按一次关闭窗口；长录屏也能立即打开），然后导出 SRT 或 WebVTT，或拷贝章节（YouTube 格式）和摘要。所有内容保存在 `<视频名>.transcript.json` 中，再次打开时保留你的修改。
+- **截图历史** —— 按 <kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>（或在菜单栏选择“截图历史…”），以缩略图网格浏览截图文件夹中的所有截图、录屏和 `.lumora` 文档。可按类型筛选，并搜索文件名*以及截图里的文字*（窗口打开时在本机识别），然后在编辑器中重新打开（有 `.lumora` 时优先打开它，标注仍可编辑）、拷贝、在访达中显示或移到废纸篓。只会列出 Lumora 自己的文件（依据 `.lumora` / 附属文件或你的文件名模板），缩略图在后台生成并缓存。可选的保留期限设置（设置 → 通用：全部保留、30 天或 90 天）只会*提示*将较旧的项目移到废纸篓，并需要确认——绝不会直接删除任何文件。
 - **macOS 14+ 麦克风录制** —— 在 macOS 14 和 15 上都能边录屏边录下你的声音，可使用系统默认麦克风，或在“设置 → 录屏”中选择设备。首次使用时 Lumora 会请求麦克风权限。
 
 ## 快捷键
@@ -94,6 +95,7 @@
 | 窗口截图 | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>5</kbd> |
 | 录屏（开始 / 停止） | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>R</kbd> |
 | 打开截图文件夹 | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>O</kbd> |
+| 截图历史 | <kbd>⌥</kbd> <kbd>⇧</kbd> <kbd>H</kbd> |
 
 | 截图界面内 | 按键 |
 |---|---|
@@ -186,7 +188,9 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
 
 <br>
 
-设置以 TOML 格式保存在 `~/Library/Application Support/Lumora/settings.toml`。缺失的键使用默认值，未知的键会被忽略，损坏的文件会被移到 `settings.toml.bak`。日志输出到 stderr；设置 `LUMORA_LOG=debug` 可查看更多信息。
+设置以 TOML 格式保存在 `~/Library/Application Support/Lumora/settings.toml`。缺失的键使用默认值，未知的键会被忽略，损坏的文件会被移到 `settings.toml.bak`。清除的快捷键会保存为 `""`，重启后依然保持清除状态。
+
+截图历史索引（文件列表、尺寸以及截图中识别出的文字，用于搜索）保存在同目录的 `history.json`，缩略图在 `Thumbnails/` 中。两者都只是缓存：随时可以删除，下次扫描会自动重建；所有内容都不会离开你的 Mac。日志输出到 stderr；设置 `LUMORA_LOG=debug` 可查看更多信息。
 
 </details>
 
@@ -201,10 +205,10 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
 | Crate | 职责 |
 |---|---|
 | [`apps/lumora`](apps/lumora) | 可执行程序：`NSApplication`、状态栏图标、隐藏的主菜单、Carbon 全局快捷键、应用状态，以及截图 / 录屏 / 文字识别 / 打码 / 教程 / 转写流程 |
-| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation：截图界面、快速访问、钉图、快门、倒计时、录屏控件、设置、引导、标注编辑器 + 美化面板 + AI 结果面板、识别文字操作面板、点击涟漪浮层、教程与字幕窗口 |
+| [`lumora-ui`](crates/lumora-ui) | AppKit + Core Animation：截图界面、快速访问、钉图、快门、倒计时、录屏控件、设置、引导、标注编辑器 + 美化面板 + AI 结果面板、识别文字操作面板、点击涟漪浮层、教程、字幕与截图历史窗口 |
 | [`lumora-ai`](crates/lumora-ai) | OpenAI 兼容的流式对话与 `/audio/transcriptions` 客户端、钥匙串密钥存储 |
 | [`lumora-capture`](crates/lumora-capture) | ScreenCaptureKit、ImageIO、AVFoundation（含 macOS 14 上的 `AVCaptureSession` 麦克风）、剪贴板、美化渲染、Vision 文字识别与人脸检测、教程帧渲染、Apple 语音转写 |
-| [`lumora-core`](crates/lumora-core) | 纯 Rust：几何、弹簧、选区状态机、吸附、设置、文件名、快捷键解析、布局、录屏状态机、美化模型、`.lumora` 文档格式、AI 设置/提示词/流式解析、打码检测器、表格 / 代码提取、点击记录、教程模型与导出、字幕（SRT / VTT、章节、摘要）、临时文件夹清理 |
+| [`lumora-core`](crates/lumora-core) | 纯 Rust：几何、弹簧、选区状态机、吸附、设置、文件名、快捷键解析、布局、录屏状态机、美化模型、`.lumora` 文档格式、AI 设置/提示词/流式解析、打码检测器、表格 / 代码提取、点击记录、教程模型与导出、字幕（SRT / VTT、章节、摘要）、临时文件夹清理、截图历史索引 |
 
 深入了解：[ARCHITECTURE.md](ARCHITECTURE.md)（线程模型、数据流、坐标空间）· [DESIGN.md](DESIGN.md)（颜色、形状、字体与动效令牌）。
 
@@ -223,7 +227,7 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
 
 - [ ] 在 Apple Silicon 与 Intel（macOS 14 和 15）上真机调试并修复问题
 - [ ] 在 CI 中进行 Developer ID 签名与公证
-- [ ] 截图历史窗口（<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>）
+- [x] 截图历史窗口（<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>）—— 已完成，等待真机测试
 - [ ] 录屏增强：按键提示、导出 GIF 与剪辑、字幕烧录
 - [ ] 滚动截图
 

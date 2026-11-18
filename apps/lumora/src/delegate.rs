@@ -91,6 +91,11 @@ define_class!(
             post_command(Command::OpenFolder);
         }
 
+        #[unsafe(method(showHistory:))]
+        fn show_history(&self, _sender: Option<&AnyObject>) {
+            post_command(Command::ShowHistory);
+        }
+
         #[unsafe(method(openLumoraDocument:))]
         fn open_lumora_document(&self, _sender: Option<&AnyObject>) {
             post_command(Command::OpenDocument);

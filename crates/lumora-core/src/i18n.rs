@@ -153,6 +153,7 @@ messages! {
     RecordScreen => "Record Screen", "录制屏幕";
     StopRecording => "Stop Recording", "停止录制";
     OpenCapturesFolder => "Open Captures Folder", "打开截图文件夹";
+    CaptureHistoryMenu => "Capture History…", "截图历史…";
     OpenDocumentMenu => "Open…", "打开…";
     SettingsMenu => "Settings…", "设置…";
     PermissionMenu => "Screen Recording Permission…", "屏幕录制权限…";
@@ -533,6 +534,42 @@ messages! {
     RedactAiCheck => "Also check with AI (sends text only)", "同时用 AI 检查（仅发送文字）";
     RedactAuto => "Redact new screenshots automatically", "复制 / 保存新截图前自动打码";
     RedactNote => "Detects on this Mac; AI check needs AI Writing on.", "检测在本机完成；AI 检查需先启用 AI 写作。";
+
+    // -- capture history (v0.6) ---------------------------------------------------
+    CaptureHistory => "Capture History", "截图历史";
+    HistoryFilterAll => "All", "全部";
+    HistoryFilterScreenshots => "Screenshots", "截图";
+    HistoryFilterRecordings => "Recordings", "录屏";
+    HistoryFilterDocuments => "Editable", "可编辑";
+    HistorySearchPlaceholder => "Search names and text", "搜索文件名和文字";
+    HistoryCount => "{0} items", "共 {0} 项";
+    HistoryEmptyTitle => "No captures yet", "还没有截图或录屏";
+    HistoryEmptyDetail => "Screenshots and recordings you save appear here.", "保存的截图和录屏会显示在这里。";
+    HistoryNoMatches => "Nothing matches your search", "没有符合搜索条件的项目";
+    HistoryLoading => "Loading history", "正在载入历史记录";
+    HistoryReopen => "Open in Editor", "在编辑器中打开";
+    HistoryPlay => "Play", "播放";
+    HistoryShowInFinder => "Show in Finder", "在访达中显示";
+    HistoryMoveToTrash => "Move to Trash", "移到废纸篓";
+    HistoryShowMore => "Show More", "显示更多";
+    HistoryDeleteTitle => "Move “{0}” to the Trash?", "将“{0}”移到废纸篓？";
+    HistoryDeleteDetail => "Its editable document and recording sidecars go with it. You can put them back from the Trash.",
+        "它的可编辑文档和录屏附属文件也会一起移走，可以从废纸篓中放回。";
+    HistoryRetentionBanner => "{0} captures are older than {1} days.", "有 {0} 项已超过 {1} 天。";
+    HistoryRetentionButton => "Move to Trash…", "移到废纸篓…";
+    HistoryRetentionConfirmTitle => "Move {0} captures older than {1} days to the Trash?", "将超过 {1} 天的 {0} 项移到废纸篓？";
+    HistoryRetentionConfirmDetail => "Their editable documents and recording sidecars go too. You can put them back from the Trash.",
+        "它们的可编辑文档和录屏附属文件也会一起移走，可以从废纸篓中放回。";
+    HistoryKeepAll => "Keep everything", "全部保留";
+    HistoryKeep30 => "30 days", "30 天";
+    HistoryKeep90 => "90 days", "90 天";
+    HistoryRetentionLabel => "Keep history:", "历史保留：";
+    HistoryRetentionNote => "Older captures are only offered for the Trash in the history window, never deleted on their own.",
+        "超期的项目只会在历史窗口中提示移到废纸篓，不会被自动删除。";
+    HistoryTrashFailed => "Couldn’t move to the Trash", "无法移到废纸篓";
+    HistoryTrashFailedDetail => "{0} could not be moved. Nothing was deleted.", "无法移动 {0}，没有删除任何文件。";
+    HistoryMissingFile => "That file is no longer there", "该文件已不存在";
+    HistoryCancel => "Cancel", "取消";
 }
 
 #[cfg(test)]

@@ -6,6 +6,35 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Capture history window** (<kbd>⌥⇧H</kbd>, or **Capture History…** in the
+  menu bar): a thumbnail grid of the screenshots, recordings and `.lumora`
+  documents in your captures folder, newest first. Filter by type (All,
+  Screenshots, Recordings, Editable), search file names and the text
+  recognised in screenshots, and per item Open in Editor (the `.lumora` when
+  there is one; recordings play), Copy, Show in Finder and Move to Trash
+  (with confirmation). Clicking a thumbnail reopens it; Esc / ⌘W close the
+  window; an empty folder shows an explanation instead of a blank grid.
+  Only Lumora's files are listed: `.lumora` documents, PNGs with a
+  `.lumora` or a name matching the file-name template, movies with a click
+  log / steps / transcript or a matching name.
+- History index `~/Library/Application Support/Lumora/history.json`
+  (versioned schema with migration steps; a corrupt or newer file is moved
+  to `history.json.bak` and rebuilt from a scan) caching type, path, date,
+  size, dimensions and OCR text. Text is recognised on this Mac in the
+  background while the window is open, and reused from auto-redaction /
+  Smart Redact / AI Writing when a capture already had it. Thumbnails are
+  made off the main thread and cached in `Thumbnails/`; stale ones are
+  pruned.
+- Settings → General → **Keep history** (everything / 30 days / 90 days).
+  Older captures are only offered for the Trash from a banner in the
+  history window, after a confirmation; nothing is ever deleted outright.
+
+### Fixed
+- A shortcut cleared in Settings → Shortcuts came back as the default on
+  the next launch (the cleared key was omitted from `settings.toml`); it is
+  now saved as `""` and stays cleared.
+
 ## [0.5.1] — 2026-11-17 (prerelease, polish only, not yet hardware-tested)
 
 ### Changed

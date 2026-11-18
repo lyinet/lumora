@@ -196,6 +196,34 @@ impl std::fmt::Debug for TextAiRequest {
     }
 }
 
+/// A thumbnail the history window needs: the app renders it off the main
+/// thread (cached on disk under `key`) and answers with
+/// `HistoryWindow::set_thumbnail`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThumbRequest {
+    pub key: String,
+    pub path: std::path::PathBuf,
+    pub kind: lumora_core::history::ItemKind,
+}
+
+/// What the capture history window tells the app. Paths name an item by
+/// its primary file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HistoryAction {
+    /// Reopen in the editor (its `.lumora` when there is one); recordings
+    /// open in the default player.
+    Reopen(std::path::PathBuf),
+    Copy(std::path::PathBuf),
+    Reveal(std::path::PathBuf),
+    /// Move to the Trash (the app confirms first).
+    Delete(std::path::PathBuf),
+    /// Move everything older than the retention setting to the Trash (the
+    /// app confirms first).
+    TrashExpired,
+    NeedThumbnails(Vec<ThumbRequest>),
+    Closed,
+}
+
 /// Onboarding panel buttons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnboardingAction {
@@ -253,6 +281,8 @@ pub enum UiEvent {
         id: u64,
         action: TranscriptAction,
     },
+    /// The capture history window.
+    History(HistoryAction),
     /// The AI tab needs the stored API key for `provider`; the app reads
     /// the Keychain and answers with `SettingsWindow::set_ai_key`.
     AiKeyRequested(lumora_core::ai::AiProvider),

@@ -599,6 +599,20 @@ pub fn thumbnail(
     crate::av_sync::image_at(&generator, start).inspect_err(|e| log::warn!("recording thumbnail: {e}")).ok()
 }
 
+/// Pixel size of a movie's first video track (`None` if it has none or
+/// can't be read). Blocks on AVFoundation's async loader; call off main.
+pub fn video_dimensions(path: &Path) -> Option<(u32, u32)> {
+    use objc2_av_foundation::{AVAsset, AVMediaTypeVideo};
+    let url = crate::clipboard::file_url(path)?;
+    // SAFETY: a local file URL; the media type constant is a valid static.
+    let (asset, video) = unsafe { (AVAsset::assetWithURL(&url), AVMediaTypeVideo?) };
+    let track = crate::av_sync::tracks(&asset, video).ok()?.into_iter().next()?;
+    // SAFETY: read-only property of a loaded track.
+    let size = unsafe { track.naturalSize() };
+    let (w, h) = (size.width.abs().round(), size.height.abs().round());
+    (w >= 1.0 && h >= 1.0).then_some((w as u32, h as u32))
+}
+
 #[cfg(test)]
 mod tests {
     use super::even;

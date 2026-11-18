@@ -15,6 +15,8 @@ pub enum Command {
     /// Start (choose area) or stop a recording.
     ToggleRecording,
     OpenFolder,
+    /// The capture history window.
+    ShowHistory,
     /// Choose `.lumora` documents to reopen in the editor.
     OpenDocument,
     /// Choose a recording and make a step-by-step tutorial from it.
@@ -35,6 +37,7 @@ impl From<Action> for Command {
             Action::CaptureText => Command::CaptureText,
             Action::RecordScreen => Command::ToggleRecording,
             Action::OpenFolder => Command::OpenFolder,
+            Action::History => Command::ShowHistory,
         }
     }
 }

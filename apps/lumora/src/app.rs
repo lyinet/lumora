@@ -224,6 +224,8 @@ pub struct App {
     pub transcripts: RefCell<HashMap<u64, crate::transcribe_flow::OpenTranscript>>,
     /// Running transcriptions: movie → cancel flag.
     pub transcribe_jobs: RefCell<HashMap<PathBuf, std::sync::Arc<std::sync::atomic::AtomicBool>>>,
+    /// Capture history: index, window and thumbnail cache.
+    pub history: RefCell<crate::history_flow::HistoryState>,
 }
 
 impl App {
@@ -235,11 +237,22 @@ impl App {
     /// Remember OCR boxes recognised on capture `id`'s image `key` (ignored
     /// if the capture's original has since been replaced).
     pub fn store_ocr(&self, id: u64, key: usize, boxes: Arc<Vec<lumora_core::ocr::TextBox>>) {
-        let mut caps = self.captures.borrow_mut();
-        if let Some(ed) = caps.get_mut(&id).and_then(|r| r.editable.as_mut()) {
-            if Editable::ocr_key(&ed.original) == key {
-                ed.ocr.store(key, boxes);
+        let note = {
+            let mut caps = self.captures.borrow_mut();
+            let Some(rec) = caps.get_mut(&id) else { return };
+            let (file, temp) = (rec.file.clone(), rec.temp);
+            match rec.editable.as_mut() {
+                Some(ed) if Editable::ocr_key(&ed.original) == key => {
+                    // Also kept in the history index, for search.
+                    let text = (!temp).then(|| (file, lumora_core::ocr::assemble(&boxes)));
+                    ed.ocr.store(key, boxes);
+                    text
+                }
+                _ => None,
             }
+        };
+        if let Some((file, text)) = note {
+            self.history_note_ocr(file, text);
         }
     }
 
@@ -293,6 +306,7 @@ impl App {
                 tutorial_busy: RefCell::new(std::collections::HashSet::new()),
                 transcripts: RefCell::new(HashMap::new()),
                 transcribe_jobs: RefCell::new(HashMap::new()),
+                history: RefCell::new(Default::default()),
             }
         });
         APP.with(|a| *a.borrow_mut() = Rc::downgrade(&app));
@@ -357,6 +371,7 @@ impl App {
                 let folder = self.settings.borrow().save_folder(&self.home);
                 system::open_folder(&folder);
             }
+            Command::ShowHistory => self.show_history(),
             Command::OpenDocument => self.open_document_panel(),
             Command::MakeTutorial => self.choose_recording_for_tutorial(),
             Command::Transcribe => self.choose_recording_for_transcript(),
@@ -421,6 +436,7 @@ impl App {
             UiEvent::TextResult(action) => self.on_text_result(action),
             UiEvent::Tutorial { id, action } => self.on_tutorial(id, action),
             UiEvent::Transcript { id, action } => self.on_transcript(id, action),
+            UiEvent::History(action) => self.on_history(action),
             UiEvent::AiKeyRequested(provider) => self.on_ai_key_requested(provider),
             UiEvent::AiKeySave { provider, key } => self.on_ai_key_save(provider, key),
             UiEvent::AiTestConnection { id, settings, key } => self.on_ai_test_connection(id, *settings, key),
@@ -486,8 +502,9 @@ impl App {
                                     o.movie = dest.clone();
                                 }
                             }
-                            rec.file = dest;
+                            rec.file = dest.clone();
                             rec.temp = false;
+                            self.history_note(dest);
                         }
                     }
                     system::reveal_in_finder(&rec.file);
@@ -507,7 +524,9 @@ impl App {
                 self.quick.dismiss(id);
             }
             CardAction::Delete => {
-                if let Some(rec) = self.captures.borrow_mut().remove(&id) {
+                let removed = self.captures.borrow_mut().remove(&id);
+                if let Some(rec) = removed {
+                    self.history_forget(rec.file.clone());
                     system::trash(&rec.file);
                     let doc = lumora_core::lumora_doc::doc_path_for(&rec.file);
                     if rec.editable.is_some() && doc.exists() {
@@ -594,6 +613,10 @@ impl App {
         self.apply_hotkeys();
         if language_changed {
             self.apply_language();
+        }
+        // Save folder, file-name template or retention may have changed.
+        if self.history_open() {
+            self.refresh_history();
         }
     }
 
