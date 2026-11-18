@@ -173,8 +173,10 @@ impl ClickOverlay {
             MouseButton::Right => color::CLICK_RIGHT,
             MouseButton::Other => color::CLICK_OTHER,
         };
-        // The root layer is geometry-flipped: local y grows downwards.
-        let local = CGPoint::new(p.x - s.frame.min_x(), s.frame.max_y() - p.y);
+        // The hosting view and its root layer are top-down (see
+        // `layer_host_view`): local y grows downwards from the screen's top.
+        let l = lumora_core::geometry::appkit_to_local_top_down(p, s.frame);
+        let local = CGPoint::new(l.x, l.y);
         let ring = CAShapeLayer::new();
         let d = RADIUS * 2.0;
         without_actions(|| {

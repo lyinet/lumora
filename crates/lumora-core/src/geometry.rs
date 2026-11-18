@@ -374,9 +374,58 @@ pub fn flip_point_y(p: Point, primary_height: f64) -> Point {
     Point::new(p.x, primary_height - p.y)
 }
 
+/// A global AppKit point (bottom-left origin, y up) in the top-down local
+/// space of an overlay that covers `frame` (its AppKit global frame): x
+/// from the frame's left edge, y from its **top** edge. This is what a
+/// y-down (flipped) layer tree inside that overlay expects.
+pub fn appkit_to_local_top_down(p: Point, frame: Rect) -> Point {
+    Point::new(p.x - frame.min_x(), frame.max_y() - p.y)
+}
+
+/// Rect version of [`appkit_to_local_top_down`]: the rect's top edge (its
+/// AppKit `max_y`) becomes its local `min_y`.
+pub fn appkit_rect_to_local_top_down(r: Rect, frame: Rect) -> Rect {
+    Rect::new(r.min_x() - frame.min_x(), frame.max_y() - r.max_y(), r.width(), r.height())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn appkit_point_to_overlay_local_top_down() {
+        // Primary 1512×982 at the origin.
+        let primary = Rect::new(0.0, 0.0, 1512.0, 982.0);
+        // A click near the bottom-right (the stop button) stays bottom-right.
+        let p = appkit_to_local_top_down(Point::new(1400.0, 40.0), primary);
+        assert_eq!(p, Point::new(1400.0, 942.0));
+        // Top-left corner of the screen is local (0, 0).
+        assert_eq!(appkit_to_local_top_down(Point::new(0.0, 982.0), primary), Point::new(0.0, 0.0));
+        // A screen to the left and higher up (negative x, positive y).
+        let left = Rect::new(-2560.0, 200.0, 2560.0, 1440.0);
+        assert_eq!(appkit_to_local_top_down(Point::new(-2560.0, 1640.0), left), Point::new(0.0, 0.0));
+        assert_eq!(appkit_to_local_top_down(Point::new(-10.0, 210.0), left), Point::new(2550.0, 1430.0));
+        // A screen below the primary (negative y).
+        let below = Rect::new(300.0, -1080.0, 1920.0, 1080.0);
+        assert_eq!(appkit_to_local_top_down(Point::new(400.0, -1000.0), below), Point::new(100.0, 1000.0));
+        // y-mirrored clicks must map to different local points (the v0.6.1
+        // bug drew `h - y` instead of `y`).
+        let a = appkit_to_local_top_down(Point::new(10.0, 100.0), primary);
+        let b = appkit_to_local_top_down(Point::new(10.0, 882.0), primary);
+        assert!(a.y > b.y);
+        assert!((a.y + b.y - primary.height()).abs() < 1e-9);
+    }
+
+    #[test]
+    fn appkit_rect_to_overlay_local_top_down() {
+        let screen = Rect::new(-1920.0, -300.0, 1920.0, 1200.0);
+        // A rect touching the screen's top-left corner.
+        let r = Rect::new(-1920.0, 700.0, 300.0, 200.0);
+        assert_eq!(appkit_rect_to_local_top_down(r, screen), Rect::new(0.0, 0.0, 300.0, 200.0));
+        // Its bottom-left corner point agrees with the point helper.
+        let bl = appkit_to_local_top_down(Point::new(r.min_x(), r.min_y()), screen);
+        assert_eq!(bl, Point::new(0.0, 200.0));
+    }
 
     #[test]
     fn from_corners_normalises() {

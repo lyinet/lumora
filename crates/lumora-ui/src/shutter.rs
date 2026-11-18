@@ -31,7 +31,7 @@ pub fn play(mtm: MainThreadMarker, image: &CGImage, from: Rect, to: Option<Rect>
     panel.orderFrontRegardless();
 
     // AppKit global (y-up) → this view's y-down local space.
-    let local = |r: Rect| Rect::new(r.min_x() - screen.min_x(), screen.max_y() - r.max_y(), r.width(), r.height());
+    let local = |r: Rect| lumora_core::geometry::appkit_rect_to_local_top_down(r, screen);
     let from_l = local(from);
 
     let flash = CALayer::new();

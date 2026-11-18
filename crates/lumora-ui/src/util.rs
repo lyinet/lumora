@@ -484,15 +484,44 @@ pub fn make_panel(mtm: MainThreadMarker, frame: CGRect, spec: PanelSpec) -> Reta
     panel
 }
 
-/// A layer-hosting view of `size` whose root layer uses y-down geometry,
-/// matching `lumora_core`'s coordinate convention.
+define_class!(
+    /// A top-down (`isFlipped == YES`) layer-hosting view.
+    ///
+    /// AppKit keeps the hosted root layer's `geometryFlipped` in step with
+    /// the view's `isFlipped`: on a plain (bottom-up) `NSView` it resets the
+    /// flag we set, so a y-down layer tree draws mirrored vertically (the
+    /// v0.6.1 click ripples). A flipped view keeps both agreeing — the same
+    /// setup the capture overlay and the editor canvas already use.
+    #[unsafe(super(objc2_app_kit::NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "LumoraLayerHostView"]
+    pub struct LayerHostView;
+
+    unsafe impl NSObjectProtocol for LayerHostView {}
+
+    impl LayerHostView {
+        #[unsafe(method(isFlipped))]
+        fn is_flipped(&self) -> bool {
+            true
+        }
+    }
+);
+
+/// A layer-hosting view of `frame` whose root layer uses y-down geometry,
+/// matching `lumora_core`'s coordinate convention: local `(0, 0)` is the
+/// view's **top-left** corner (see
+/// [`lumora_core::geometry::appkit_to_local_top_down`]).
 pub fn layer_host_view(mtm: MainThreadMarker, frame: CGRect) -> (Retained<objc2_app_kit::NSView>, Retained<CALayer>) {
-    let view = objc2_app_kit::NSView::initWithFrame(objc2_app_kit::NSView::alloc(mtm), frame);
+    let this = LayerHostView::alloc(mtm).set_ivars(());
+    let view: Retained<LayerHostView> = unsafe { msg_send![super(this), initWithFrame: frame] };
     let root = CALayer::new();
     root.setGeometryFlipped(true);
     view.setLayer(Some(&root));
     view.setWantsLayer(true);
-    (view, root)
+    // Re-assert after AppKit took the layer over (it agrees: the view is
+    // flipped).
+    root.setGeometryFlipped(true);
+    (Retained::into_super(view), root)
 }
 
 /// A rounded "glass" HUD background (`NSVisualEffectView`, HUD material,
@@ -546,7 +575,19 @@ define_class!(
 
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &objc2_app_kit::NSEvent) {
+            // Auto-repeat of a key still held from before this view took
+            // focus (↩ that confirmed a selection) must not act again.
+            if event.isARepeat() {
+                return;
+            }
             (self.ivars().on_key)(event.keyCode());
+        }
+
+        /// Top-down, like [`LayerHostView`], so the hosted y-down layers
+        /// keep their geometry.
+        #[unsafe(method(isFlipped))]
+        fn is_flipped(&self) -> bool {
+            true
         }
     }
 );
@@ -564,6 +605,7 @@ impl KeyCatcherView {
         root.setGeometryFlipped(true);
         this.setLayer(Some(&root));
         this.setWantsLayer(true);
+        root.setGeometryFlipped(true);
         (this, root)
     }
 }
