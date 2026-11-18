@@ -6,6 +6,54 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-18 (prerelease; first real-Mac fixes)
+
+First fixes from testing on a real Mac (Mac mini M4, macOS 26 Tahoe).
+
+### Fixed
+- **Capturing did nothing after the welcome window was closed.** Closing the
+  onboarding window with its close button, Esc or ⌘W left it registered as
+  open, so every capture, every shortcut and **Screen Recording
+  Permission…** silently did nothing. Closing it now counts as **Not Now**,
+  and asking again brings the window back to the front.
+- **The welcome window could stay hidden** behind other apps (Lumora has no
+  Dock icon). It now opens after launch has finished, floats above other
+  windows and is forced to the front; its visibility is logged.
+- **Lumora did not appear under Screen & System Audio Recording** and
+  **Grant Access** showed no prompt on macOS 15/26. Lumora now asks for
+  access at launch and on **Grant Access** with both
+  `CGRequestScreenCaptureAccess` and a real ScreenCaptureKit query, which
+  makes macOS list the app and show its prompt, then opens the pane.
+- **“The app doesn’t open”:** a launch with permission granted showed
+  nothing at all. Lumora now says it is running in the menu bar and lists
+  the main shortcuts (not for login-item launches), warns and opens
+  Settings if its menu-bar icon looks hidden (System Settings → Menu Bar
+  on macOS 26), and opening Lumora again from Finder or Spotlight shows
+  Settings (or the welcome window without permission).
+- **Running from the disk image or a translocated copy:** Lumora detects
+  App Translocation and `/Volumes/…`, explains why permissions won’t stick
+  and offers to move itself to Applications (removing the quarantine flag)
+  and reopen from there.
+- **No silent failures in capture:** a capture refused for missing
+  permission or because another capture is running now logs and shows a
+  toast; if ScreenCaptureKit doesn’t answer within 5 s the capture is reset
+  with an error instead of blocking every later capture; when macOS
+  refuses although the permission looks granted (a grant left over from an
+  older ad-hoc build) Lumora explains how to reset it.
+- **Logs:** everything is also written to
+  `~/Library/Logs/Lumora/lumora.log` (rotated at 5 MB), with debug detail
+  via `LUMORA_DEBUG=1`, `RUST_LOG` or `LUMORA_LOG`; a panic hook records
+  crashes with a backtrace.
+
+### Docs
+- README (en + zh-CN): Troubleshooting for first launch, permissions
+  (`xattr`, `tccutil reset ScreenCapture com.lumora.app`, ad-hoc builds
+  losing the grant on update), granting the permission with Lumora opened
+  from Finder/Spotlight/Launchpad rather than a terminal (otherwise macOS
+  asks on behalf of, and grants, the terminal), the hidden menu-bar icon
+  and where the log lives. Lumora logs a warning when started from a
+  terminal.
+
 ## [0.6.0] — 2026-11-18 (prerelease, not yet hardware-tested)
 
 ### Added
@@ -413,7 +461,8 @@ All notable changes to Lumora are documented here. The format follows
 - Screen Recording onboarding with live permission polling and relaunch.
 - Universal bundle script (lipo, codesign, notarytool, create-dmg) and CI.
 
-[Unreleased]: https://github.com/lyinet/lumora/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/lyinet/lumora/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/lyinet/lumora/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/lyinet/lumora/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/lyinet/lumora/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lyinet/lumora/compare/v0.4.0...v0.5.0
