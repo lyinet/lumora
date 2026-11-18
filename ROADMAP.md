@@ -104,6 +104,16 @@
   changes skipped, restart before the first scroll, lost-frame run and
   retried frame errors after it, every end logged).
 
+## v0.6.3 — scrolling-capture fixes (2026-11-18)
+
+- ✅ Lumora excluded from every capture as an application (no own panels,
+  HUDs, toasts or border in images or recordings).
+- ✅ Scrolling control placed outside the captured area; ignores the mouse
+  when it can't be.
+- ✅ Stitcher matches real pages: tolerant cell matching, fixed top / bottom
+  bands and fixed columns, 1–2 px steps, torn frames skipped, stitching up
+  and down; per-frame debug log and an end-of-session summary.
+
 ## v0.7 — make it real on hardware, signing
 
 - Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
