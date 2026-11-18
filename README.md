@@ -195,6 +195,8 @@ LUMORA_DEBUG=1 /Applications/Lumora.app/Contents/MacOS/lumora   # or LUMORA_LOG=
 ```
 Caveat: a copy started from a terminal uses the **terminal’s** Screen Recording permission (see above), so use this for reading logs, not for granting or testing the permission; the log file is written either way, so for permission problems launch normally and read `~/Library/Logs/Lumora/lumora.log` afterwards. Please attach the log when you report a bug.
 
+**Scrolling capture doesn’t stitch.** Every session ends with a `scrolling capture summary:` line in the log (frames appended / prepended / unchanged / restarted / lost, the fixed header and footer found, the image size), and the first few frames that didn’t line up are logged with how they were matched. With debug logging (above) every frame is logged: the offset found, the fixed bands, the fixed columns and the result. Attach that part of the log when you report it.
+
 <details>
 <summary><b>Developing on Linux or in CI</b></summary>
 

@@ -195,6 +195,8 @@ LUMORA_DEBUG=1 /Applications/Lumora.app/Contents/MacOS/lumora   # 或 LUMORA_LOG
 ```
 注意：从终端启动的副本使用的是**终端**的“屏幕录制”权限（见上文），因此这种方式只适合查看日志，不适合授予或测试权限；无论哪种方式日志文件都会写入，所以遇到权限问题时请正常启动，之后再查看 `~/Library/Logs/Lumora/lumora.log`。报告问题时请附上这份日志。
 
+**滚动截图拼接不起来。** 每次滚动截图结束时，日志里都有一行 `scrolling capture summary:`（追加 / 前插 / 未变化 / 重新开始 / 无法衔接的帧数、识别到的固定页眉页脚、图片尺寸），前几帧无法衔接的画面也会记下匹配情况。开启调试日志（见上文）后，每一帧都会记录：找到的偏移、固定区域、固定列以及处理结果。报告问题时请附上这一段日志。
+
 <details>
 <summary><b>在 Linux 或 CI 中开发</b></summary>
 

@@ -24,7 +24,7 @@ use lumora_capture::screenshot::{self, ShotTarget};
 use lumora_capture::CaptureError;
 use lumora_core::geometry::Rect;
 use lumora_core::i18n::{tr, Msg};
-use lumora_core::scroll_capture::{Frame, Push, ScrollStitcher, LOST_LIMIT, MAX_HEIGHT};
+use lumora_core::scroll_capture::{Frame, MatchInfo, Push, ScrollStitcher, Summary, LOST_LIMIT, MAX_HEIGHT};
 use lumora_core::selection::Target;
 use lumora_ui::recording_hud::RecordingBorder;
 use lumora_ui::scroll_hud::ScrollControl;
@@ -54,7 +54,17 @@ struct FrameOutcome {
     push: Push,
     frames: usize,
     scrolled: bool,
+    /// How the frame was matched (offset, fixed bands, scores).
+    matched: Option<MatchInfo>,
+    /// Counts so far.
+    summary: Summary,
+    /// Pixels per point of the frame.
+    scale: f64,
 }
+
+/// Restarted / lost frames logged at info (with how they were matched)
+/// before the rest go to debug only.
+const INFO_FRAMES: usize = 5;
 
 /// State the capture callbacks (any queue) share with the main thread.
 struct Shared {
@@ -214,7 +224,14 @@ impl App {
                             Ok(mut st) => {
                                 st.1 = shot.scale;
                                 let push = st.0.push(frame);
-                                Some(Ok(FrameOutcome { push, frames: st.0.frames(), scrolled: st.0.scrolled() }))
+                                Some(Ok(FrameOutcome {
+                                    push,
+                                    frames: st.0.frames(),
+                                    scrolled: st.0.scrolled(),
+                                    matched: st.0.last_match().copied(),
+                                    summary: st.0.summary(),
+                                    scale: shot.scale,
+                                }))
                             }
                             Err(_) => None,
                         },
@@ -268,30 +285,49 @@ impl App {
                     self.fail(e);
                 }
             }
-            Ok(FrameOutcome { push, frames, scrolled }) => match push {
-                Push::Capped(_) if scrolled => {
-                    self.notify(Notice::Warning(Msg::ToastScrollCapped), None);
-                    self.finish_scrolling_capture("height cap reached");
-                }
-                Push::Capped(_) => {
-                    log::info!("scrolling capture: the area alone reaches the height cap; waiting for Done");
-                }
-                Push::NoOverlap => {
-                    self.notify(
-                        Notice::Warning(Msg::ToastScrollNoOverlap),
-                        Some(tr(Msg::ToastScrollNoOverlapDetail).into()),
-                    );
-                    self.finish_scrolling_capture(&format!("{LOST_LIMIT} frames in a row lined up with nothing"));
-                }
-                Push::Restarted => {
-                    log::info!("scrolling capture: content changed before any scroll (focus click?); restarted");
-                }
-                Push::Lost(n) => log::debug!("scrolling capture: frame lined up with nothing ({n} in a row)"),
-                Push::Mismatch => log::info!("scrolling capture: frame of another size skipped"),
-                Push::Appended(rows) => log::debug!("scrolling capture: +{rows} rows below ({frames} frames)"),
-                Push::Prepended(rows) => log::debug!("scrolling capture: +{rows} rows above ({frames} frames)"),
-                Push::Started | Push::Unchanged | Push::Moved => {}
-            },
+            Ok(FrameOutcome { push, frames, scrolled, matched, summary, scale }) => {
+                let matched = matched.map_or_else(|| "first frame".to_string(), |m| m.to_string());
+                log::debug!(
+                    "scrolling capture: frame {}: {push:?}; {matched}; {}x{} px @{scale}x, {frames} kept",
+                    summary.pushed,
+                    summary.width,
+                    summary.height
+                );
+                self.on_scroll_push(push, frames, scrolled, &matched, &summary);
+            }
+        }
+    }
+
+    /// React to what the stitcher did with a frame (logs at info only what
+    /// helps a report; every frame is logged at debug).
+    fn on_scroll_push(self: &Rc<Self>, push: Push, frames: usize, scrolled: bool, matched: &str, summary: &Summary) {
+        match push {
+            Push::Capped(_) if scrolled => {
+                self.notify(Notice::Warning(Msg::ToastScrollCapped), None);
+                self.finish_scrolling_capture("height cap reached");
+            }
+            Push::Capped(_) => {
+                log::info!("scrolling capture: the area alone reaches the height cap; waiting for Done");
+            }
+            Push::NoOverlap => {
+                self.notify(
+                    Notice::Warning(Msg::ToastScrollNoOverlap),
+                    Some(tr(Msg::ToastScrollNoOverlapDetail).into()),
+                );
+                self.finish_scrolling_capture(&format!("{LOST_LIMIT} frames in a row lined up with nothing"));
+            }
+            Push::Restarted if summary.restarted <= INFO_FRAMES => {
+                log::info!(
+                    "scrolling capture: content changed before any scroll, not as a scroll; restarted ({matched})"
+                );
+            }
+            Push::Lost(n) if summary.lost <= INFO_FRAMES => {
+                log::info!("scrolling capture: frame lined up with nothing ({n} in a row; {matched})");
+            }
+            Push::Mismatch => log::info!("scrolling capture: frame of another size skipped"),
+            Push::Appended(rows) => log::debug!("scrolling capture: +{rows} rows below ({frames} frames)"),
+            Push::Prepended(rows) => log::debug!("scrolling capture: +{rows} rows above ({frames} frames)"),
+            Push::Restarted | Push::Lost(_) | Push::Started | Push::Unchanged | Push::Moved => {}
         }
     }
 
@@ -325,10 +361,18 @@ impl App {
     pub fn finish_scrolling_capture(self: &Rc<Self>, reason: &str) {
         let Some(session) = self.end_scrolling() else { return };
         let ScrollSession { shared, area, started, .. } = *session;
-        let (frames, height) = shared.stitch.lock().map(|st| (st.0.frames(), st.0.height())).unwrap_or((0, 0));
+        let (frames, height, summary, last) = shared
+            .stitch
+            .lock()
+            .map(|st| (st.0.frames(), st.0.height(), st.0.summary(), st.0.last_match().copied()))
+            .unwrap_or_default();
         log::info!(
             "scrolling capture finished after {:.1} s: {reason} ({frames} frame(s), {height} px)",
             started.elapsed().as_secs_f64()
+        );
+        log::info!(
+            "scrolling capture summary: {summary}; last match: {}",
+            last.map_or_else(|| "none".to_string(), |m| m.to_string())
         );
         DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
             move || {
