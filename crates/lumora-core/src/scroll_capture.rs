@@ -30,6 +30,21 @@
 //!    pixels (smooth or momentum scrolling, 2× Retina frames) are found like
 //!    any other.
 //!
+//! ## Scroll hints
+//!
+//! A frame may come with a [`ScrollHint`]: the scroll-wheel deltas the user
+//! made since the previous frame ([`crate::scroll_trigger`]). Summed since
+//! the last kept frame and passed through a [`Calibration`] learnt from
+//! earlier matches (direction, and how many pixels a point of wheel delta
+//! moved the content), it gives a [`HintWindow`]: the expected direction and
+//! a range of shifts. That range is searched first and a match there wins
+//! (repeating content can line up at several shifts; the hint picks the one
+//! the user scrolled). When nothing in it matches, every shift is searched
+//! as without a hint; once the calibration is trusted, a *weak* match
+//! against the scroll direction is rejected as implausible (one frame at a
+//! time, never two in a row, so a wrong hint can't stall a session). Frames
+//! without a hint are matched exactly as before.
+//!
 //! ## Composing
 //!
 //! The image is the header once, the stitched middle, the footer once. The
@@ -50,8 +65,8 @@ use std::fmt;
 pub const MAX_HEIGHT: usize = 20_000;
 
 /// Consecutive frames that line up with nothing (after scrolling started)
-/// before the session gives up with [`Push::NoOverlap`]. At one frame every
-/// 0.15 s this is about two seconds.
+/// before the session gives up with [`Push::NoOverlap`]: about 1.5–5
+/// seconds, depending on how fast frames come (wheel-driven or timer).
 pub const LOST_LIMIT: usize = 12;
 
 /// Cells per row signature (fewer when the frame is narrower).
@@ -80,6 +95,173 @@ const FIXED_COLUMN: f64 = 0.97;
 
 /// Rows with content that must line up for a match, at least.
 const MIN_INFO_ROWS: usize = 3;
+
+/// Hints smaller than this many pixels say nothing.
+pub const MIN_HINT_PX: f64 = 2.0;
+
+/// The hint window spans `expected × HINT_LOW − HINT_SLACK_LOW` to
+/// `expected × HINT_HIGH + HINT_SLACK_HIGH` pixels: apps animate wheel
+/// steps (part of a step lands in the next frame) and accelerate them.
+pub const HINT_LOW: f64 = 0.5;
+pub const HINT_HIGH: f64 = 2.0;
+const HINT_SLACK_LOW: f64 = 4.0;
+const HINT_SLACK_HIGH: f64 = 16.0;
+
+/// Matches that must agree with the hints' direction before a match against
+/// it can be rejected.
+pub const TRUSTED_AGREEMENT: usize = 3;
+
+/// Only an opposite-direction match at least this far from a perfect one
+/// (share of differing cells) is rejected; clean matches always win.
+const REJECT_MISMATCH: f64 = 0.02;
+
+/// Only hints of at least this many pixels (or line-based ones) reject.
+const REJECT_MIN_PX: f64 = 16.0;
+
+/// What the scroll events said about one frame: the content's expected
+/// shift since the previous frame.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScrollHint {
+    /// Raw shift in pixels, same sign convention as [`Offset::dy`]
+    /// (positive: scrolled down), before calibration. Line-based deltas
+    /// (`precise == false`) are in lines and only their sign is used.
+    pub dy: f64,
+    /// Pixel-precise deltas (trackpad, Magic Mouse).
+    pub precise: bool,
+}
+
+impl ScrollHint {
+    /// From wheel deltas summed since the previous frame, at `scale` pixels
+    /// per point. `NSEvent.scrollingDeltaY` is positive when the content
+    /// moves down, i.e. when the view moves *up* the page: the opposite of
+    /// [`Offset::dy`]. `None` without events or movement.
+    pub fn from_wheel(delta: &crate::scroll_trigger::WheelDelta, scale: f64) -> Option<ScrollHint> {
+        if delta.events == 0 || delta.delta_y == 0.0 || !delta.delta_y.is_finite() {
+            return None;
+        }
+        let scale = if scale > 0.0 { scale } else { 1.0 };
+        let dy = if delta.precise { -delta.delta_y * scale } else { -delta.delta_y };
+        Some(ScrollHint { dy, precise: delta.precise })
+    }
+}
+
+/// What the stitcher has learnt about how hints relate to the shifts found.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Calibration {
+    /// +1, or −1 when the hints turned out to point the other way.
+    pub orientation: f64,
+    /// Pixels of shift per pixel of (precise) hint.
+    pub gain: f64,
+    /// Hinted matches whose direction agreed / disagreed (since the last
+    /// flip).
+    pub agree: usize,
+    pub disagree: usize,
+}
+
+impl Default for Calibration {
+    fn default() -> Self {
+        Calibration { orientation: 1.0, gain: 1.0, agree: 0, disagree: 0 }
+    }
+}
+
+impl Calibration {
+    /// Directions have agreed often enough to reject against them.
+    pub fn trusted(&self) -> bool {
+        self.agree >= TRUSTED_AGREEMENT && self.agree >= 3 * self.disagree
+    }
+
+    /// The calibrated expected shift (pixels; sign only when not precise).
+    pub fn expect(&self, hint: &ScrollHint) -> f64 {
+        if hint.precise {
+            hint.dy * self.orientation * self.gain
+        } else {
+            hint.dy * self.orientation
+        }
+    }
+
+    /// Learn from a match `dy` found for a raw `hint`.
+    pub fn learn(&mut self, hint: &ScrollHint, dy: isize) {
+        if dy == 0 || (hint.precise && hint.dy.abs() < MIN_HINT_PX) {
+            return;
+        }
+        let expected = hint.dy * self.orientation;
+        if expected.signum() == (dy as f64).signum() {
+            self.agree += 1;
+            if hint.precise {
+                let ratio = (dy.unsigned_abs() as f64 / hint.dy.abs()).clamp(0.25, 8.0);
+                self.gain = (self.gain * 0.7 + ratio * 0.3).clamp(0.25, 8.0);
+            }
+        } else {
+            self.disagree += 1;
+            if self.disagree >= 2 && self.disagree > self.agree {
+                // The hints point the other way (an inverted device, an app
+                // that scrolls against the wheel): flip and start over.
+                *self = Calibration { orientation: -self.orientation, ..Calibration::default() };
+            }
+        }
+    }
+}
+
+/// The shifts a hint makes likely: `sign × (lo..=hi)` rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HintWindow {
+    /// +1 scrolled down, −1 up.
+    pub sign: isize,
+    pub lo: usize,
+    pub hi: usize,
+}
+
+impl HintWindow {
+    /// The window for a calibrated `expected` shift, with shifts up to
+    /// `max_shift` possible. `None` when the hint is too small or the window
+    /// lies beyond `max_shift`.
+    pub fn new(expected: f64, precise: bool, max_shift: usize) -> Option<HintWindow> {
+        if !expected.is_finite() || max_shift == 0 || (precise && expected.abs() < MIN_HINT_PX) || expected == 0.0 {
+            return None;
+        }
+        let sign = if expected > 0.0 { 1 } else { -1 };
+        let (lo, hi) = if precise {
+            let e = expected.abs();
+            let lo = (e * HINT_LOW - HINT_SLACK_LOW).floor().max(1.0) as usize;
+            let hi = (e * HINT_HIGH + HINT_SLACK_HIGH).ceil() as usize;
+            (lo, hi.min(max_shift))
+        } else {
+            (1, max_shift)
+        };
+        (lo <= hi).then_some(HintWindow { sign, lo, hi })
+    }
+
+    pub fn contains(&self, dy: isize) -> bool {
+        dy.signum() == self.sign && (self.lo..=self.hi).contains(&dy.unsigned_abs())
+    }
+}
+
+/// Whether a match `dy` with `mismatch` found by the full search (outside
+/// the hint window) is plausible. Rejected only when the calibration is
+/// trusted, the hint is clear, the match goes against it and is not clean,
+/// and the previous frame was not rejected already.
+pub fn plausible(cal: &Calibration, hint: &ScrollHint, dy: isize, mismatch: f64, rejected_last: bool) -> bool {
+    if rejected_last || !cal.trusted() || dy == 0 {
+        return true;
+    }
+    let expected = cal.expect(hint);
+    let clear = !hint.precise || expected.abs() >= REJECT_MIN_PX;
+    let against = expected.signum() != (dy as f64).signum();
+    !(clear && against && mismatch > REJECT_MISMATCH)
+}
+
+/// How a hint was used for a frame (for logs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HintUse {
+    /// The match was found inside the hint window.
+    Window,
+    /// Nothing matched in the window; the full search found this one.
+    Outside,
+    /// The full search's match went against a trusted hint; rejected.
+    Rejected,
+    /// The hint gave no window (too small, beyond the frame).
+    NoWindow,
+}
 
 /// One captured frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,6 +364,8 @@ pub struct MatchInfo {
     pub mismatch: Option<f64>,
     /// The best candidate shift, even when it was rejected.
     pub candidate: Option<isize>,
+    /// The calibrated hint (pixels) and how it was used; `None`: no hint.
+    pub hint: Option<(isize, HintUse)>,
 }
 
 impl fmt::Display for MatchInfo {
@@ -197,6 +381,15 @@ impl fmt::Display for MatchInfo {
         )?;
         if let (Some(c), Some(m)) = (self.candidate, self.mismatch) {
             write!(f, " best_shift={c} mismatch={m:.3}")?;
+        }
+        if let Some((h, u)) = self.hint {
+            let how = match u {
+                HintUse::Window => "matched in window",
+                HintUse::Outside => "matched outside window",
+                HintUse::Rejected => "rejected against hint",
+                HintUse::NoWindow => "no window",
+            };
+            write!(f, " hint={h} ({how})")?;
         }
         Ok(())
     }
@@ -325,9 +518,18 @@ fn min_overlap(band: usize) -> usize {
     (band / 4).max(8).min(band)
 }
 
+/// A hint for one match: the raw hint summed since the last kept frame,
+/// the session's calibration, and whether the previous frame was rejected.
+#[derive(Debug, Clone, Copy)]
+struct HintCtx {
+    raw: ScrollHint,
+    cal: Calibration,
+    rejected_last: bool,
+}
+
 /// Match frame `b` against `a`. `fixed` is the header/footer already known
 /// for the session (the band matched is never larger than it).
-fn match_sigs(a: &Sig, b: &Sig, fixed: Option<(usize, usize)>) -> (Option<Offset>, MatchInfo) {
+fn match_sigs(a: &Sig, b: &Sig, fixed: Option<(usize, usize)>, hint: Option<HintCtx>) -> (Option<Offset>, MatchInfo) {
     let h = a.height;
     let all: Vec<usize> = (0..a.cells).collect();
     let mut info = MatchInfo {
@@ -340,6 +542,7 @@ fn match_sigs(a: &Sig, b: &Sig, fixed: Option<(usize, usize)>) -> (Option<Offset
         rows_changed: 0.0,
         mismatch: None,
         candidate: None,
+        hint: None,
     };
     let still_offset = Offset { dy: 0, header: 0, footer: 0 };
     let changed_rows = (0..h).filter(|&y| !rows_equal(a.row(y), b.row(y))).count();
@@ -398,11 +601,12 @@ fn match_sigs(a: &Sig, b: &Sig, fixed: Option<(usize, usize)>) -> (Option<Offset
     };
     let still_band = cmp.score((top..bottom).map(|y| (y, y)), 1.0).unwrap_or_default().ratio();
 
-    // (ratio, info rows, |dy|, dy)
-    let mut best: Option<(f64, usize, usize, isize)> = None;
-    for d in 1..=(band - need) {
-        let n = band - d;
-        for dy in [d as isize, -(d as isize)] {
+    // The best shift among `shifts`: (ratio, info rows, |dy|, dy).
+    let search = |shifts: &mut dyn Iterator<Item = isize>| {
+        let mut best: Option<(f64, usize, usize, isize)> = None;
+        for dy in shifts {
+            let d = dy.unsigned_abs();
+            let n = band - d;
             // Scrolled down by d: b[top+i] shows what a[top+i+d] showed.
             let pair = move |i: usize| if dy > 0 { (top + i + d, top + i) } else { (top + i, top + i + d) };
             // A sparse pass first rules out most shifts cheaply.
@@ -424,43 +628,92 @@ fn match_sigs(a: &Sig, b: &Sig, fixed: Option<(usize, usize)>) -> (Option<Offset
                 best = Some((r, s.info, d, dy));
             }
         }
+        best
+    };
+    // Whether the best shift holds up: clearly better than not moving,
+    // lines up where the new rows join, and the new rows really moved.
+    let holds = |ratio: f64, dy: isize| -> bool {
+        let d = dy.unsigned_abs();
+        // Clearly better than not moving at all.
+        if ratio > still_band * 0.5 {
+            return false;
+        }
+        // Still lines up next to where the new rows join (a frame torn
+        // mid-redraw lines up at the far end only).
+        let n = band - d;
+        let k = (n / 8).max(16).min(n);
+        let pair = move |i: usize| if dy > 0 { (top + i + d, top + i) } else { (top + i, top + i + d) };
+        let edge = if dy > 0 { cmp.score((n - k..n).map(pair), 1.0) } else { cmp.score((0..k).map(pair), 1.0) };
+        if !matches!(edge, Some(e) if e.ratio() <= MATCH_TOLERANCE) {
+            return false;
+        }
+        // The rows that would be added must have moved: rows that are where
+        // they were in the last frame are a stale part of a torn frame.
+        let (ext_top, ext_bottom) = match fixed {
+            Some((fh, ff)) => (fh, h - ff),
+            None => (top, bottom),
+        };
+        let fresh = if dy > 0 { ext_bottom.saturating_sub(d)..ext_bottom } else { ext_top..(ext_top + d).min(h) };
+        let (mut content, mut stale) = (0usize, 0usize);
+        for y in fresh {
+            if cmp.plain_a[y] && cmp.plain_b[y] {
+                continue;
+            }
+            content += 1;
+            stale += usize::from(cols.iter().all(|&c| same(a.row(y)[c], b.row(y)[c])));
+        }
+        !(content >= 2 && stale * 2 > content)
+    };
+    let max_shift = band - need;
+    let found = |info: &mut MatchInfo, dy: isize| {
+        info.dy = Some(dy);
+        Some(Offset { dy, header, footer })
+    };
+
+    // The hint's window first.
+    let window = hint.as_ref().and_then(|h| {
+        let expected = h.cal.expect(&h.raw);
+        info.hint = Some((expected.round() as isize, HintUse::NoWindow));
+        HintWindow::new(expected, h.raw.precise, max_shift)
+    });
+    if let Some(w) = window {
+        let mut shifts = (w.lo..=w.hi).map(|d| d as isize * w.sign);
+        if let Some((ratio, _, _, dy)) = search(&mut shifts) {
+            if holds(ratio, dy) {
+                info.candidate = Some(dy);
+                info.mismatch = Some(ratio);
+                if let Some((_, u)) = info.hint.as_mut() {
+                    *u = HintUse::Window;
+                }
+                let off = found(&mut info, dy);
+                return (off, info);
+            }
+        }
     }
-    let Some((ratio, _, d, dy)) = best else { return fallback(info) };
+
+    // Every shift.
+    let mut all_shifts = (1..=max_shift).flat_map(|d| [d as isize, -(d as isize)]);
+    let Some((ratio, _, _, dy)) = search(&mut all_shifts) else { return fallback(info) };
     info.candidate = Some(dy);
     info.mismatch = Some(ratio);
-    // Clearly better than not moving at all.
-    if ratio > still_band * 0.5 {
+    if !holds(ratio, dy) {
         return fallback(info);
     }
-    // Still lines up next to where the new rows join (a frame torn
-    // mid-redraw lines up at the far end only).
-    let n = band - d;
-    let k = (n / 8).max(16).min(n);
-    let pair = move |i: usize| if dy > 0 { (top + i + d, top + i) } else { (top + i, top + i + d) };
-    let edge = if dy > 0 { cmp.score((n - k..n).map(pair), 1.0) } else { cmp.score((0..k).map(pair), 1.0) };
-    if !matches!(edge, Some(e) if e.ratio() <= MATCH_TOLERANCE) {
-        return fallback(info);
-    }
-    // The rows that would be added must have moved: rows that are where
-    // they were in the last frame are a stale part of a torn frame.
-    let (ext_top, ext_bottom) = match fixed {
-        Some((fh, ff)) => (fh, h - ff),
-        None => (top, bottom),
-    };
-    let fresh = if dy > 0 { ext_bottom.saturating_sub(d)..ext_bottom } else { ext_top..(ext_top + d).min(h) };
-    let (mut content, mut stale) = (0usize, 0usize);
-    for y in fresh {
-        if cmp.plain_a[y] && cmp.plain_b[y] {
-            continue;
+    if let Some(h) = &hint {
+        if window.is_some() {
+            if let Some((_, u)) = info.hint.as_mut() {
+                *u = HintUse::Outside;
+            }
         }
-        content += 1;
-        stale += usize::from(cols.iter().all(|&c| same(a.row(y)[c], b.row(y)[c])));
+        if !plausible(&h.cal, &h.raw, dy, ratio, h.rejected_last) {
+            if let Some((_, u)) = info.hint.as_mut() {
+                *u = HintUse::Rejected;
+            }
+            return fallback(info);
+        }
     }
-    if content >= 2 && stale * 2 > content {
-        return fallback(info);
-    }
-    info.dy = Some(dy);
-    (Some(Offset { dy, header, footer }), info)
+    let off = found(&mut info, dy);
+    (off, info)
 }
 
 /// The shift from frame `a` to frame `b` (same size). `dy == 0` when the
@@ -469,7 +722,7 @@ pub fn find_offset(a: &Frame, b: &Frame) -> Option<Offset> {
     if a.width != b.width || a.height != b.height || a.bpp != b.bpp {
         return None;
     }
-    match_sigs(&Sig::of(a), &Sig::of(b), None).0
+    match_sigs(&Sig::of(a), &Sig::of(b), None, None).0
 }
 
 /// Counts for the end-of-session log line.
@@ -483,6 +736,11 @@ pub struct Summary {
     pub moved: usize,
     pub lost: usize,
     pub mismatched: usize,
+    /// Frames that came with a scroll hint; matched inside its window;
+    /// rejected as going against it.
+    pub hinted: usize,
+    pub hint_window: usize,
+    pub hint_rejected: usize,
     /// Fixed header and footer of the stitch (0 until the first scroll).
     pub header: usize,
     pub footer: usize,
@@ -498,6 +756,7 @@ impl fmt::Display for Summary {
         write!(
             f,
             "{} frames pushed: {} appended, {} prepended, {} moved, {} unchanged, {} restarted, {} lost, {} mismatched; \
+             {} hinted ({} in window, {} rejected); \
              header {} px, footer {} px, +{} px above, +{} px below; image {}×{}",
             self.pushed,
             self.appended,
@@ -507,6 +766,9 @@ impl fmt::Display for Summary {
             self.restarted,
             self.lost,
             self.mismatched,
+            self.hinted,
+            self.hint_window,
+            self.hint_rejected,
             self.header,
             self.footer,
             self.rows_up,
@@ -541,6 +803,11 @@ pub struct ScrollStitcher {
     lost: usize,
     match_info: Option<MatchInfo>,
     summary: Summary,
+    /// Hints summed since the last kept frame.
+    hint: Option<ScrollHint>,
+    calibration: Calibration,
+    /// The last frame was rejected against its hint.
+    rejected_last: bool,
 }
 
 impl ScrollStitcher {
@@ -561,6 +828,9 @@ impl ScrollStitcher {
             lost: 0,
             match_info: None,
             summary: Summary::default(),
+            hint: None,
+            calibration: Calibration::default(),
+            rejected_last: false,
         }
     }
 
@@ -601,6 +871,11 @@ impl ScrollStitcher {
     /// How the last pushed frame was matched (for logs).
     pub fn last_match(&self) -> Option<&MatchInfo> {
         self.match_info.as_ref()
+    }
+
+    /// What the hints have taught so far.
+    pub fn calibration(&self) -> Calibration {
+        self.calibration
     }
 
     /// Counts so far (for the end-of-session log line).
@@ -649,6 +924,8 @@ impl ScrollStitcher {
         self.view = 0;
         self.frames = 1;
         self.lost = 0;
+        self.hint = None;
+        self.rejected_last = false;
         let capped = frame.height >= self.max_height;
         let sig = Sig::of(&frame);
         self.last = Some((frame, sig));
@@ -659,8 +936,25 @@ impl ScrollStitcher {
         }
     }
 
+    /// Push a frame taken without a scroll hint.
     pub fn push(&mut self, frame: Frame) -> Push {
+        self.push_hinted(frame, None)
+    }
+
+    /// Push a frame with what the scroll events since the previous frame
+    /// said (see the module docs); `None` matches as [`Self::push`].
+    pub fn push_hinted(&mut self, frame: Frame, hint: Option<ScrollHint>) -> Push {
         self.summary.pushed += 1;
+        if let Some(h) = hint {
+            self.summary.hinted += 1;
+            self.hint = Some(match self.hint {
+                // Line-based deltas only count by sign; mixing makes the
+                // sum line-based.
+                Some(acc) if acc.precise == h.precise => ScrollHint { dy: acc.dy + h.dy, precise: h.precise },
+                Some(acc) => ScrollHint { dy: acc.dy.signum() + h.dy.signum(), precise: false },
+                None => h,
+            });
+        }
         let Some((last, last_sig)) = &self.last else {
             self.match_info = None;
             return self.start(frame);
@@ -673,8 +967,27 @@ impl ScrollStitcher {
             return Push::Capped(0);
         }
         let sig = Sig::of(&frame);
-        let (off, info) = match_sigs(last_sig, &sig, self.bands);
+        let ctx = self.hint.filter(|h| h.dy != 0.0).map(|raw| HintCtx {
+            raw,
+            cal: self.calibration,
+            rejected_last: self.rejected_last,
+        });
+        let (off, info) = match_sigs(last_sig, &sig, self.bands, ctx);
         self.match_info = Some(info);
+        self.rejected_last = false;
+        match info.hint.map(|h| h.1) {
+            Some(HintUse::Window) => self.summary.hint_window += 1,
+            Some(HintUse::Rejected) => {
+                self.summary.hint_rejected += 1;
+                self.rejected_last = true;
+            }
+            _ => {}
+        }
+        if let (Some(raw), Some(o)) = (ctx.map(|c| c.raw), off) {
+            if o.dy != 0 {
+                self.calibration.learn(&raw, o.dy);
+            }
+        }
         let Some(off) = off else {
             if !self.scrolled() {
                 // Nothing stitched beyond the first frame: the newest
@@ -757,6 +1070,7 @@ impl ScrollStitcher {
         };
         self.view = new_view;
         self.last = Some((frame, sig));
+        self.hint = None;
         result
     }
 }
@@ -1243,5 +1557,152 @@ mod tests {
         let sum = s.summary();
         assert_eq!((sum.pushed, sum.appended, sum.unchanged, sum.height), (3, 1, 1, 130));
         assert!(sum.to_string().contains("1 appended"));
+    }
+
+    /// `page` rows repeating every `period` rows (a list of identical items).
+    fn periodic_page(height: usize, width: usize, period: usize) -> Vec<Vec<u8>> {
+        let one = page(period, width);
+        (0..height).map(|y| one[y % period].clone()).collect()
+    }
+
+    fn hint(dy: f64) -> Option<ScrollHint> {
+        Some(ScrollHint { dy, precise: true })
+    }
+
+    #[test]
+    fn hint_window_bounds() {
+        let w = HintWindow::new(80.0, true, 500).unwrap();
+        assert_eq!(w, HintWindow { sign: 1, lo: 36, hi: 176 });
+        assert!(w.contains(80) && w.contains(36) && !w.contains(35) && !w.contains(-80));
+        let w = HintWindow::new(-10.0, true, 500).unwrap();
+        assert_eq!(w, HintWindow { sign: -1, lo: 1, hi: 36 });
+        // Clamped to what the frame allows; beyond it, no window.
+        assert_eq!(HintWindow::new(100.0, true, 60).unwrap().hi, 60);
+        assert_eq!(HintWindow::new(400.0, true, 60), None);
+        // Too small to say anything.
+        assert_eq!(HintWindow::new(1.5, true, 500), None);
+        assert_eq!(HintWindow::new(0.0, false, 500), None);
+        // Line-based: direction only.
+        assert_eq!(HintWindow::new(-3.0, false, 90), Some(HintWindow { sign: -1, lo: 1, hi: 90 }));
+    }
+
+    #[test]
+    fn hints_from_wheel_deltas() {
+        use crate::scroll_trigger::WheelDelta;
+        // Fingers up on a trackpad (natural): deltaY < 0, the view moves down
+        // the page: dy > 0, in pixels at 2×.
+        let d = WheelDelta { delta_y: -12.5, precise: true, events: 3 };
+        assert_eq!(ScrollHint::from_wheel(&d, 2.0), Some(ScrollHint { dy: 25.0, precise: true }));
+        let d = WheelDelta { delta_y: 2.0, precise: false, events: 1 };
+        assert_eq!(ScrollHint::from_wheel(&d, 2.0), Some(ScrollHint { dy: -2.0, precise: false }));
+        assert_eq!(ScrollHint::from_wheel(&WheelDelta::default(), 2.0), None);
+    }
+
+    #[test]
+    fn calibration_learns_gain_and_flips_when_hints_point_the_other_way() {
+        let mut c = Calibration::default();
+        let h = ScrollHint { dy: 20.0, precise: true };
+        for _ in 0..3 {
+            c.learn(&h, 40);
+        }
+        assert!(c.trusted());
+        assert!(c.gain > 1.5 && c.gain < 2.0, "{c:?}");
+        assert!(c.expect(&h) > 30.0);
+        // Hints the other way round from the start: flips after two.
+        let mut c = Calibration::default();
+        c.learn(&h, -20);
+        assert_eq!(c.orientation, 1.0);
+        c.learn(&h, -20);
+        assert_eq!((c.orientation, c.agree, c.disagree), (-1.0, 0, 0));
+        assert!(c.expect(&h) < 0.0);
+        // Tiny precise hints and no shift teach nothing.
+        c.learn(&ScrollHint { dy: 1.0, precise: true }, 5);
+        c.learn(&h, 0);
+        assert_eq!((c.agree, c.disagree), (0, 0));
+    }
+
+    #[test]
+    fn only_weak_matches_against_a_trusted_hint_are_implausible() {
+        let h = ScrollHint { dy: 60.0, precise: true };
+        let fresh = Calibration::default();
+        let trusted = Calibration { agree: 5, ..Calibration::default() };
+        // Untrusted: anything goes.
+        assert!(plausible(&fresh, &h, -60, 0.05, false));
+        // Trusted, against the hint, weak: rejected once, not twice in a row.
+        assert!(!plausible(&trusted, &h, -60, 0.05, false));
+        assert!(plausible(&trusted, &h, -60, 0.05, true));
+        // A clean match always wins.
+        assert!(plausible(&trusted, &h, -60, 0.0, false));
+        // With the hint, or a small hint: fine.
+        assert!(plausible(&trusted, &h, 120, 0.05, false));
+        assert!(plausible(&trusted, &ScrollHint { dy: 8.0, precise: true }, -8, 0.05, false));
+        // Line-based hints are clear by direction.
+        assert!(!plausible(&trusted, &ScrollHint { dy: 3.0, precise: false }, -8, 0.05, false));
+    }
+
+    #[test]
+    fn a_hint_picks_the_scrolled_shift_in_repeating_content() {
+        let p = periodic_page(600, 32, 64);
+        // Without a hint the smallest shift that lines up wins (16, not 80).
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(view(&p, 0, 200, 0, 0));
+        assert_eq!(s.push(view(&p, 80, 200, 0, 0)), Push::Appended(16));
+        // With the hint, the 80 the user scrolled.
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push_hinted(view(&p, 0, 200, 0, 0), None);
+        assert_eq!(s.push_hinted(view(&p, 80, 200, 0, 0), hint(80.0)), Push::Appended(80));
+        let m = s.last_match().unwrap();
+        assert_eq!(m.hint, Some((80, HintUse::Window)));
+        assert!(m.to_string().contains("hint=80 (matched in window)"));
+        assert_eq!(s.image(), expected(&p, 0, 80, 200, 0, 0));
+        assert_eq!((s.summary().hinted, s.summary().hint_window), (1, 1));
+    }
+
+    #[test]
+    fn hints_add_up_over_frames_that_did_not_move() {
+        let p = periodic_page(600, 32, 64);
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(view(&p, 0, 200, 0, 0));
+        // The app hasn't drawn the first step yet.
+        assert_eq!(s.push_hinted(view(&p, 0, 200, 0, 0), hint(40.0)), Push::Unchanged);
+        assert_eq!(s.push_hinted(view(&p, 80, 200, 0, 0), hint(40.0)), Push::Appended(80));
+        assert_eq!(s.last_match().unwrap().hint, Some((80, HintUse::Window)));
+    }
+
+    #[test]
+    fn hinted_sessions_stitch_like_unhinted_ones() {
+        let p = page(600, 32);
+        let (h, hd, ft) = (150, 12, 8);
+        let steps = [0usize, 30, 75, 75, 140, 200, 260, 330];
+        let mut plain = ScrollStitcher::new(MAX_HEIGHT);
+        let mut hinted = ScrollStitcher::new(MAX_HEIGHT);
+        let mut prev = 0;
+        for &y in &steps {
+            plain.push(view(&p, y, h, hd, ft));
+            // Hints a bit off (apps accelerate and animate).
+            let d = (y as f64 - prev as f64) * 0.8;
+            hinted.push_hinted(view(&p, y, h, hd, ft), if d == 0.0 { None } else { hint(d) });
+            prev = y;
+        }
+        assert_eq!(plain.image(), hinted.image());
+        assert_eq!(hinted.image(), expected(&p, 0, 330, h, hd, ft));
+        assert!(hinted.calibration().trusted());
+    }
+
+    #[test]
+    fn hints_pointing_the_wrong_way_still_stitch_and_get_flipped() {
+        let p = page(800, 32);
+        let mut s = ScrollStitcher::new(MAX_HEIGHT);
+        s.push(view(&p, 0, 150, 0, 0));
+        let mut y = 0;
+        for _ in 0..6 {
+            y += 40;
+            let push = s.push_hinted(view(&p, y, 150, 0, 0), hint(-40.0));
+            assert_eq!(push, Push::Appended(40));
+        }
+        assert_eq!(s.calibration().orientation, -1.0);
+        assert_eq!(s.last_match().unwrap().hint, Some((40, HintUse::Window)));
+        assert_eq!(s.summary().hint_rejected, 0);
+        assert_eq!(s.image(), expected(&p, 0, y, 150, 0, 0));
     }
 }
