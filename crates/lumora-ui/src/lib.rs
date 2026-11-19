@@ -56,6 +56,8 @@ pub mod settings_window;
 #[cfg(target_os = "macos")]
 pub mod shutter;
 #[cfg(target_os = "macos")]
+pub mod subtitle_preview;
+#[cfg(target_os = "macos")]
 pub mod text_result;
 #[cfg(target_os = "macos")]
 pub mod toast;
