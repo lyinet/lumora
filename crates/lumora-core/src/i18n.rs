@@ -331,6 +331,15 @@ messages! {
     FillNone => "No Fill", "无填充";
     FillSolid => "Solid", "实心";
     FillTranslucent => "Translucent", "半透明";
+    SectionHeads => "Arrowheads", "箭头样式";
+    HeadsNone => "None", "无箭头";
+    HeadsFilled => "Filled", "实心箭头";
+    HeadsOpen => "Open", "开口箭头";
+    HeadsBoth => "Both Ends", "双向箭头";
+    SectionLine => "Line", "线条";
+    DashSolid => "Solid Line", "实线";
+    DashDashed => "Dashed", "虚线";
+    DashDotted => "Dotted", "点线";
     Undo => "Undo (⌘Z)", "撤销（⌘Z）";
     Redo => "Redo (⇧⌘Z)", "重做（⇧⌘Z）";
     CopyImage => "Copy (⌘C)", "拷贝（⌘C）";

@@ -7,9 +7,12 @@ use crate::color::Rgb8;
 use crate::geometry::{Point, Rect};
 
 use super::document::Annotation;
-use super::path::{arrow_outline, smooth, Path};
+use super::path::{
+    arrow_centerline, arrow_outline, direction, head_points, point_along, polyline_lengths, smooth, sub_polyline,
+    ArrowHead, Path,
+};
 use super::shape::{rect_radius, RedactMode, Shape, TEXT_PILL_PAD};
-use super::style::{Fill, Style};
+use super::style::{ArrowHeads, Dash, Fill, Style};
 
 /// Opacity of highlighter ink.
 pub const HIGHLIGHTER_ALPHA: f64 = 0.38;
@@ -31,11 +34,11 @@ pub enum Paint {
     Stroke {
         width: f64,
         cap: LineCap,
+        /// `(on, off)` dash lengths; `None` = solid.
+        dash: Option<(f64, f64)>,
     },
     /// `even_odd` punches holes (the spotlight).
-    Fill {
-        even_odd: bool,
-    },
+    Fill { even_odd: bool },
 }
 
 /// A path drawn in one colour.
@@ -92,9 +95,13 @@ pub fn contrast_on(bg: Rgb8) -> Rgb8 {
 }
 
 fn stroke(path: Path, style: &Style, width: f64, shadow: bool) -> RenderOp {
+    stroke_dashed(path, style, width, None, shadow)
+}
+
+fn stroke_dashed(path: Path, style: &Style, width: f64, dash: Option<(f64, f64)>, shadow: bool) -> RenderOp {
     RenderOp::Shape(ShapeOp {
         path,
-        paint: Paint::Stroke { width, cap: LineCap::Round },
+        paint: Paint::Stroke { width, cap: LineCap::Round, dash },
         color: style.color,
         alpha: 1.0,
         shadow,
@@ -105,15 +112,72 @@ fn fill(path: Path, color: Rgb8, alpha: f64, shadow: bool) -> RenderOp {
     RenderOp::Shape(ShapeOp { path, paint: Paint::Fill { even_odd: false }, color, alpha, shadow })
 }
 
+/// An arrow. The classic look (filled head, solid) is one tapered filled
+/// outline; every other combination is a constant-width shaft (dashed or
+/// not) trimmed so it doesn't poke through the heads, plus the heads:
+/// filled swallowtails or a stroked open chevron (never dashed).
+fn arrow_ops(start: Point, end: Point, control: Option<Point>, style: &Style) -> Vec<RenderOp> {
+    let w = style.width.points();
+    if style.heads == ArrowHeads::Filled && style.dash == Dash::Solid {
+        let outline = arrow_outline(start, end, control, w);
+        if outline.is_empty() {
+            return Vec::new();
+        }
+        return vec![fill(outline, style.color, 1.0, true)];
+    }
+    let line = arrow_centerline(start, end, control);
+    let lengths = polyline_lengths(&line);
+    let total = *lengths.last().unwrap_or(&0.0);
+    if total <= 1e-6 {
+        return Vec::new();
+    }
+    let both = style.heads == ArrowHeads::Both;
+    let head = ArrowHead::for_width(w, if both { total / 2.0 } else { total });
+    // Aim each head along the part of the curve it covers.
+    let aim = |tip: Point, from: f64| direction(point_along(&line, &lengths, from), tip);
+    let filled_trim = head.length * (1.0 - head.notch);
+    let (trim_start, trim_end) = match style.heads {
+        ArrowHeads::None => (0.0, 0.0),
+        ArrowHeads::Filled => (0.0, filled_trim),
+        ArrowHeads::Open => (0.0, w * 0.5),
+        ArrowHeads::Both => (filled_trim, filled_trim),
+    };
+    let mut ops = Vec::new();
+    let shaft = sub_polyline(&line, trim_start, total - trim_end);
+    if shaft.len() >= 2 {
+        ops.push(stroke_dashed(Path::polyline(&shaft), style, w, style.dash.pattern(w), true));
+    }
+    let filled_head = |tip: Point, dir: (f64, f64)| {
+        let [l, t, r, n] = head_points(tip, dir, head);
+        fill(Path::polygon(&[l, t, r, n]), style.color, 1.0, true)
+    };
+    match style.heads {
+        ArrowHeads::None => {}
+        ArrowHeads::Filled => ops.extend(aim(end, total - head.length).map(|d| filled_head(end, d))),
+        ArrowHeads::Open => {
+            if let Some(d) = aim(end, total - head.length) {
+                let [l, t, r, _] = head_points(end, d, head);
+                ops.push(stroke(Path::polyline(&[l, t, r]), style, w, true));
+            }
+        }
+        ArrowHeads::Both => {
+            ops.extend(aim(end, total - head.length).map(|d| filled_head(end, d)));
+            ops.extend(aim(start, head.length).map(|d| filled_head(start, d)));
+        }
+    }
+    ops
+}
+
 /// A closed outline, with the style's fill (if any) painted underneath
 /// it. A solid fill carries the shadow so the stroke doesn't cast one onto
 /// its own fill; a translucent fill casts none (it would muddy the inside).
 fn filled_outline(path: Path, style: &Style, width: f64) -> Vec<RenderOp> {
     match style.fill.alpha() {
-        None => vec![stroke(path, style, width, true)],
+        None => vec![stroke_dashed(path, style, width, style.dash.pattern(width), true)],
         Some(alpha) => {
             let solid = style.fill == Fill::Solid;
-            vec![fill(path.clone(), style.color, alpha, solid), stroke(path, style, width, !solid)]
+            let outline = stroke_dashed(path.clone(), style, width, style.dash.pattern(width), !solid);
+            vec![fill(path, style.color, alpha, solid), outline]
         }
     }
 }
@@ -149,14 +213,10 @@ fn render_opaque(a: &Annotation, canvas: Rect, step: Option<u32>) -> Vec<RenderO
     let style = &a.style;
     let w = style.width.points();
     match &a.shape {
-        Shape::Arrow { start, end, control } => {
-            let outline = arrow_outline(*start, *end, *control, w);
-            if outline.is_empty() {
-                return Vec::new();
-            }
-            vec![fill(outline, style.color, 1.0, true)]
+        Shape::Arrow { start, end, control } => arrow_ops(*start, *end, *control, style),
+        Shape::Line { start, end } => {
+            vec![stroke_dashed(Path::polyline(&[*start, *end]), style, w, style.dash.pattern(w), true)]
         }
-        Shape::Line { start, end } => vec![stroke(Path::polyline(&[*start, *end]), style, w, true)],
         Shape::Rect { rect, rounded } => {
             let path = if *rounded { Path::rounded_rect(*rect, rect_radius(style)) } else { Path::rect(*rect) };
             filled_outline(path, style, w)
@@ -165,7 +225,7 @@ fn render_opaque(a: &Annotation, canvas: Rect, step: Option<u32>) -> Vec<RenderO
         Shape::Pen { points } => vec![stroke(smooth(points), style, w, true)],
         Shape::Highlighter { points } => vec![RenderOp::Shape(ShapeOp {
             path: smooth(points),
-            paint: Paint::Stroke { width: style.width.highlighter_points(), cap: LineCap::Butt },
+            paint: Paint::Stroke { width: style.width.highlighter_points(), cap: LineCap::Butt, dash: None },
             color: style.color,
             alpha: HIGHLIGHTER_ALPHA,
             shadow: false,
@@ -201,7 +261,7 @@ fn render_opaque(a: &Annotation, canvas: Rect, step: Option<u32>) -> Vec<RenderO
                 fill(Path::circle(*center, r), style.color, 1.0, true),
                 RenderOp::Shape(ShapeOp {
                     path: Path::circle(*center, r - 1.0),
-                    paint: Paint::Stroke { width: 2.0, cap: LineCap::Round },
+                    paint: Paint::Stroke { width: 2.0, cap: LineCap::Round, dash: None },
                     color: WHITE,
                     alpha: 0.9,
                     shadow: false,
@@ -306,7 +366,7 @@ mod tests {
         match &ops[0] {
             RenderOp::Shape(s) => {
                 assert_eq!(s.alpha, HIGHLIGHTER_ALPHA);
-                assert_eq!(s.paint, Paint::Stroke { width: 20.0, cap: LineCap::Butt });
+                assert_eq!(s.paint, Paint::Stroke { width: 20.0, cap: LineCap::Butt, dash: None });
             }
             _ => panic!(),
         }
@@ -379,6 +439,93 @@ mod tests {
                 mode: RedactMode::Blur,
                 amount: REDACT_BLUR
             }]
+        );
+    }
+
+    fn arrow(heads: ArrowHeads, dash: Dash) -> Vec<RenderOp> {
+        let mut a = ann(Shape::Arrow { start: Point::new(0.0, 0.0), end: Point::new(100.0, 0.0), control: None });
+        a.style.heads = heads;
+        a.style.dash = dash;
+        render(&a, CANVAS, None)
+    }
+
+    fn shapes(ops: &[RenderOp]) -> Vec<&ShapeOp> {
+        ops.iter().filter_map(|o| if let RenderOp::Shape(s) = o { Some(s) } else { None }).collect()
+    }
+
+    #[test]
+    fn arrowhead_styles() {
+        // Classic: one tapered filled outline (unchanged from 0.7).
+        assert_eq!(arrow(ArrowHeads::Filled, Dash::Solid).len(), 1);
+        // No head: just a round-capped shaft over the full length.
+        let none = arrow(ArrowHeads::None, Dash::Solid);
+        let s = shapes(&none);
+        assert_eq!(s.len(), 1);
+        assert_eq!(s[0].paint, Paint::Stroke { width: 4.0, cap: LineCap::Round, dash: None });
+        assert_eq!(s[0].path.control_bounds().unwrap().max_x(), 100.0);
+        // Open: shaft + a stroked chevron whose tip is the arrow's end.
+        let open = arrow(ArrowHeads::Open, Dash::Solid);
+        let s = shapes(&open);
+        assert_eq!(s.len(), 2);
+        assert!(matches!(s[1].paint, Paint::Stroke { dash: None, .. }));
+        assert_eq!(s[1].path.flatten(1)[0][1], Point::new(100.0, 0.0));
+        // Both: shaft trimmed at both ends + two filled heads.
+        let both = arrow(ArrowHeads::Both, Dash::Solid);
+        let s = shapes(&both);
+        assert_eq!(s.len(), 3);
+        let shaft = s[0].path.control_bounds().unwrap();
+        assert!(shaft.min_x() > 1.0 && shaft.max_x() < 99.0, "{shaft:?}");
+        let tips: Vec<Point> = s[1..].iter().map(|h| h.path.flatten(1)[0][1]).collect();
+        assert_eq!(tips, vec![Point::new(100.0, 0.0), Point::new(0.0, 0.0)]);
+        assert!(s[1..].iter().all(|h| h.paint == Paint::Fill { even_odd: false }));
+        // A dashed classic arrow switches to shaft + filled head; the head is never dashed.
+        let dashed = arrow(ArrowHeads::Filled, Dash::Dashed);
+        let s = shapes(&dashed);
+        assert_eq!(s.len(), 2);
+        assert_eq!(s[0].paint, Paint::Stroke { width: 4.0, cap: LineCap::Round, dash: Some((12.0, 8.0)) });
+        assert_eq!(s[1].paint, Paint::Fill { even_odd: false });
+        // Zero length draws nothing in any style.
+        for h in ArrowHeads::ALL {
+            let mut a = ann(Shape::Arrow { start: Point::new(5.0, 5.0), end: Point::new(5.0, 5.0), control: None });
+            a.style.heads = h;
+            assert!(render(&a, CANVAS, None).is_empty(), "{h:?}");
+        }
+    }
+
+    #[test]
+    fn curved_heads_follow_the_curve() {
+        let mut a = ann(Shape::Arrow {
+            start: Point::new(0.0, 0.0),
+            end: Point::new(100.0, 0.0),
+            control: Some(Point::new(50.0, 80.0)),
+        });
+        a.style.heads = ArrowHeads::Both;
+        let ops = render(&a, CANVAS, None);
+        let s = shapes(&ops);
+        // The end head points down-right-ish along the curve's tail (coming up
+        // from y > 0), so its wings sit below the tip.
+        let end_head = &s[1].path.flatten(1)[0];
+        assert!(end_head[0].y > 0.0 && end_head[2].y > 0.0, "{end_head:?}");
+    }
+
+    #[test]
+    fn dashes_apply_to_lines_and_outlines_but_not_freehand() {
+        for shape in [
+            Shape::Line { start: Point::ZERO, end: Point::new(50.0, 0.0) },
+            Shape::Rect { rect: Rect::new(0.0, 0.0, 50.0, 50.0), rounded: false },
+            Shape::Ellipse { rect: Rect::new(0.0, 0.0, 50.0, 50.0) },
+        ] {
+            let mut a = ann(shape);
+            a.style.dash = Dash::Dotted;
+            a.style.fill = Fill::Translucent;
+            let ops = render(&a, CANVAS, None);
+            let stroke = shapes(&ops).into_iter().find(|s| matches!(s.paint, Paint::Stroke { .. })).unwrap();
+            assert_eq!(stroke.paint, Paint::Stroke { width: 4.0, cap: LineCap::Round, dash: Some((0.0, 8.0)) });
+        }
+        let mut pen = ann(Shape::Pen { points: vec![Point::ZERO, Point::new(9.0, 9.0)] });
+        pen.style.dash = Dash::Dashed;
+        assert!(
+            matches!(&render(&pen, CANVAS, None)[0], RenderOp::Shape(s) if matches!(s.paint, Paint::Stroke { dash: None, .. }))
         );
     }
 

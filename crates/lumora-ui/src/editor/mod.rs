@@ -773,6 +773,8 @@ impl State {
                 ToolbarAction::Width(w) => ed.set_width(w),
                 ToolbarAction::Opacity(o) => ed.set_opacity(o),
                 ToolbarAction::Fill(f) => ed.set_fill(f),
+                ToolbarAction::Heads(h) => ed.set_heads(h),
+                ToolbarAction::Dash(d) => ed.set_dash(d),
                 ToolbarAction::ShapeStyleMenu => {
                     drop(ed);
                     this.toolbar.show_style_menu();

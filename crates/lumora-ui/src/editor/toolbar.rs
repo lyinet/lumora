@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use lumora_core::annotate::editor::{Tool, ToolOptions};
 use lumora_core::annotate::shape::RedactMode;
-use lumora_core::annotate::style::{Fill, StrokeWidth, Style, OPACITY_MAX, OPACITY_MIN, PALETTE};
+use lumora_core::annotate::style::{ArrowHeads, Dash, Fill, StrokeWidth, Style, OPACITY_MAX, OPACITY_MIN, PALETTE};
 use lumora_core::color::Rgb8;
 use lumora_core::geometry::Rect;
 use lumora_core::i18n::{tr, Msg};
@@ -48,6 +48,8 @@ pub enum ToolbarAction {
     /// Pop up the shape-style menu (fill, …).
     ShapeStyleMenu,
     Fill(Fill),
+    Heads(ArrowHeads),
+    Dash(Dash),
     /// The contextual checkbox (curved / rounded / background).
     Toggle(bool),
     Redact(RedactMode),
@@ -947,6 +949,17 @@ fn style_sections(target: Tool, style: Style) -> Vec<StyleSection> {
         let msgs = [Msg::FillNone, Msg::FillSolid, Msg::FillTranslucent];
         let entries = Fill::ALL.iter().zip(msgs).map(|(f, m)| (m, style.fill == *f, ToolbarAction::Fill(*f))).collect();
         out.push((Msg::SectionFill, entries));
+    }
+    if target == Tool::Arrow {
+        let msgs = [Msg::HeadsNone, Msg::HeadsFilled, Msg::HeadsOpen, Msg::HeadsBoth];
+        let entries =
+            ArrowHeads::ALL.iter().zip(msgs).map(|(h, m)| (m, style.heads == *h, ToolbarAction::Heads(*h))).collect();
+        out.push((Msg::SectionHeads, entries));
+    }
+    if target.uses_dash() {
+        let msgs = [Msg::DashSolid, Msg::DashDashed, Msg::DashDotted];
+        let entries = Dash::ALL.iter().zip(msgs).map(|(d, m)| (m, style.dash == *d, ToolbarAction::Dash(*d))).collect();
+        out.push((Msg::SectionLine, entries));
     }
     out
 }

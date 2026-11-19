@@ -16,10 +16,15 @@ All notable changes to Lumora are documented here. The format follows
   bar (the sliders button) offers No Fill / Solid / Translucent for
   rectangles and ellipses — for the selection, or for the next ones you
   draw. Filled shapes can be selected by clicking inside them.
+- **Arrowhead styles and dashed lines.** The same menu sets an arrow's
+  heads — none, filled (the classic tapered arrow), open, or filled at both
+  ends; curved arrows aim each head along the curve — and a solid, dashed
+  or dotted stroke for lines, arrows, rectangles and ellipses (dashes scale
+  with the stroke width; heads are never dashed).
 
 ### Changed
 - **`.lumora` schema 2.** Documents now store per-annotation style fields
-  (`opacity`, `fill`, …). Schema-1 files from 0.3–0.7 open unchanged (migrated with
+  (`opacity`, `fill`, `heads`, `dash`, …). Schema-1 files from 0.3–0.7 open unchanged (migrated with
   the values that reproduce their look); files saved by 0.8 need 0.8 or
   later — older builds refuse them with "please update Lumora" instead of
   dropping the new styles.

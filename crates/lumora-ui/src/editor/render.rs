@@ -28,7 +28,7 @@ use objc2_core_graphics::{
 use objc2_core_image::{
     kCIInputCenterKey, kCIInputImageKey, kCIInputRadiusKey, kCIInputScaleKey, CIContext, CIFilter, CIImage, CIVector,
 };
-use objc2_foundation::{NSDictionary, NSNumber, NSObjectNSKeyValueCoding, NSString};
+use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSObjectNSKeyValueCoding, NSString};
 use objc2_quartz_core::{
     kCAAlignmentCenter, kCAAlignmentLeft, kCAFillRuleEvenOdd, kCAFillRuleNonZero, kCALineCapButt, kCALineCapRound,
     kCALineJoinRound, CALayer, CAShapeLayer, CATextLayer,
@@ -159,10 +159,14 @@ fn shape_layer(op: &ShapeOp, canvas: Rect) -> Retained<CAShapeLayer> {
     l.setFrame(cg_rect(canvas));
     l.setPath(Some(&cg_path(&op.path)));
     match op.paint {
-        Paint::Stroke { width, cap } => {
+        Paint::Stroke { width, cap, dash } => {
             l.setFillColor(None);
             l.setStrokeColor(Some(&cg_rgb8(op.color, 1.0)));
             l.setLineWidth(width);
+            if let Some((on, off)) = dash {
+                let pattern = [NSNumber::numberWithDouble(on), NSNumber::numberWithDouble(off)];
+                l.setLineDashPattern(Some(&NSArray::from_retained_slice(&pattern)));
+            }
             // SAFETY: valid static CA constants.
             unsafe {
                 l.setLineCap(match cap {
@@ -261,9 +265,14 @@ fn draw_shape(ctx: &CGContext, op: &ShapeOp, scale: f64) {
     }
     CGContext::add_path(Some(ctx), Some(&cg_path(&op.path)));
     match op.paint {
-        Paint::Stroke { width, cap } => {
+        Paint::Stroke { width, cap, dash } => {
             CGContext::set_stroke_color_with_color(Some(ctx), Some(&cg_rgb8(op.color, 1.0)));
             CGContext::set_line_width(Some(ctx), width);
+            if let Some((on, off)) = dash {
+                let lengths = [on, off];
+                // SAFETY: `lengths` outlives the call; count matches.
+                unsafe { CGContext::set_line_dash(Some(ctx), 0.0, lengths.as_ptr(), lengths.len()) };
+            }
             CGContext::set_line_cap(Some(ctx), if cap == LineCap::Round { CGLineCap::Round } else { CGLineCap::Butt });
             CGContext::set_line_join(Some(ctx), CGLineJoin::Round);
             CGContext::stroke_path(Some(ctx));

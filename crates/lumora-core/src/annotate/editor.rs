@@ -18,7 +18,7 @@ use crate::geometry::{Handle, Point, Rect, Size};
 use super::document::{Annotation, AnnotationId, Command, Document};
 use super::path::{push_sample, simplify, snap_angle};
 use super::shape::{resize_rect, EditHandle, RedactMode, Shape};
-use super::style::{Fill, StrokeWidth, Style};
+use super::style::{ArrowHeads, Dash, Fill, StrokeWidth, Style};
 use crate::color::Rgb8;
 use crate::selection::constrain_aspect;
 
@@ -111,6 +111,12 @@ impl Tool {
             Shape::Redact { .. } => Tool::Redact,
             Shape::Spotlight { .. } => Tool::Spotlight,
         }
+    }
+
+    /// Whether the style bar offers dashes (lines, arrows, rectangles,
+    /// ellipses).
+    pub fn uses_dash(self) -> bool {
+        matches!(self, Tool::Arrow | Tool::Line | Tool::Rect | Tool::Ellipse)
     }
 
     /// Whether the style bar offers a fill (rectangles and ellipses).
@@ -317,6 +323,18 @@ impl Editor {
     pub fn set_fill(&mut self, fill: Fill) -> Effect {
         self.style.fill = fill;
         self.restyle(|a| a.style.fill = fill)
+    }
+
+    /// Change the arrowheads; also applies to the selection (one undo step).
+    pub fn set_heads(&mut self, heads: ArrowHeads) -> Effect {
+        self.style.heads = heads;
+        self.restyle(|a| a.style.heads = heads)
+    }
+
+    /// Change the stroke pattern; also applies to the selection.
+    pub fn set_dash(&mut self, dash: Dash) -> Effect {
+        self.style.dash = dash;
+        self.restyle(|a| a.style.dash = dash)
     }
 
     /// The kind of annotation the style bar is styling: the selection's
@@ -1087,6 +1105,22 @@ mod tests {
         e.select(None);
         assert_eq!(e.style_target(), Tool::Select);
         assert_eq!(Tool::for_shape(&Shape::Spotlight { rect: Rect::ZERO, ellipse: true }), Tool::Spotlight);
+    }
+
+    #[test]
+    fn heads_and_dash_restyle_the_selection() {
+        let mut e = editor();
+        drag(&mut e, p(0.0, 0.0), p(100.0, 0.0));
+        let id = e.selected().unwrap();
+        e.set_heads(ArrowHeads::Both);
+        e.set_dash(Dash::Dashed);
+        let a = e.document().get(id).unwrap();
+        assert_eq!((a.style.heads, a.style.dash), (ArrowHeads::Both, Dash::Dashed));
+        e.undo();
+        assert_eq!(e.document().get(id).unwrap().style.dash, Dash::Solid);
+        e.undo();
+        assert_eq!(e.document().get(id).unwrap().style.heads, ArrowHeads::Filled);
+        assert!(Tool::Line.uses_dash() && Tool::Ellipse.uses_dash() && !Tool::Pen.uses_dash());
     }
 
     #[test]

@@ -108,6 +108,50 @@ impl Fill {
     }
 }
 
+/// Arrowheads of an arrow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ArrowHeads {
+    /// No head: a plain shaft.
+    None,
+    /// A filled swallowtail head at the end (the classic Lumora arrow,
+    /// tapered shaft).
+    #[default]
+    Filled,
+    /// An open chevron at the end.
+    Open,
+    /// Filled heads at both ends.
+    Both,
+}
+
+impl ArrowHeads {
+    pub const ALL: [ArrowHeads; 4] = [ArrowHeads::None, ArrowHeads::Filled, ArrowHeads::Open, ArrowHeads::Both];
+}
+
+/// Stroke pattern of lines, arrows, rectangles and ellipses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Dash {
+    #[default]
+    Solid,
+    Dashed,
+    Dotted,
+}
+
+impl Dash {
+    pub const ALL: [Dash; 3] = [Dash::Solid, Dash::Dashed, Dash::Dotted];
+
+    /// `(on, off)` lengths for a stroke `width` points wide, or `None` for
+    /// solid. Proportional to the width so thick dashes keep their rhythm.
+    /// Dots are zero-length dashes drawn with round caps (one `width`-wide
+    /// dot every two widths).
+    pub fn pattern(self, width: f64) -> Option<(f64, f64)> {
+        match self {
+            Dash::Solid => None,
+            Dash::Dashed => Some((width * 3.0, width * 2.0)),
+            Dash::Dotted => Some((0.0, width * 2.0)),
+        }
+    }
+}
+
 /// Colour, width, opacity and the per-kind looks, shared by every
 /// annotation kind. Fields a kind doesn't use are ignored by it (a pen
 /// stroke has no fill).
@@ -120,6 +164,10 @@ pub struct Style {
     pub opacity: u8,
     /// Rectangles and ellipses only.
     pub fill: Fill,
+    /// Arrows only.
+    pub heads: ArrowHeads,
+    /// Lines, arrows, rectangles and ellipses.
+    pub dash: Dash,
 }
 
 impl Default for Style {
@@ -132,7 +180,7 @@ impl Style {
     /// A style with `color` and `width` and every other field at its
     /// default (opaque, unfilled …).
     pub const fn new(color: Rgb8, width: StrokeWidth) -> Style {
-        Style { color, width, opacity: OPACITY_MAX, fill: Fill::None }
+        Style { color, width, opacity: OPACITY_MAX, fill: Fill::None, heads: ArrowHeads::Filled, dash: Dash::Solid }
     }
 
     /// Opacity as a 0.1–1.0 multiplier (clamped, so a bad value from a
@@ -180,6 +228,16 @@ mod tests {
         assert!((s.alpha() - 0.55).abs() < 1e-12);
         assert_eq!(clamp_opacity(5), OPACITY_MIN);
         assert_eq!(clamp_opacity(70), 70);
+    }
+
+    #[test]
+    fn dash_patterns_scale_with_width() {
+        assert_eq!(Dash::Solid.pattern(4.0), None);
+        assert_eq!(Dash::Dashed.pattern(4.0), Some((12.0, 8.0)));
+        assert_eq!(Dash::Dashed.pattern(8.0), Some((24.0, 16.0)));
+        assert_eq!(Dash::Dotted.pattern(2.0), Some((0.0, 4.0)));
+        assert_eq!(Style::default().dash, Dash::Solid);
+        assert_eq!(Style::default().heads, ArrowHeads::Filled);
     }
 
     #[test]

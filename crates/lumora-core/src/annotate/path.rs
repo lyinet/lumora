@@ -419,6 +419,66 @@ pub fn arrow_centerline(start: Point, end: Point, control: Option<Point>) -> Vec
     }
 }
 
+/// Cumulative lengths along a polyline (`[0, |p0p1|, …]`).
+pub fn polyline_lengths(pts: &[Point]) -> Vec<f64> {
+    let mut acc = 0.0;
+    let mut out = Vec::with_capacity(pts.len());
+    for (i, p) in pts.iter().enumerate() {
+        if i > 0 {
+            acc += pts[i - 1].distance(*p);
+        }
+        out.push(acc);
+    }
+    out
+}
+
+/// The point `d` along a polyline (clamped to its ends). `lengths` is
+/// [`polyline_lengths`] of `pts`.
+pub fn point_along(pts: &[Point], lengths: &[f64], d: f64) -> Point {
+    let Some(first) = pts.first() else { return Point::ZERO };
+    if d <= 0.0 {
+        return *first;
+    }
+    for i in 1..pts.len() {
+        if lengths[i] >= d {
+            let seg = lengths[i] - lengths[i - 1];
+            let t = if seg > 0.0 { (d - lengths[i - 1]) / seg } else { 0.0 };
+            return pts[i - 1].lerp(pts[i], t.clamp(0.0, 1.0));
+        }
+    }
+    *pts.last().unwrap_or(first)
+}
+
+/// The part of a polyline between distances `from` and `to` along it.
+pub fn sub_polyline(pts: &[Point], from: f64, to: f64) -> Vec<Point> {
+    let lengths = polyline_lengths(pts);
+    let total = *lengths.last().unwrap_or(&0.0);
+    let (from, to) = (from.clamp(0.0, total), to.clamp(0.0, total));
+    if to <= from {
+        return Vec::new();
+    }
+    let mut out = vec![point_along(pts, &lengths, from)];
+    out.extend(pts.iter().zip(&lengths).filter(|(_, l)| **l > from && **l < to).map(|(p, _)| *p));
+    out.push(point_along(pts, &lengths, to));
+    out
+}
+
+/// The corners of an arrowhead whose tip is at `tip`, pointing along the
+/// unit vector `dir`: `[left wing, tip, right wing, notch]` (the notch is
+/// where a filled swallowtail head meets the shaft).
+pub fn head_points(tip: Point, dir: (f64, f64), head: ArrowHead) -> [Point; 4] {
+    let (dx, dy) = dir;
+    let (nx, ny) = (-dy, dx);
+    let back = Point::new(tip.x - dx * head.length, tip.y - dy * head.length);
+    let notch_at = head.length * (1.0 - head.notch);
+    [
+        Point::new(back.x + nx * head.half_width, back.y + ny * head.half_width),
+        tip,
+        Point::new(back.x - nx * head.half_width, back.y - ny * head.half_width),
+        Point::new(tip.x - dx * notch_at, tip.y - dy * notch_at),
+    ]
+}
+
 /// The filled outline of a tapered arrow: the shaft grows from 40 % of
 /// `width` at the tail to the full width where it meets a swallowtail head.
 /// Returns an empty path for a zero-length arrow.
@@ -489,6 +549,29 @@ mod tests {
 
     fn p(x: f64, y: f64) -> Point {
         Point::new(x, y)
+    }
+
+    #[test]
+    fn polyline_walking_and_trimming() {
+        let pts = [p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0)];
+        let l = polyline_lengths(&pts);
+        assert_eq!(l, vec![0.0, 10.0, 20.0]);
+        assert_eq!(point_along(&pts, &l, 15.0), p(10.0, 5.0));
+        assert_eq!(point_along(&pts, &l, -1.0), p(0.0, 0.0));
+        assert_eq!(point_along(&pts, &l, 99.0), p(10.0, 10.0));
+        assert_eq!(sub_polyline(&pts, 5.0, 15.0), vec![p(5.0, 0.0), p(10.0, 0.0), p(10.0, 5.0)]);
+        assert!(sub_polyline(&pts, 12.0, 12.0).is_empty());
+        assert_eq!(sub_polyline(&pts, -5.0, 100.0), vec![p(0.0, 0.0), p(10.0, 0.0), p(10.0, 10.0)]);
+    }
+
+    #[test]
+    fn head_points_are_symmetric_behind_the_tip() {
+        let head = ArrowHead { length: 10.0, half_width: 4.0, notch: 0.2 };
+        let [l, tip, r, notch] = head_points(p(100.0, 0.0), (1.0, 0.0), head);
+        assert_eq!(tip, p(100.0, 0.0));
+        assert_eq!(l, p(90.0, 4.0));
+        assert_eq!(r, p(90.0, -4.0));
+        assert_eq!(notch, p(92.0, 0.0));
     }
 
     #[test]
