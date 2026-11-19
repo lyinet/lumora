@@ -4,7 +4,9 @@
 //! AVAssetExportSession (HighestQuality; audio is carried along).
 //!
 //! The layout (font size, wrapping, boxes, timing) comes from
-//! [`lumora_core::transcript::burn`]. Blocks; call it from a worker thread.
+//! [`lumora_core::transcript::burn`]. [`cue_overlay`] is shared with the
+//! transcript window's live preview. [`export_subtitled`] and
+//! [`preview_canvas`] block; call them from a worker thread.
 
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
@@ -19,7 +21,7 @@ use objc2_app_kit::{
     NSParagraphStyleAttributeName, NSTextAlignment,
 };
 use objc2_av_foundation::{
-    AVAssetExportPresetHighestQuality, AVAssetExportSession, AVCoreAnimationBeginTimeAtZero, AVFileTypeMPEG4,
+    AVAsset, AVAssetExportPresetHighestQuality, AVAssetExportSession, AVCoreAnimationBeginTimeAtZero, AVFileTypeMPEG4,
     AVFileTypeQuickTimeMovie, AVMutableComposition, AVMutableVideoComposition, AVVideoCompositionCoreAnimationTool,
 };
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
@@ -88,12 +90,15 @@ fn visibility(cue: &Cue, duration: f64) -> Option<Retained<CAKeyframeAnimation>>
     Some(anim)
 }
 
-/// The overlay layer for one cue (box + text), hidden outside its time.
-fn cue_layer(cue: &Cue, layout: &BurnLayout, duration: f64) -> Option<Retained<CALayer>> {
-    let anim = visibility(cue, duration)?;
+/// The overlay for one cue — background box and text — in a
+/// `video_w`×`video_h` layer with Core Animation's bottom-left origin. This
+/// is the one drawing path for subtitles: the export animates its opacity
+/// over the movie and the transcript window's live preview shows it scaled
+/// over a frame, so the two can't drift apart. `contents_scale` is the text
+/// rasterisation scale (1.0 = one pixel per video pixel, the export's).
+pub fn cue_overlay(cue: &Cue, layout: &BurnLayout, contents_scale: f64) -> Retained<CALayer> {
     let group = CALayer::layer();
     group.setFrame(CGRect::new(CGPoint::ZERO, CGSize::new(layout.video_w, layout.video_h)));
-    group.setOpacity(0.0);
     if layout.style.background {
         let bg = CALayer::layer();
         bg.setFrame(cg(cue.box_rect));
@@ -109,11 +114,59 @@ fn cue_layer(cue: &Cue, layout: &BurnLayout, duration: f64) -> Option<Retained<C
     text.setWrapped(false);
     // SAFETY: valid static constant.
     text.setAlignmentMode(unsafe { objc2_quartz_core::kCAAlignmentCenter });
-    // Rendered at video pixels; 1.0 keeps text crisp at the export size.
-    text.setContentsScale(1.0);
+    text.setContentsScale(contents_scale);
     group.addSublayer(&text);
+    group
+}
+
+/// The export's layer for one cue: [`cue_overlay`] at video pixels (1.0
+/// keeps text crisp at the export size), hidden outside its time.
+fn cue_layer(cue: &Cue, layout: &BurnLayout, duration: f64) -> Option<Retained<CALayer>> {
+    let anim = visibility(cue, duration)?;
+    let group = cue_overlay(cue, layout, 1.0);
+    group.setOpacity(0.0);
     group.addAnimation_forKey(&anim, Some(&NSString::from_str("lumoraSubtitle")));
     Some(group)
+}
+
+/// What the preview needs to lay subtitles out like the export: the
+/// video's render size (the size the export's video composition renders
+/// at, display orientation) and duration.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Canvas {
+    pub width: f64,
+    pub height: f64,
+    pub duration: f64,
+}
+
+/// The render size the export would use for `asset` (or a composition of
+/// it).
+fn render_size(asset: &AVAsset) -> CGSize {
+    // SAFETY: instructions, frame rate and render size from the asset.
+    #[allow(deprecated)] // the completion-handler variant is macOS 15+.
+    let vc = unsafe { AVMutableVideoComposition::videoCompositionWithPropertiesOfAsset(asset) };
+    // SAFETY: plain property read.
+    unsafe { vc.renderSize() }
+}
+
+/// `movie`'s [`Canvas`], or `None` when it has no video track (an
+/// audio-only recording). Blocks; call it from a worker thread.
+pub fn preview_canvas(movie: &Path) -> Result<Option<Canvas>, CaptureError> {
+    let asset = crate::clip::asset_for(movie)?;
+    // SAFETY: a valid static media type.
+    let video = unsafe { objc2_av_foundation::AVMediaTypeVideo }
+        .ok_or_else(|| CaptureError::Framework("AVMediaTypeVideo missing".into()))?;
+    if crate::av_sync::tracks(&asset, video)?.is_empty() {
+        return Ok(None);
+    }
+    // SAFETY: duration is loaded with the tracks above.
+    #[allow(deprecated)]
+    let duration = unsafe { asset.duration().seconds() };
+    let size = render_size(&asset);
+    if !duration.is_finite() || duration <= 0.0 || size.width <= 0.0 || size.height <= 0.0 {
+        return Err(CaptureError::Empty);
+    }
+    Ok(Some(Canvas { width: size.width, height: size.height, duration }))
 }
 
 /// Write `movie` to `dest` (must not exist) with `segments` burned in.
@@ -172,7 +225,8 @@ fn burn(
     // SAFETY: instructions, frame rate and render size from the composition.
     #[allow(deprecated)] // the completion-handler variant is macOS 15+.
     let vc = unsafe { AVMutableVideoComposition::videoCompositionWithPropertiesOfAsset(&composition) };
-    // SAFETY: plain property read.
+    // SAFETY: plain property read; the same size `render_size` gives the
+    // preview.
     let size = unsafe { vc.renderSize() };
     let layout = BurnLayout::new(size.width, size.height, style);
     let cues = layout_cues(segments, &layout, duration);

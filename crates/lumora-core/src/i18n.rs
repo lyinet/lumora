@@ -647,6 +647,9 @@ messages! {
     ToastSubtitlesBurned => "Subtitled recording saved", "已保存带字幕的录屏";
     ToastSubtitlesBurnFailed => "Couldn’t burn in the subtitles", "无法烧录字幕";
     ToastSubtitlesNone => "There are no subtitles to burn in", "没有可烧录的字幕";
+    SubtitlePreviewLoading => "Loading preview…", "正在载入预览…";
+    SubtitlePreviewNoVideo => "This recording has no video, so there is no subtitle preview.", "此录音没有画面，无法预览字幕。";
+    SubtitlePreviewFailed => "Couldn’t load a preview frame", "无法载入预览画面";
 
     // -- scrolling capture (v0.6) -------------------------------------------------
     ScrollingCapture => "Scrolling Capture", "滚动截图";

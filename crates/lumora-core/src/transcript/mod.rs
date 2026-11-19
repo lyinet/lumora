@@ -13,6 +13,7 @@
 
 pub mod burn;
 pub mod chapters;
+pub mod preview;
 mod srt;
 
 pub use chapters::{Chapter, Summary};

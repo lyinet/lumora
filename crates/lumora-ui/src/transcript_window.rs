@@ -5,43 +5,57 @@
 //! Subtitles…" along the bottom; while a burn-in runs the bottom bar shows
 //! its progress and Cancel. Esc and ⌘W close it.
 //!
+//! Under the top bar sits the live burn-in preview
+//! ([`crate::subtitle_preview`]): a frame with the subtitles drawn exactly as
+//! the export draws them, and a scrubber. It follows the style controls,
+//! the segment being edited (clicking into a segment jumps to its midpoint)
+//! and the scrubber, re-rendering 100 ms after the last change. For an
+//! audio-only recording it collapses to a one-line note.
+//!
 //! The window owns the [`Transcript`] while it is open. Every action reads
 //! the text fields back into it first and hands the app a copy through
 //! [`UiEvent::Transcript`]; the app writes files and the `.transcript.json`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use lumora_core::geometry::Rect;
 use lumora_core::i18n::{tr, trf, Msg};
 use lumora_core::transcript::burn::{SubtitlePosition, SubtitleSize, SubtitleStyle};
 use lumora_core::transcript::chapters::format_chapter_time;
+use lumora_core::transcript::preview::{midpoint, DEBOUNCE_SECS};
 use lumora_core::transcript::Transcript;
 use objc2::rc::Retained;
-use objc2::runtime::ProtocolObject;
+use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{define_class, msg_send, DefinedClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{
     NSApplication, NSAutoresizingMaskOptions, NSBezelStyle, NSBorderType, NSBox, NSBoxType, NSButton, NSColor,
-    NSControl, NSControlSize, NSControlStateValueOff, NSControlStateValueOn, NSFont, NSLineBreakMode, NSPopUpButton,
-    NSProgressIndicator, NSProgressIndicatorStyle, NSResponder, NSScrollView, NSTextField, NSView, NSWindow,
-    NSWindowDelegate, NSWindowStyleMask,
+    NSControl, NSControlSize, NSControlStateValueOff, NSControlStateValueOn, NSControlTextEditingDelegate, NSFont,
+    NSLineBreakMode, NSPopUpButton, NSProgressIndicator, NSProgressIndicatorStyle, NSResponder, NSScrollView,
+    NSTextField, NSTextFieldDelegate, NSTextView, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
 };
-use objc2_core_foundation::{CGPoint, CGRect, CGSize};
+use objc2_core_foundation::{CFRetained, CGPoint, CGRect, CGSize};
+use objc2_core_graphics::CGImage;
 use objc2_foundation::{NSNotification, NSObject, NSObjectProtocol, NSString, NSTimer};
 
 use crate::events::{EventSink, TranscriptAction, UiEvent};
+use crate::subtitle_preview::{PreviewSource, SubtitlePreview};
 use crate::tokens::typography;
 use crate::util::{cg_rect, mono_digits, schedule_timer, screen_under_mouse, weight, ActionTarget};
 
 const WIDTH: f64 = 760.0;
-const HEIGHT: f64 = 640.0;
+const HEIGHT: f64 = 820.0;
 const BAR: f64 = 52.0;
 /// Bottom bar: burn-in style and button, or burn-in progress.
 const FOOT: f64 = 52.0;
 const POPUP_W: f64 = 104.0;
 const PAD: f64 = 20.0;
 const MIN_W: f64 = 560.0;
-const MIN_H: f64 = 360.0;
+const MIN_H: f64 = 520.0;
+/// The burn-in preview pane (stage + scrubber) under the top bar.
+const PANE_H: f64 = 300.0;
+/// The pane collapsed to a note (audio-only recording, unreadable movie).
+const NOTE_H: f64 = 40.0;
 /// Narrowest the top-bar info line may get before the window stops shrinking.
 const INFO_MIN_W: f64 = 120.0;
 const HEADING_H: f64 = 28.0;
@@ -101,8 +115,79 @@ define_class!(
                 s.emit(TranscriptAction::Closed);
             }
         }
+
+        #[unsafe(method(windowDidResize:))]
+        fn window_did_resize(&self, _notification: &NSNotification) {
+            if let Some(s) = self.ivars().state.borrow().upgrade() {
+                s.relayout_preview();
+                State::schedule_preview(&s);
+            }
+        }
+
+        /// Sent every pass of the event loop: notice when the user clicks
+        /// (or tabs) into another segment, which no control notification
+        /// reports until they type.
+        #[unsafe(method(windowDidUpdate:))]
+        fn window_did_update(&self, _notification: &NSNotification) {
+            if let Some(s) = self.ivars().state.borrow().upgrade() {
+                s.track_focus();
+            }
+        }
+
+        #[unsafe(method(windowDidChangeBackingProperties:))]
+        fn window_did_change_backing(&self, _notification: &NSNotification) {
+            if let Some(s) = self.ivars().state.borrow().upgrade() {
+                s.relayout_preview();
+                State::schedule_preview(&s);
+            }
+        }
     }
 );
+
+define_class!(
+    /// Watches the segment fields: typing re-renders the preview. Fields
+    /// carry `SEGMENT_TAG + index` as their tag.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "LumoraTranscriptSegmentDelegate"]
+    #[ivars = DelegateIvars]
+    struct SegmentDelegate;
+
+    unsafe impl NSObjectProtocol for SegmentDelegate {}
+
+    unsafe impl NSControlTextEditingDelegate for SegmentDelegate {
+        #[unsafe(method(controlTextDidChange:))]
+        fn control_text_did_change(&self, _notification: &NSNotification) {
+            if let Some(s) = self.ivars().state.borrow().upgrade() {
+                State::schedule_preview(&s);
+            }
+        }
+    }
+
+    unsafe impl NSTextFieldDelegate for SegmentDelegate {}
+);
+
+impl SegmentDelegate {
+    fn new(mtm: MainThreadMarker) -> Retained<Self> {
+        let this = Self::alloc(mtm).set_ivars(DelegateIvars { state: RefCell::new(Weak::new()) });
+        unsafe { msg_send![super(this), init] }
+    }
+}
+
+/// Segment fields are tagged `SEGMENT_TAG + index` (other fields keep 0).
+const SEGMENT_TAG: isize = 1_000_000;
+
+/// The segment index of `window`'s focused field, if it is a segment field.
+/// While a text field edits, the first responder is its field editor (an
+/// NSTextView) whose delegate is the field.
+fn focused_segment(window: &NSWindow) -> Option<usize> {
+    let responder = window.firstResponder()?;
+    let editor = responder.downcast::<NSTextView>().ok()?;
+    // SAFETY: `delegate` is a plain getter returning nil or an object.
+    let delegate: Option<Retained<AnyObject>> = unsafe { msg_send![&*editor, delegate] };
+    let field = delegate?.downcast::<NSTextField>().ok()?;
+    usize::try_from(field.tag().checked_sub(SEGMENT_TAG)?).ok()
+}
 
 impl WindowDelegate {
     fn new(mtm: MainThreadMarker) -> Retained<Self> {
@@ -126,8 +211,16 @@ struct State {
     fields: RefCell<Fields>,
     rows: RefCell<Option<Rows>>,
     foot: RefCell<Option<Foot>>,
+    scroll: RefCell<Option<Retained<NSScrollView>>>,
+    preview: RefCell<Option<Rc<SubtitlePreview>>>,
+    /// The pending (debounced) preview render.
+    preview_timer: RefCell<Option<Retained<NSTimer>>>,
+    me: RefCell<Weak<State>>,
+    /// The segment last focused (the preview jumped to it).
+    focused: Cell<Option<usize>>,
     _bar_targets: RefCell<Vec<Retained<ActionTarget>>>,
     _delegate: RefCell<Option<Retained<WindowDelegate>>>,
+    segment_delegate: RefCell<Option<Retained<SegmentDelegate>>>,
 }
 
 /// An open transcript.
@@ -360,6 +453,12 @@ impl State {
             let time = format_chapter_time(seg.start, rows.long);
             rows.list.addSubview(&time_label(self.mtm, &time, Rect::new(PAD, y + 4.0, TIME_W, 18.0)));
             let f = text_field(self.mtm, &seg.text, Rect::new(PAD + TIME_W, y, inner - TIME_W, 22.0));
+            f.setTag(SEGMENT_TAG + rows.built as isize);
+            if let Some(d) = self.segment_delegate.borrow().as_ref() {
+                // SAFETY: the delegate lives as long as the window state,
+                // which outlives the fields; it is cleared in `Drop`.
+                unsafe { f.setDelegate(Some(ProtocolObject::from_ref(&**d))) };
+            }
             rows.list.addSubview(&f);
             fields.segments.push(f);
             rows.built += 1;
@@ -493,6 +592,76 @@ impl State {
     fn style_changed(&self) {
         let style = self.style();
         (self.sink)(UiEvent::Transcript { id: self.id, action: TranscriptAction::SubtitleStyle(style) });
+        if let Some(me) = self.me.borrow().upgrade() {
+            State::schedule_preview(&me);
+        }
+    }
+
+    /// Re-render the preview 100 ms after the last change (style, edit,
+    /// scrub, selection).
+    fn schedule_preview(this: &Rc<Self>) {
+        if let Some(t) = this.preview_timer.borrow_mut().take() {
+            t.invalidate();
+        }
+        let weak = Rc::downgrade(this);
+        let timer = schedule_timer(DEBOUNCE_SECS, false, move || {
+            if let Some(s) = weak.upgrade() {
+                s.preview_timer.borrow_mut().take();
+                s.render_preview();
+            }
+            false
+        });
+        *this.preview_timer.borrow_mut() = Some(timer);
+    }
+
+    /// Draw the current segments and style at the scrub time.
+    fn render_preview(&self) {
+        let Some(p) = self.preview.borrow().clone() else { return };
+        self.sync();
+        let style = self.style();
+        p.render(&self.transcript.borrow().segments, style);
+    }
+
+    /// When focus moves into another segment field, jump the preview there.
+    fn track_focus(&self) {
+        let now = focused_segment(&self.window);
+        if now == self.focused.get() {
+            return;
+        }
+        self.focused.set(now);
+        if let Some(i) = now {
+            self.select_segment(i);
+        }
+    }
+
+    /// Move the preview to segment `i`'s midpoint.
+    fn select_segment(&self, i: usize) {
+        let Some(p) = self.preview.borrow().clone() else { return };
+        let Some(t) = self.transcript.borrow().segments.get(i).map(midpoint) else { return };
+        p.set_time(t);
+        if let Some(me) = self.me.borrow().upgrade() {
+            State::schedule_preview(&me);
+        }
+    }
+
+    fn relayout_preview(&self) {
+        if let Some(p) = self.preview.borrow().as_ref() {
+            p.relayout();
+        }
+    }
+
+    /// Size the pane for what it shows and give the list the rest.
+    fn layout_pane(&self) {
+        let (Some(p), Some(scroll)) = (self.preview.borrow().clone(), self.scroll.borrow().clone()) else {
+            return;
+        };
+        let Some(content) = self.window.contentView() else { return };
+        let size = content.frame().size;
+        let (w, h) = (size.width, size.height);
+        let pane_h = if p.has_video() { PANE_H } else { NOTE_H };
+        p.view.setFrame(cg_rect(Rect::new(0.0, h - BAR - pane_h, w, pane_h)));
+        scroll.setFrame(cg_rect(Rect::new(0.0, FOOT, w, (h - BAR - FOOT - pane_h).max(0.0))));
+        p.relayout();
     }
 
     fn burn(&self) {
@@ -549,15 +718,15 @@ impl TranscriptWindow {
         );
         content.addSubview(&info);
 
-        let scroll =
-            NSScrollView::initWithFrame(NSScrollView::alloc(mtm), cg_rect(Rect::new(0.0, FOOT, w, h - BAR - FOOT)));
+        let list_h = h - BAR - FOOT - PANE_H;
+        let scroll = NSScrollView::initWithFrame(NSScrollView::alloc(mtm), cg_rect(Rect::new(0.0, FOOT, w, list_h)));
         scroll.setHasVerticalScroller(true);
         scroll.setBorderType(NSBorderType::NoBorder);
         scroll.setDrawsBackground(false);
         scroll.setAutoresizingMask(
             NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
         );
-        let list = ListView::new(mtm, CGRect::new(CGPoint::ZERO, CGSize::new(w, h - BAR - FOOT)));
+        let list = ListView::new(mtm, CGRect::new(CGPoint::ZERO, CGSize::new(w, list_h)));
         list.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable);
         scroll.setDocumentView(Some(&list));
         content.addSubview(&scroll);
@@ -579,9 +748,44 @@ impl TranscriptWindow {
             fields: RefCell::new(Fields { summary: None, chapters: Vec::new(), segments: Vec::new() }),
             rows: RefCell::new(None),
             foot: RefCell::new(None),
+            scroll: RefCell::new(Some(scroll.clone())),
+            preview: RefCell::new(None),
+            preview_timer: RefCell::new(None),
+            me: RefCell::new(Weak::new()),
+            focused: Cell::new(None),
             _bar_targets: RefCell::new(Vec::new()),
             _delegate: RefCell::new(None),
+            segment_delegate: RefCell::new(None),
         });
+        *state.me.borrow_mut() = Rc::downgrade(&state);
+        let segment_delegate = SegmentDelegate::new(mtm);
+        *segment_delegate.ivars().state.borrow_mut() = Rc::downgrade(&state);
+        *state.segment_delegate.borrow_mut() = Some(segment_delegate);
+
+        // The burn-in preview pane, between the top bar and the list.
+        let preview = {
+            let scrub = Rc::downgrade(&state);
+            let request_sink = state.sink.clone();
+            SubtitlePreview::new(
+                mtm,
+                Rect::new(0.0, h - BAR - PANE_H, w, PANE_H),
+                move || {
+                    if let Some(s) = scrub.upgrade() {
+                        if let Some(p) = s.preview.borrow().as_ref() {
+                            p.scrubbed();
+                        }
+                        State::schedule_preview(&s);
+                    }
+                },
+                move |t| request_sink(UiEvent::Transcript { id, action: TranscriptAction::PreviewFrame(t) }),
+            )
+        };
+        preview.view.setAutoresizingMask(
+            NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewMinYMargin,
+        );
+        preview.view.addSubview(&separator(mtm, Rect::new(0.0, 0.0, w, 1.0)));
+        content.addSubview(&preview.view);
+        *state.preview.borrow_mut() = Some(preview);
 
         // Buttons, right to left.
         let has_summary = state.transcript.borrow().summary.is_some();
@@ -632,7 +836,8 @@ impl TranscriptWindow {
             w
         };
 
-        let doc_h = state.build(&list, w).max(h - BAR - FOOT);
+        state.layout_pane();
+        let doc_h = state.build(&list, w).max(list_h);
         list.setFrame(CGRect::new(CGPoint::ZERO, CGSize::new(w, doc_h)));
         // Scroll to the top (flipped document: origin is the top).
         scroll.contentView().scrollToPoint(CGPoint::ZERO);
@@ -676,6 +881,27 @@ impl TranscriptWindow {
         }
     }
 
+    /// What the burn-in preview shows: the movie's canvas once the app has
+    /// read it, or why there's no preview. Starts at the first subtitle.
+    pub fn set_preview_source(&self, source: PreviewSource) {
+        let Some(p) = self.state.preview.borrow().clone() else { return };
+        let start =
+            self.state.transcript.borrow().segments.iter().find(|s| !s.text.trim().is_empty()).map_or(0.0, midpoint);
+        p.set_source(source, start);
+        self.state.layout_pane();
+        if matches!(source, PreviewSource::Video(_)) {
+            State::schedule_preview(&self.state);
+        }
+    }
+
+    /// A frame the preview asked for (`TranscriptAction::PreviewFrame`);
+    /// `None` if it couldn't be generated.
+    pub fn set_preview_frame(&self, time: f64, image: Option<CFRetained<CGImage>>) {
+        if let Some(p) = self.state.preview.borrow().clone() {
+            p.frame_arrived(time, image);
+        }
+    }
+
     /// The transcript with the current field contents.
     pub fn transcript(&self) -> Transcript {
         self.state.sync();
@@ -687,6 +913,13 @@ impl Drop for TranscriptWindow {
     fn drop(&mut self) {
         if let Some(timer) = self.state.rows.borrow_mut().as_mut().and_then(|r| r.timer.take()) {
             timer.invalidate();
+        }
+        if let Some(timer) = self.state.preview_timer.borrow_mut().take() {
+            timer.invalidate();
+        }
+        // SAFETY: detaching our delegate from fields that may outlive us.
+        for f in &self.state.fields.borrow().segments {
+            unsafe { f.setDelegate(None) };
         }
         self.state.window.setDelegate(None);
         self.state.window.orderOut(None);

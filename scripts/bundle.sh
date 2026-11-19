@@ -6,11 +6,24 @@
 #   SIGN_IDENTITY="Developer ID Application: Example (TEAMID)" \
 #   NOTARY_PROFILE=lumora-notary scripts/bundle.sh
 #
-# NOTARY_PROFILE is a keychain profile created with
+# NOTARY_PROFILE is a notarytool keychain profile created with
 #   xcrun notarytool store-credentials lumora-notary --apple-id … --team-id …
+# (or --key/--key-id/--issuer for an App Store Connect API key).
+# NOTARY_KEYCHAIN optionally names the keychain that holds the profile
+# (CI uses a temporary one, see scripts/sign-and-notarize.sh).
+# APPLE_TEAM_ID, when set with a real identity, is checked against the
+# signature's designated requirement.
 #
-# Note: ad-hoc signed builds get a new code identity every build, so macOS
-# asks for Screen Recording permission again after each rebuild.
+# The code identity is pinned to the bundle identifier com.lumora.app. With a
+# Developer ID certificate the designated requirement is then
+#   identifier "com.lumora.app" and anchor apple generic and
+#   certificate leaf[subject.OU] = TEAMID …
+# which is the same for every build, so macOS keeps Screen Recording,
+# Microphone, Accessibility and Keychain grants across updates.
+#
+# Note: ad-hoc signed builds get a new code identity every build (their
+# designated requirement is the code hash), so macOS asks for Screen
+# Recording permission again after each rebuild.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -24,6 +37,7 @@ VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 SHORT_VERSION="${VERSION%%[-+]*}"
 BUILD="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+BUNDLE_ID="com.lumora.app"
 TARGETS=(aarch64-apple-darwin x86_64-apple-darwin)
 
 echo "==> Lumora $VERSION (CFBundleShortVersionString $SHORT_VERSION, build $BUILD)"
@@ -53,22 +67,72 @@ else
 fi
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 plutil -lint "$APP/Contents/Info.plist"
+# The bundle identifier is the code identity TCC and the Keychain remember,
+# and hardened-runtime apps are killed when they touch a protected resource
+# without its usage string, so refuse to ship a plist that lost either.
+plist_value() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist" 2>/dev/null || true; }
+if [[ "$(plist_value CFBundleIdentifier)" != "$BUNDLE_ID" ]]; then
+  echo "error: CFBundleIdentifier must stay $BUNDLE_ID (permissions are tied to it)" >&2
+  exit 1
+fi
+for key in NSScreenCaptureUsageDescription NSMicrophoneUsageDescription NSSpeechRecognitionUsageDescription; do
+  if [[ -z "$(plist_value "$key")" ]]; then
+    echo "error: Info.plist is missing $key" >&2
+    exit 1
+  fi
+done
+
+# notarytool submit --wait exits 0 for an "Invalid" result on some Xcode
+# versions, so read the status from its JSON and print Apple's log on failure.
+notarize() {
+  local file="$1" out status id
+  local args=(--keychain-profile "$NOTARY_PROFILE")
+  [[ -n "${NOTARY_KEYCHAIN:-}" ]] && args+=(--keychain "$NOTARY_KEYCHAIN")
+  echo "==> Notarizing $(basename "$file")"
+  out="$(mktemp)"
+  xcrun notarytool submit "$file" "${args[@]}" --wait --output-format json > "$out"
+  status="$(plutil -extract status raw -o - "$out" 2>/dev/null || echo unknown)"
+  id="$(plutil -extract id raw -o - "$out" 2>/dev/null || true)"
+  rm -f "$out"
+  echo "   submission ${id:-?}: $status"
+  if [[ "$status" != "Accepted" ]]; then
+    [[ -n "$id" ]] && xcrun notarytool log "$id" "${args[@]}" || true
+    echo "error: notarization of $(basename "$file") was not accepted ($status)" >&2
+    return 1
+  fi
+}
 
 echo "==> codesign ($SIGN_IDENTITY)"
 # Secure timestamps need Apple's server and a real identity; skip for ad-hoc.
 TIMESTAMP="--timestamp"
 [[ "$SIGN_IDENTITY" == "-" ]] && TIMESTAMP="--timestamp=none"
 codesign --force --options runtime "$TIMESTAMP" --sign "$SIGN_IDENTITY" \
+  --identifier "$BUNDLE_ID" \
   --entitlements packaging/entitlements.plist "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
+REQUIREMENT="$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => //p')"
+echo "   designated requirement: $REQUIREMENT"
+if [[ "$SIGN_IDENTITY" != "-" ]]; then
+  # A stable requirement is the whole point of a real identity: it must name
+  # the bundle identifier and (when known) the team, never a code hash.
+  if [[ "$REQUIREMENT" != *"identifier \"$BUNDLE_ID\""* || "$REQUIREMENT" == *cdhash* ]]; then
+    echo "error: designated requirement is not stable: $REQUIREMENT" >&2
+    exit 1
+  fi
+  if [[ -n "${APPLE_TEAM_ID:-}" && "$REQUIREMENT" != *"$APPLE_TEAM_ID"* ]]; then
+    echo "error: designated requirement does not name team $APPLE_TEAM_ID" >&2
+    exit 1
+  fi
+fi
 
 if [[ -n "${NOTARY_PROFILE:-}" ]]; then
-  echo "==> Notarizing"
   ZIP="$DIST/Lumora-$VERSION.zip"
   ditto -c -k --keepParent "$APP" "$ZIP"
-  xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
-  xcrun stapler staple "$APP"
+  notarize "$ZIP"
   rm -f "$ZIP"
+  xcrun stapler staple "$APP"
+  xcrun stapler validate "$APP"
+  spctl --assess --type execute -vv "$APP"
 fi
 
 DMG="$DIST/Lumora-$VERSION.dmg"
@@ -92,7 +156,14 @@ else
   rm -rf "$STAGE"
 fi
 if [[ "$SIGN_IDENTITY" != "-" ]]; then
+  echo "==> codesign $(basename "$DMG")"
   codesign --force --timestamp --sign "$SIGN_IDENTITY" "$DMG"
-  [[ -n "${NOTARY_PROFILE:-}" ]] && xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait && xcrun stapler staple "$DMG"
+  codesign --verify --strict --verbose=2 "$DMG"
+  if [[ -n "${NOTARY_PROFILE:-}" ]]; then
+    notarize "$DMG"
+    xcrun stapler staple "$DMG"
+    xcrun stapler validate "$DMG"
+    spctl --assess --type open --context context:primary-signature -vv "$DMG"
+  fi
 fi
 echo "==> Done: $DMG"

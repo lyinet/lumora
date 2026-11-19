@@ -89,6 +89,9 @@ pub enum TranscriptAction {
     CancelBurn,
     /// The burn-in style controls changed (the app saves them).
     SubtitleStyle(lumora_core::transcript::burn::SubtitleStyle),
+    /// The live subtitle preview wants the movie's frame at this time
+    /// (seconds); answer with `TranscriptWindow::set_preview_frame`.
+    PreviewFrame(f64),
     /// The window closed (the app saves `.transcript.json` and drops it).
     Closed(Box<lumora_core::transcript::Transcript>),
 }

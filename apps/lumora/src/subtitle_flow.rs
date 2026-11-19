@@ -5,6 +5,10 @@
 //! folder for a temporary recording) on a global queue, with progress and
 //! Cancel in the transcript window, then shows a Quick Access card. The
 //! style controls are remembered in `[transcribe]`.
+//!
+//! Also feeds the transcript window's live burn-in preview: the movie's
+//! render size and duration when the window opens, and frames on request,
+//! both read on a global queue.
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -16,6 +20,7 @@ use lumora_capture::CaptureError;
 use lumora_core::i18n::{tr, Msg};
 use lumora_core::transcript::burn::SubtitleStyle;
 use lumora_core::transcript::Transcript;
+use lumora_ui::subtitle_preview::{PreviewSource, FRAME_MAX_SIDE};
 use lumora_ui::toast::ToastKind;
 
 use crate::app::{on_main, App, Notice};
@@ -42,6 +47,48 @@ impl App {
         if let Some(w) = self.settings_window.borrow().as_ref() {
             w.set_subtitle_style(style);
         }
+    }
+
+    /// Read `movie`'s canvas for transcript window `id`'s preview.
+    pub(crate) fn load_subtitle_preview(&self, id: u64, movie: PathBuf) {
+        DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
+            move || {
+                let source = match lumora_capture::burn::preview_canvas(&movie) {
+                    Ok(Some(canvas)) => {
+                        log::info!("subtitle preview: {}×{} px, {:.1} s", canvas.width, canvas.height, canvas.duration);
+                        PreviewSource::Video(canvas)
+                    }
+                    Ok(None) => {
+                        log::info!("subtitle preview: no video track (audio only)");
+                        PreviewSource::NoVideo
+                    }
+                    Err(e) => {
+                        log::warn!("subtitle preview unavailable: {e}");
+                        PreviewSource::Failed
+                    }
+                };
+                on_main(move |app| {
+                    if let Some(o) = app.transcripts.borrow().get(&id) {
+                        o.window.set_preview_source(source);
+                    }
+                });
+            },
+        );
+    }
+
+    /// Generate the frame at `time` for transcript window `id`'s preview
+    /// (the window keeps one request in flight and caches the results).
+    pub(crate) fn subtitle_preview_frame(&self, id: u64, movie: PathBuf, time: f64) {
+        DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
+            move || {
+                let image = lumora_capture::clip::frame_at(&movie, time, FRAME_MAX_SIDE);
+                on_main(move |app| {
+                    if let Some(o) = app.transcripts.borrow().get(&id) {
+                        o.window.set_preview_frame(time, image);
+                    }
+                });
+            },
+        );
     }
 
     /// Cancel the burn-in running for transcript window `id`.

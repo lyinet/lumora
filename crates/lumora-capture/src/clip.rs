@@ -57,7 +57,8 @@ pub fn movie_info(movie: &Path) -> Result<MovieInfo, CaptureError> {
 }
 
 /// The frame of `movie` at `time` (seconds), at most `max_side` pixels on
-/// its longer side, for the trim window's preview. Blocks.
+/// its longer side, for the trim window's and the subtitle preview's
+/// frames. Blocks.
 pub fn frame_at(movie: &Path, time: f64, max_side: f64) -> Option<CFRetained<objc2_core_graphics::CGImage>> {
     let asset = asset_for(movie).ok()?;
     // SAFETY: plain setters on a fresh generator; a little tolerance keeps
@@ -71,7 +72,7 @@ pub fn frame_at(movie: &Path, time: f64, max_side: f64) -> Option<CFRetained<obj
         g.setRequestedTimeToleranceAfter(tol);
         (g, CMTime::with_seconds(time.max(0.0), TIMESCALE))
     };
-    crate::av_sync::image_at(&generator, at).inspect_err(|e| log::warn!("trim preview: {e}")).ok()
+    crate::av_sync::image_at(&generator, at).inspect_err(|e| log::warn!("preview frame at {time:.2} s: {e}")).ok()
 }
 
 fn time_range(range: TrimRange) -> CMTimeRange {

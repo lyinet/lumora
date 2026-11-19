@@ -35,6 +35,7 @@ pub mod ocr;
 pub mod recording;
 pub mod redact;
 pub mod scroll_capture;
+pub mod scroll_trigger;
 pub mod selection;
 pub mod settings;
 pub mod snap;

@@ -34,6 +34,8 @@ pub mod history_window;
 #[cfg(target_os = "macos")]
 pub mod icon;
 #[cfg(target_os = "macos")]
+pub mod key_layout;
+#[cfg(target_os = "macos")]
 pub mod keystroke_hud;
 #[cfg(target_os = "macos")]
 pub mod onboarding;
@@ -48,9 +50,13 @@ pub mod recording_hud;
 #[cfg(target_os = "macos")]
 pub mod scroll_hud;
 #[cfg(target_os = "macos")]
+pub mod scroll_monitor;
+#[cfg(target_os = "macos")]
 pub mod settings_window;
 #[cfg(target_os = "macos")]
 pub mod shutter;
+#[cfg(target_os = "macos")]
+pub mod subtitle_preview;
 #[cfg(target_os = "macos")]
 pub mod text_result;
 #[cfg(target_os = "macos")]

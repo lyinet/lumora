@@ -25,6 +25,13 @@ jobs:
   macos:
     name: macOS (fmt, clippy, test, universal .app)
     runs-on: macos-15
+    env:
+      # Developer ID signing switches on only when all three certificate
+      # secrets exist (forks and PRs from forks never see secrets, so they
+      # keep the ad-hoc build). These are booleans, never secret values;
+      # the secrets themselves are mapped only into the signing step.
+      SIGNING_ENABLED: ${{ secrets.MACOS_CERT_P12 != '' && secrets.MACOS_CERT_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
+      SIGNING_SECRETS_PARTIAL: ${{ (secrets.MACOS_CERT_P12 != '' || secrets.MACOS_CERT_PASSWORD != '' || secrets.APPLE_TEAM_ID != '') && !(secrets.MACOS_CERT_P12 != '' && secrets.MACOS_CERT_PASSWORD != '' && secrets.APPLE_TEAM_ID != '') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,9 +52,23 @@ jobs:
       - name: Install create-dmg
         run: brew install create-dmg
       - name: Build universal app + DMG (ad-hoc signed)
+        if: env.SIGNING_ENABLED != 'true'
+        run: scripts/sign-and-notarize.sh
+      - name: Build universal app + DMG (Developer ID signed + notarized)
+        if: env.SIGNING_ENABLED == 'true'
         env:
-          SIGN_IDENTITY: "-"
-        run: scripts/bundle.sh
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          # Tag builds must be notarized; branch / PR builds may ship
+          # signed-only when no notary credentials are configured.
+          REQUIRE_NOTARIZATION: ${{ startsWith(github.ref, 'refs/tags/') && '1' || '0' }}
+        run: scripts/sign-and-notarize.sh
       - uses: actions/upload-artifact@v4
         with:
           name: Lumora-dmg

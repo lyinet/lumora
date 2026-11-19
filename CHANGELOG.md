@@ -6,6 +6,76 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-20 (prerelease; awaiting hardware QA)
+
+Scrolling capture driven by your scrolling, keystroke labels that follow
+your keyboard layout, a live preview for burned-in subtitles, and an
+optional Developer ID signing + notarization pipeline. Built and unit-tested;
+none of it has run on a real Mac yet — see STATUS.md for the hardware-QA
+list. Release DMGs stay ad-hoc signed until the signing secrets exist.
+
+### Added
+- **Optional Developer ID signing + notarization in CI.** When the
+  repository has the signing secrets (`MACOS_CERT_P12`,
+  `MACOS_CERT_PASSWORD`, `APPLE_TEAM_ID`, and either an App Store Connect
+  API key — `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`, `NOTARY_KEY_P8` — or
+  `APPLE_ID` + `APPLE_APP_PASSWORD`), CI signs the app with the hardened
+  runtime and a secure timestamp, notarizes and staples both the app and the
+  DMG, and checks them with `codesign` / `spctl` / `stapler`. The
+  certificate lives in a temporary keychain that is deleted afterwards.
+  Without the secrets CI builds the same ad-hoc DMG as before and says so.
+  Tag builds refuse to ship un-notarized. New `scripts/sign-and-notarize.sh`
+  and [docs/signing.md](docs/signing.md).
+- **Live preview for burned-in subtitles.** The subtitles window shows a
+  frame of the video with the subtitles drawn on top exactly as **Burn In
+  Subtitles…** will draw them: the preview uses the export's own layout
+  (font size from the video size, wrapping, box, margins, top / bottom) at
+  the export's render size and the export's own layer code, then scales the
+  whole picture to fit the pane. It updates ~100 ms after you change the
+  size / position / box, edit a line or move the new scrubber, and jumps to
+  a line's midpoint when you click into it. Frames are generated in the
+  background and cached. Audio-only recordings show a note instead of the
+  preview.
+
+### Changed
+- **`scripts/bundle.sh` pins the code identity.** The app is signed with
+  the identifier `com.lumora.app`; with a real identity the build fails
+  unless the designated requirement names that identifier and the team
+  (never a code hash), so permissions survive signed updates. It also fails
+  if `Info.plist` loses its bundle identifier or its Screen Recording,
+  Microphone or Speech Recognition usage strings, reads notarytool's result
+  as JSON (an `Invalid` submission now fails the build and prints Apple's
+  log), and accepts `NOTARY_KEYCHAIN` for a profile in another keychain.
+- **Keystroke HUD labels follow your keyboard layout.** Shortcut keys are
+  named from the selected layout instead of a US table: ⌘ + the key
+  marked W on AZERTY shows `⌘W`, QWERTZ shows `⌘Z` for its Z key, and the
+  AZERTY number row shows `⌘1` under ⌘. ⌘ and ⌃ shortcuts on non-Latin
+  layouts (Russian, Greek…) and input methods use the ASCII-capable layout,
+  as macOS menus do; ⌥ combos use the selected layout's base key. ⇧ stays a
+  glyph next to the unshifted key (`⇧⌘4`). Layouts are read at the start of
+  each recording and again when you switch input sources; named keys (↩ ⇥
+  ⌫ ⎋ ␣ arrows, F-keys) and any key the layout can't name fall back to the
+  built-in table. Plain typing is still never shown and never translated,
+  and nothing is shown under secure input.
+- **Scrolling capture follows your scrolling.** Frames are taken on
+  scroll-wheel and trackpad events over the captured area (at most every
+  ~120 ms while scrolling, one ~70 ms after the last event, one when a
+  trackpad fling ends) instead of every 150 ms; scrolling elsewhere on
+  screen is ignored. A timer stays as a fallback for scrolling without wheel
+  events (keys, the scroll bar): 150 ms until the first wheel event, 400 ms
+  after, fast again whenever the content moves without one. Events are
+  observed with a global AppKit monitor, which needs no permission for
+  scroll events (no Accessibility, no Input Monitoring).
+- **Scroll direction and distance guide the stitcher.** The wheel deltas
+  since the last frame give an expected shift (calibrated against the
+  shifts actually found), whose range is searched first, so repeating
+  content (identical list rows) lines up where you scrolled. Weak matches
+  against a well-established scroll direction are skipped (never two in a
+  row). Frames without wheel events are matched exactly as before.
+- The session summary in the log now counts frames taken on scroll events
+  vs. by the timer, wheel events inside / outside the area, and hinted
+  frames; debug logging adds a line per scroll-triggered frame.
+
 ## [0.6.3] - 2026-11-18 (prerelease; scrolling-capture fixes)
 
 Scrolling capture (⌥⇧S) still failed on a real Mac (Mac mini M4, macOS
@@ -522,7 +592,8 @@ First fixes from testing on a real Mac (Mac mini M4, macOS 26 Tahoe).
 - Screen Recording onboarding with live permission polling and relaunch.
 - Universal bundle script (lipo, codesign, notarytool, create-dmg) and CI.
 
-[Unreleased]: https://github.com/lyinet/lumora/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/lyinet/lumora/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/lyinet/lumora/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/lyinet/lumora/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/lyinet/lumora/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/lyinet/lumora/compare/v0.6.0...v0.6.1

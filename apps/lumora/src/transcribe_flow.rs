@@ -408,7 +408,8 @@ impl App {
         let id = self.next_id();
         let style = self.settings.borrow().transcribe.subtitle_style();
         let window = TranscriptWindow::show(self.mtm, id, t, &stem(&movie), style, self.sink.clone());
-        self.transcripts.borrow_mut().insert(id, OpenTranscript { window, movie, burn: None });
+        self.transcripts.borrow_mut().insert(id, OpenTranscript { window, movie: movie.clone(), burn: None });
+        self.load_subtitle_preview(id, movie);
     }
 
     pub fn on_transcript(self: &Rc<Self>, id: u64, action: TranscriptAction) {
@@ -447,6 +448,7 @@ impl App {
             }
             TranscriptAction::CancelBurn => self.cancel_burn(id),
             TranscriptAction::SubtitleStyle(style) => self.subtitle_style_changed(style),
+            TranscriptAction::PreviewFrame(time) => self.subtitle_preview_frame(id, movie, time),
             TranscriptAction::Closed(t) => {
                 save_transcript(&movie, &t);
                 self.cancel_burn(id);
