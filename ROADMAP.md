@@ -126,7 +126,9 @@
   capture stitching).
 - Developer ID signing + notarization in CI (stable code identity, so
   Screen Recording, Input Monitoring and Keychain trust survive updates).
-- Keyboard-layout-aware keystroke labels (today: US layout only).
+- ✅ Keyboard-layout-aware keystroke labels (Text Input Sources +
+  `UCKeyTranslate`, ASCII-capable layout for ⌘/⌃, US table as fallback) —
+  built, awaiting hardware QA.
 - ✅ Scroll-wheel driven scrolling capture (capture on scroll events instead
   of a fixed 150 ms timer; wheel deltas as stitch hints) — built, awaiting
   hardware QA.

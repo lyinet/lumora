@@ -7,6 +7,17 @@ All notable changes to Lumora are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **Keystroke HUD labels follow your keyboard layout.** Shortcut keys are
+  named from the selected layout instead of a US table: ⌘ + the key
+  marked W on AZERTY shows `⌘W`, QWERTZ shows `⌘Z` for its Z key, and the
+  AZERTY number row shows `⌘1` under ⌘. ⌘ and ⌃ shortcuts on non-Latin
+  layouts (Russian, Greek…) and input methods use the ASCII-capable layout,
+  as macOS menus do; ⌥ combos use the selected layout's base key. ⇧ stays a
+  glyph next to the unshifted key (`⇧⌘4`). Layouts are read at the start of
+  each recording and again when you switch input sources; named keys (↩ ⇥
+  ⌫ ⎋ ␣ arrows, F-keys) and any key the layout can't name fall back to the
+  built-in table. Plain typing is still never shown and never translated,
+  and nothing is shown under secure input.
 - **Scrolling capture follows your scrolling.** Frames are taken on
   scroll-wheel and trackpad events over the captured area (at most every
   ~120 ms while scrolling, one ~70 ms after the last event, one when a
