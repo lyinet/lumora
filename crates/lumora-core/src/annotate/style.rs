@@ -69,16 +69,43 @@ impl StrokeWidth {
     }
 }
 
-/// Colour + width, shared by every annotation kind.
+/// Lowest opacity the style bar offers, in percent (fully invisible ink
+/// would be a trap: you couldn't see what to select).
+pub const OPACITY_MIN: u8 = 10;
+/// Fully opaque, in percent.
+pub const OPACITY_MAX: u8 = 100;
+
+/// Clamp an opacity percentage into [`OPACITY_MIN`]…[`OPACITY_MAX`].
+pub fn clamp_opacity(percent: u8) -> u8 {
+    percent.clamp(OPACITY_MIN, OPACITY_MAX)
+}
+
+/// Colour, width and opacity, shared by every annotation kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Style {
     pub color: Rgb8,
     pub width: StrokeWidth,
+    /// Opacity of the whole annotation in percent, 10–100. Redactions
+    /// ignore it (a see-through redaction would leak what it hides).
+    pub opacity: u8,
 }
 
 impl Default for Style {
     fn default() -> Self {
-        Style { color: PALETTE[0], width: StrokeWidth::Medium }
+        Style { color: PALETTE[0], width: StrokeWidth::Medium, opacity: OPACITY_MAX }
+    }
+}
+
+impl Style {
+    /// A style with `color` and `width` at full opacity.
+    pub const fn new(color: Rgb8, width: StrokeWidth) -> Style {
+        Style { color, width, opacity: OPACITY_MAX }
+    }
+
+    /// Opacity as a 0.1–1.0 multiplier (clamped, so a bad value from a
+    /// file can't make ink vanish).
+    pub fn alpha(&self) -> f64 {
+        f64::from(clamp_opacity(self.opacity)) / 100.0
     }
 }
 
@@ -106,5 +133,19 @@ mod tests {
         assert!(PALETTE.iter().any(|c| c.prefers_dark_text()));
         assert!(PALETTE.iter().any(|c| !c.prefers_dark_text()));
         assert_eq!(Style::default().color, PALETTE[0]);
+    }
+
+    #[test]
+    fn opacity_is_clamped_into_its_range() {
+        assert_eq!(Style::default().alpha(), 1.0);
+        assert_eq!(Style::new(PALETTE[1], StrokeWidth::Thin).opacity, 100);
+        let mut s = Style { opacity: 0, ..Style::default() };
+        assert_eq!(s.alpha(), 0.1);
+        s.opacity = 255;
+        assert_eq!(s.alpha(), 1.0);
+        s.opacity = 55;
+        assert!((s.alpha() - 0.55).abs() < 1e-12);
+        assert_eq!(clamp_opacity(5), OPACITY_MIN);
+        assert_eq!(clamp_opacity(70), 70);
     }
 }

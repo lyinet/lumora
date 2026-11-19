@@ -282,6 +282,14 @@ impl Editor {
         self.restyle(|a| a.style.width = width)
     }
 
+    /// Change the opacity (percent, clamped to 10–100); also applies to the
+    /// selection as one undo step.
+    pub fn set_opacity(&mut self, percent: u8) -> Effect {
+        let o = super::style::clamp_opacity(percent);
+        self.style.opacity = o;
+        self.restyle(|a| a.style.opacity = o)
+    }
+
     /// Change tool options; applies to a selected annotation of that kind.
     pub fn set_options(&mut self, options: ToolOptions) -> Effect {
         self.options = options;
@@ -1006,13 +1014,38 @@ mod tests {
         e.set_color(PALETTE[3]);
         e.set_width(StrokeWidth::Thick);
         let a = &e.document().items()[0];
-        assert_eq!(a.style, Style { color: PALETTE[3], width: StrokeWidth::Thick });
+        assert_eq!(a.style, Style::new(PALETTE[3], StrokeWidth::Thick));
         assert_eq!(e.document().history().undo_len(), 3);
         e.select(None);
         e.set_color(PALETTE[2]);
         assert_eq!(e.document().history().undo_len(), 3, "nothing selected: no undo step");
         drag(&mut e, p(0.0, 200.0), p(100.0, 200.0));
         assert_eq!(e.document().items()[1].style.color, PALETTE[2]);
+    }
+
+    #[test]
+    fn opacity_restyles_the_selection_and_undoes() {
+        let mut e = editor();
+        drag(&mut e, p(0.0, 0.0), p(100.0, 0.0));
+        let undo0 = e.document().history().undo_len();
+        e.set_opacity(40);
+        assert_eq!(e.document().items()[0].style.opacity, 40);
+        assert_eq!(e.document().history().undo_len(), undo0 + 1, "one undo step");
+        e.set_opacity(3);
+        assert_eq!(e.document().items()[0].style.opacity, 10, "clamped");
+        e.undo();
+        assert_eq!(e.document().items()[0].style.opacity, 40);
+        e.undo();
+        assert_eq!(e.document().items()[0].style.opacity, 100);
+        e.redo();
+        assert_eq!(e.document().items()[0].style.opacity, 40);
+        // Selecting mirrors the opacity into the toolbar state; new shapes use it.
+        e.select(None);
+        e.set_opacity(70);
+        drag(&mut e, p(0.0, 200.0), p(100.0, 200.0));
+        assert_eq!(e.document().items()[1].style.opacity, 70);
+        e.select(Some(e.document().items()[0].id));
+        assert_eq!(e.style().opacity, 40);
     }
 
     #[test]

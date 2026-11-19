@@ -38,7 +38,7 @@ use crate::geometry::{Point, Rect, Size};
 /// File magic; the last byte is the container version.
 pub const MAGIC: [u8; 8] = *b"LUMORA\0\x01";
 /// The header schema this build writes.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 /// File extension (without the dot).
 pub const EXTENSION: &str = "lumora";
 /// Upper bound on the JSON header, so a corrupt length can't make us
@@ -271,13 +271,26 @@ pub struct AnnotationDto {
     /// `#RRGGBB`.
     pub color: String,
     pub width: WidthDto,
+    /// Percent, 10–100 (schema 2+; the v1 → v2 migration writes 100).
+    #[serde(default = "full_opacity")]
+    pub opacity: u8,
     #[serde(flatten)]
     pub shape: ShapeDto,
 }
 
+fn full_opacity() -> u8 {
+    crate::annotate::OPACITY_MAX
+}
+
 impl From<&Annotation> for AnnotationDto {
     fn from(a: &Annotation) -> Self {
-        AnnotationDto { id: a.id, color: a.style.color.hex(), width: a.style.width.into(), shape: (&a.shape).into() }
+        AnnotationDto {
+            id: a.id,
+            color: a.style.color.hex(),
+            width: a.style.width.into(),
+            opacity: a.style.opacity,
+            shape: (&a.shape).into(),
+        }
     }
 }
 
@@ -286,7 +299,11 @@ impl TryFrom<AnnotationDto> for Annotation {
     fn try_from(d: AnnotationDto) -> Result<Self, DocError> {
         let color = Rgb8::from_hex(&d.color)
             .ok_or_else(|| DocError::Invalid(format!("annotation {}: bad colour {:?}", d.id, d.color)))?;
-        Ok(Annotation { id: d.id, shape: d.shape.into(), style: Style { color, width: d.width.into() } })
+        if !(crate::annotate::OPACITY_MIN..=crate::annotate::OPACITY_MAX).contains(&d.opacity) {
+            return Err(DocError::Invalid(format!("annotation {}: opacity {} out of 10–100", d.id, d.opacity)));
+        }
+        let style = Style { color, width: d.width.into(), opacity: d.opacity };
+        Ok(Annotation { id: d.id, shape: d.shape.into(), style })
     }
 }
 
@@ -454,7 +471,7 @@ fn check_kinds(value: &Value) -> Result<(), DocError> {
 type MigrationStep = fn(Value) -> Result<Value, DocError>;
 
 /// `MIGRATIONS[n]` upgrades schema `n` to `n + 1`.
-const MIGRATIONS: [MigrationStep; SCHEMA_VERSION as usize] = [migrate_v0_to_v1];
+const MIGRATIONS: [MigrationStep; SCHEMA_VERSION as usize] = [migrate_v0_to_v1, migrate_v1_to_v2];
 
 /// Upgrade a header from schema `from` to [`SCHEMA_VERSION`], one step at a
 /// time. Current-version input is returned unchanged; newer input is an error.
@@ -495,6 +512,19 @@ fn migrate_v0_to_v1(mut json: Value) -> Result<Value, DocError> {
     }
     obj.entry("app_version").or_insert_with(|| Value::from("0.0.0"));
     obj.entry("created_at").or_insert_with(|| Value::from(0));
+    Ok(json)
+}
+
+/// v2 (Lumora 0.8) added per-annotation style fields. v1 files had none of
+/// them, so every annotation gets the value that reproduces its v1 look:
+/// `opacity` 100.
+fn migrate_v1_to_v2(mut json: Value) -> Result<Value, DocError> {
+    let obj = json.as_object_mut().ok_or_else(|| DocError::Invalid("header is not an object".into()))?;
+    if let Some(list) = obj.get_mut("annotations").and_then(Value::as_array_mut) {
+        for item in list.iter_mut().filter_map(Value::as_object_mut) {
+            item.entry("opacity").or_insert_with(|| Value::from(100));
+        }
+    }
     Ok(json)
 }
 
@@ -621,7 +651,10 @@ mod tests {
     fn sample_document() -> Document {
         let mut d = Document::new(IMAGE.size_points());
         for (i, shape) in every_kind().into_iter().enumerate() {
-            let style = Style { color: PALETTE[i % PALETTE.len()], width: StrokeWidth::ALL[i % 3] };
+            let style = Style {
+                opacity: [100, 40, 75][i % 3],
+                ..Style::new(PALETTE[i % PALETTE.len()], StrokeWidth::ALL[i % 3])
+            };
             d.add(shape, style);
         }
         d
@@ -661,8 +694,11 @@ mod tests {
     #[test]
     fn dto_conversions_are_inverse_per_kind() {
         for (i, shape) in every_kind().into_iter().enumerate() {
-            let a =
-                Annotation { id: i as u64 + 1, shape, style: Style { color: PALETTE[3], width: StrokeWidth::Thick } };
+            let a = Annotation {
+                id: i as u64 + 1,
+                shape,
+                style: Style { opacity: 60, ..Style::new(PALETTE[3], StrokeWidth::Thick) },
+            };
             let json = serde_json::to_string(&AnnotationDto::from(&a)).unwrap();
             let back: AnnotationDto = serde_json::from_str(&json).unwrap();
             assert_eq!(Annotation::try_from(back).unwrap(), a, "{json}");
@@ -763,9 +799,9 @@ mod tests {
 
     #[test]
     fn future_schema_is_rejected_clearly() {
-        let json = r#"{"schema_version":2,"app_version":"9.9","created_at":0,"image":{"width_px":1,"height_px":1,"scale":1.0}}"#;
+        let json = r#"{"schema_version":3,"app_version":"9.9","created_at":0,"image":{"width_px":1,"height_px":1,"scale":1.0}}"#;
         let err = LumoraDoc::decode(&with_header(json)).unwrap_err();
-        assert_eq!(err, DocError::FutureSchema { found: 2, supported: 1 });
+        assert_eq!(err, DocError::FutureSchema { found: 3, supported: SCHEMA_VERSION });
         assert!(err.to_string().contains("update Lumora"));
     }
 
@@ -810,7 +846,7 @@ mod tests {
             "items": [{ "id": 3, "type": "step", "color": "#0A84FF", "width": "medium", "center": [10.0, 20.0] }],
         });
         let v1 = migrate(v0.clone(), 0).unwrap();
-        assert_eq!(v1["schema_version"], 1);
+        assert_eq!(v1["schema_version"], SCHEMA_VERSION);
         assert_eq!(v1["annotations"][0]["kind"], "step");
         assert!(v1.get("items").is_none());
 
@@ -819,6 +855,58 @@ mod tests {
         let items = doc.to_annotations().unwrap();
         assert_eq!(items[0].shape, Shape::Step { center: Point::new(10.0, 20.0) });
         assert_eq!(items[0].style.color, PALETTE[3]);
+    }
+
+    /// A header exactly as Lumora 0.7 (schema 1) wrote it.
+    fn v1_header() -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": 1, "app_version": "0.7.0", "created_at": 1_763_000_000,
+            "image": { "width_px": 400, "height_px": 200, "scale": 2.0 },
+            "annotations": [
+                { "id": 1, "color": "#FF3B30", "width": "medium", "kind": "rect",
+                  "rect": { "x": 1.0, "y": 2.0, "w": 30.0, "h": 40.0 }, "rounded": true },
+                { "id": 2, "color": "#0A84FF", "width": "thick", "kind": "arrow", "start": [0.0, 0.0], "end": [50.0, 9.0] },
+                { "id": 3, "color": "#FFCC00", "width": "thin", "kind": "highlighter", "points": [[0.0, 0.0], [9.0, 0.0]] },
+            ],
+        })
+    }
+
+    #[test]
+    fn v1_header_migrates_to_v2_with_its_old_look() {
+        let v2 = migrate(v1_header(), 1).unwrap();
+        assert_eq!(v2["schema_version"], 2);
+        for a in v2["annotations"].as_array().unwrap() {
+            assert_eq!(a["opacity"], 100, "{a}");
+        }
+        let doc = LumoraDoc::decode(&with_header(&v1_header().to_string())).unwrap();
+        assert_eq!(doc.header.schema_version, SCHEMA_VERSION);
+        let items = doc.to_annotations().unwrap();
+        assert_eq!(items.len(), 3);
+        for a in &items {
+            assert_eq!(a.style.opacity, 100);
+        }
+        assert_eq!(items[0].style, Style::new(PALETTE[0], StrokeWidth::Medium));
+        // Re-saving writes the current schema and reads back identically.
+        let again = LumoraDoc::decode(&doc.encode()).unwrap();
+        assert_eq!(again.to_annotations().unwrap(), items);
+    }
+
+    #[test]
+    fn migration_keeps_explicit_v2_values() {
+        let mut h = v1_header();
+        h["annotations"][0]["opacity"] = serde_json::json!(35);
+        let v2 = migrate(h, 1).unwrap();
+        assert_eq!(v2["annotations"][0]["opacity"], 35);
+        assert_eq!(v2["annotations"][1]["opacity"], 100);
+    }
+
+    #[test]
+    fn out_of_range_opacity_is_invalid() {
+        let mut h = v1_header();
+        h["schema_version"] = serde_json::json!(2);
+        h["annotations"][0]["opacity"] = serde_json::json!(5);
+        let doc = LumoraDoc::decode(&with_header(&h.to_string())).unwrap();
+        assert!(matches!(doc.to_annotations(), Err(DocError::Invalid(m)) if m.contains("opacity")));
     }
 
     #[test]

@@ -6,6 +6,20 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Annotation opacity.** A slider in the editor's style bar sets the
+  opacity of an annotation from 10 % to 100 % (one undo step per
+  adjustment; in the "…" menu as 100 / 75 / 50 / 25 % when the toolbar is
+  narrow). Redactions ignore it and stay opaque. The editor and the export
+  draw it from the same display list.
+
+### Changed
+- **`.lumora` schema 2.** Documents now store per-annotation style fields
+  (`opacity`, …). Schema-1 files from 0.3–0.7 open unchanged (migrated with
+  the values that reproduce their look); files saved by 0.8 need 0.8 or
+  later — older builds refuse them with "please update Lumora" instead of
+  dropping the new styles.
+
 ## [0.7.0] - 2026-11-20 (prerelease; awaiting hardware QA)
 
 Scrolling capture driven by your scrolling, keystroke labels that follow

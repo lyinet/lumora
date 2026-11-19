@@ -1,6 +1,6 @@
 //! The annotation editor's model, independent of AppKit.
 //!
-//! * [`style`] — the curated palette and three stroke widths.
+//! * [`style`] — the curated palette, three stroke widths and opacity.
 //! * [`path`] — vector paths, Bézier sampling, freehand smoothing and the
 //!   tapered arrow outline.
 //! * [`shape`] — what each annotation kind stores; bounds, hit-testing,
@@ -25,4 +25,4 @@ pub use document::{Annotation, AnnotationId, Command, Document};
 pub use editor::{Editor, Effect, Input, Key, Tool, ToolOptions};
 pub use render::RenderOp;
 pub use shape::{EditHandle, RedactMode, Shape};
-pub use style::{StrokeWidth, Style, PALETTE};
+pub use style::{StrokeWidth, Style, OPACITY_MAX, OPACITY_MIN, PALETTE};

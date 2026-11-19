@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use lumora_core::annotate::editor::{Tool, ToolOptions};
 use lumora_core::annotate::shape::RedactMode;
-use lumora_core::annotate::style::{StrokeWidth, Style, PALETTE};
+use lumora_core::annotate::style::{StrokeWidth, Style, OPACITY_MAX, OPACITY_MIN, PALETTE};
 use lumora_core::color::Rgb8;
 use lumora_core::geometry::Rect;
 use lumora_core::i18n::{tr, Msg};
@@ -24,9 +24,9 @@ use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{MainThreadMarker, MainThreadOnly};
 use objc2_app_kit::{
-    NSAnimatablePropertyContainer, NSAnimationContext, NSAutoresizingMaskOptions, NSButton, NSColor,
+    NSAnimatablePropertyContainer, NSAnimationContext, NSAutoresizingMaskOptions, NSButton, NSColor, NSControlSize,
     NSControlStateValueOff, NSControlStateValueOn, NSImage, NSImageSymbolConfiguration, NSMenu, NSMenuItem,
-    NSSegmentSwitchTracking, NSSegmentedControl, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
+    NSSegmentSwitchTracking, NSSegmentedControl, NSSlider, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
     NSVisualEffectState, NSVisualEffectView,
 };
 use objc2_foundation::{NSArray, NSString};
@@ -43,6 +43,8 @@ pub enum ToolbarAction {
     Color(Rgb8),
     CustomColor,
     Width(StrokeWidth),
+    /// Opacity in percent (10–100), from the slider on mouse-up.
+    Opacity(u8),
     /// The contextual checkbox (curved / rounded / background).
     Toggle(bool),
     Redact(RedactMode),
@@ -69,6 +71,7 @@ enum SlotKind {
     Swatch(Rgb8),
     Custom,
     Widths,
+    Opacity,
     /// The active tool's options (checkbox, redaction mode, crop buttons).
     Options,
 }
@@ -124,6 +127,7 @@ pub struct Toolbar {
     swatches: Vec<(Rgb8, Retained<NSButton>)>,
     custom: Retained<NSButton>,
     widths: Retained<NSSegmentedControl>,
+    opacity: Retained<NSSlider>,
     toggle: Retained<NSButton>,
     redact: Retained<NSSegmentedControl>,
     apply_crop: Retained<NSButton>,
@@ -329,7 +333,36 @@ impl Toolbar {
         view.addSubview(&widths);
         slot(SlotKind::Widths, vec![as_view(&widths)], x);
         targets.push(target);
-        x += wf.size.width + 12.0;
+        x += wf.size.width + 10.0;
+
+        // Opacity. Not continuous: one undo step per adjustment, not one per
+        // pixel of slider travel.
+        let h = on.clone();
+        let target = ActionTarget::new(mtm, move |sender: &AnyObject| {
+            if let Some(s) = sender.downcast_ref::<NSSlider>() {
+                h(ToolbarAction::Opacity(s.doubleValue().round().clamp(0.0, 100.0) as u8));
+            }
+        });
+        // SAFETY: target kept alive by the toolbar.
+        let opacity = unsafe {
+            NSSlider::sliderWithValue_minValue_maxValue_target_action(
+                f64::from(OPACITY_MAX),
+                f64::from(OPACITY_MIN),
+                f64::from(OPACITY_MAX),
+                Some(&target),
+                Some(ActionTarget::action()),
+                mtm,
+            )
+        };
+        opacity.setControlSize(NSControlSize::Small);
+        opacity.setContinuous(false);
+        opacity.setToolTip(Some(&NSString::from_str(&opacity_tip(OPACITY_MAX))));
+        let ow = 64.0;
+        opacity.setFrame(cg_rect(Rect::new(x, (size::EDITOR_TOOLBAR_HEIGHT - 20.0) / 2.0, ow, 20.0)));
+        view.addSubview(&opacity);
+        slot(SlotKind::Opacity, vec![as_view(&opacity)], x);
+        targets.push(target);
+        x += ow + 12.0;
 
         // Contextual options: one checkbox, the redaction mode, or crop buttons.
         let h = on.clone();
@@ -496,6 +529,7 @@ impl Toolbar {
             swatches,
             custom,
             widths,
+            opacity,
             toggle,
             redact,
             apply_crop,
@@ -662,6 +696,15 @@ impl Toolbar {
                     w.setEnabled(!crop && tool != Tool::Redact && tool != Tool::Spotlight);
                     menu.addItem(&w);
                 }
+                SlotKind::Opacity => {
+                    let items = OPACITY_PRESETS
+                        .iter()
+                        .map(|p| item(&format!("{p}%"), None, style.opacity == *p, ToolbarAction::Opacity(*p)))
+                        .collect();
+                    let o = submenu(tr(Msg::ToolbarOpacity), items);
+                    o.setEnabled(colorful);
+                    menu.addItem(&o);
+                }
                 SlotKind::Options => {
                     if section || !colors.is_empty() {
                         menu.addItem(&NSMenuItem::separatorItem(mtm));
@@ -787,6 +830,8 @@ impl Toolbar {
         let tint = if custom_selected { crate::util::ns_rgb8(style.color) } else { NSColor::labelColor() };
         self.custom.setContentTintColor(Some(&tint));
         self.widths.setSelectedSegment(style.width.index() as isize);
+        self.opacity.setDoubleValue(f64::from(style.opacity));
+        self.opacity.setToolTip(Some(&NSString::from_str(&opacity_tip(style.opacity))));
 
         let colorful = tool.uses_color() || has_selection;
         let crop = tool == Tool::Crop;
@@ -796,9 +841,18 @@ impl Toolbar {
         }
         self.custom.setEnabled(colorful && !crop);
         self.widths.setEnabled(!crop && tool != Tool::Redact && tool != Tool::Spotlight);
+        self.opacity.setEnabled(colorful && !crop);
         self.undo.setEnabled(can_undo);
         self.redo.setEnabled(can_redo);
     }
+}
+
+/// Opacity steps offered when the slider is in the "…" menu.
+const OPACITY_PRESETS: [u8; 4] = [100, 75, 50, 25];
+
+/// "Opacity: 60%".
+fn opacity_tip(percent: u8) -> String {
+    lumora_core::i18n::trf(Msg::OpacityTip, &[&percent])
 }
 
 /// The contextual checkbox for `tool`: its title and state.

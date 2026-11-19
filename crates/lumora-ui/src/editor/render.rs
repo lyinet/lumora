@@ -314,12 +314,17 @@ fn draw_text(ctx: &CGContext, op: &TextOp, scale: f64) {
     } else {
         rect = Rect::new(rect.min_x(), rect.min_y(), rect.width() + 2.0, rect.height() + 2.0);
     }
+    // The annotation's opacity applies to glyphs and their shadow alike, as
+    // the live layer's `opacity` does.
+    CGContext::save_g_state(Some(ctx));
+    CGContext::set_alpha(Some(ctx), op.alpha);
     let gc = NSGraphicsContext::graphicsContextWithCGContext_flipped(ctx, true);
     NSGraphicsContext::saveGraphicsState_class();
     NSGraphicsContext::setCurrentContext(Some(&gc));
     // SAFETY: attributes dictionary built above.
     unsafe { NSString::from_str(&op.text).drawInRect_withAttributes(cg_rect(rect), Some(&attrs)) };
     NSGraphicsContext::restoreGraphicsState_class();
+    CGContext::restore_g_state(Some(ctx));
 }
 
 /// Flatten the document: base image + annotations, cropped, at the

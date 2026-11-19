@@ -324,6 +324,8 @@ messages! {
     StrokeThin => "Thin (1)", "细（1）";
     StrokeMedium => "Medium (2)", "中（2）";
     StrokeThick => "Thick (3)", "粗（3）";
+    ToolbarOpacity => "Opacity", "不透明度";
+    OpacityTip => "Opacity: {0}%", "不透明度：{0}%";
     Undo => "Undo (⌘Z)", "撤销（⌘Z）";
     Redo => "Redo (⇧⌘Z)", "重做（⇧⌘Z）";
     CopyImage => "Copy (⌘C)", "拷贝（⌘C）";

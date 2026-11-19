@@ -59,6 +59,8 @@ pub struct TextOp {
     pub bold: bool,
     pub centered: bool,
     pub shadow: bool,
+    /// 0–1, from the annotation's opacity.
+    pub alpha: f64,
 }
 
 /// One drawing operation.
@@ -105,7 +107,32 @@ fn fill(path: Path, color: Rgb8, alpha: f64, shadow: bool) -> RenderOp {
 
 /// Ops for one annotation. `canvas` is the full image rect (the spotlight
 /// dims all of it); `step` is the badge number for step annotations.
+///
+/// The annotation's opacity is folded into every op's `alpha` here, so the
+/// live layers and the export (which both just honour `alpha`) can't
+/// disagree. Redactions stay opaque whatever the opacity says.
 pub fn render(a: &Annotation, canvas: Rect, step: Option<u32>) -> Vec<RenderOp> {
+    let mut ops = render_opaque(a, canvas, step);
+    apply_opacity(&mut ops, a.style.alpha());
+    ops
+}
+
+/// Multiply every shape's and text's alpha by `alpha` (redactions are left
+/// alone).
+pub fn apply_opacity(ops: &mut [RenderOp], alpha: f64) {
+    if alpha >= 1.0 {
+        return;
+    }
+    for op in ops {
+        match op {
+            RenderOp::Shape(s) => s.alpha *= alpha,
+            RenderOp::Text(t) => t.alpha *= alpha,
+            RenderOp::Redact { .. } => {}
+        }
+    }
+}
+
+fn render_opaque(a: &Annotation, canvas: Rect, step: Option<u32>) -> Vec<RenderOp> {
     let style = &a.style;
     let w = style.width.points();
     match &a.shape {
@@ -149,6 +176,7 @@ pub fn render(a: &Annotation, canvas: Rect, step: Option<u32>) -> Vec<RenderOp> 
                 bold: true,
                 centered: false,
                 shadow: !*background,
+                alpha: 1.0,
             }));
             ops
         }
@@ -173,6 +201,7 @@ pub fn render(a: &Annotation, canvas: Rect, step: Option<u32>) -> Vec<RenderOp> 
                     bold: true,
                     centered: true,
                     shadow: false,
+                    alpha: 1.0,
                 }),
             ]
         }
@@ -234,7 +263,7 @@ mod tests {
     use crate::geometry::Size;
 
     fn ann(shape: Shape) -> Annotation {
-        Annotation { id: 1, shape, style: Style { color: PALETTE[3], width: StrokeWidth::Medium } }
+        Annotation { id: 1, shape, style: Style::new(PALETTE[3], StrokeWidth::Medium) }
     }
 
     const CANVAS: Rect = Rect::new(0.0, 0.0, 400.0, 300.0);
@@ -338,6 +367,38 @@ mod tests {
                 amount: REDACT_BLUR
             }]
         );
+    }
+
+    #[test]
+    fn opacity_scales_every_op_but_redactions() {
+        let mut a = ann(Shape::Step { center: Point::new(50.0, 50.0) });
+        let opaque = render(&a, CANVAS, Some(1));
+        a.style.opacity = 50;
+        let half = render(&a, CANVAS, Some(1));
+        assert_eq!(opaque.len(), half.len());
+        for (o, h) in opaque.iter().zip(&half) {
+            match (o, h) {
+                (RenderOp::Shape(o), RenderOp::Shape(h)) => {
+                    assert!((h.alpha - o.alpha * 0.5).abs() < 1e-12);
+                    assert_eq!(o.path, h.path, "geometry unchanged");
+                }
+                (RenderOp::Text(o), RenderOp::Text(h)) => assert!((h.alpha - o.alpha * 0.5).abs() < 1e-12),
+                _ => panic!("op kinds differ"),
+            }
+        }
+        // The highlighter's own translucency compounds with the opacity.
+        let mut hl = ann(Shape::Highlighter { points: vec![Point::ZERO, Point::new(9.0, 0.0)] });
+        hl.style.opacity = 50;
+        assert!(
+            matches!(&render(&hl, CANVAS, None)[0], RenderOp::Shape(s) if (s.alpha - HIGHLIGHTER_ALPHA * 0.5).abs() < 1e-12)
+        );
+        // Redactions never become see-through, and a bogus 0 % is clamped.
+        let mut r = ann(Shape::Redact { rect: Rect::new(0.0, 0.0, 10.0, 10.0), mode: RedactMode::Pixelate });
+        r.style.opacity = 10;
+        assert_eq!(render(&r, CANVAS, None), render(&ann(r.shape.clone()), CANVAS, None));
+        let mut zero = ann(Shape::Line { start: Point::ZERO, end: Point::new(10.0, 0.0) });
+        zero.style.opacity = 0;
+        assert!(matches!(&render(&zero, CANVAS, None)[0], RenderOp::Shape(s) if (s.alpha - 0.1).abs() < 1e-12));
     }
 
     #[test]

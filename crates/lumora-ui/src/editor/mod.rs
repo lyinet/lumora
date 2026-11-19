@@ -771,6 +771,7 @@ impl State {
                 ToolbarAction::Tool(t) => ed.set_tool(t),
                 ToolbarAction::Color(c) => ed.set_color(c),
                 ToolbarAction::Width(w) => ed.set_width(w),
+                ToolbarAction::Opacity(o) => ed.set_opacity(o),
                 ToolbarAction::Toggle(on) => {
                     let mut o = ed.options();
                     match ed.tool() {
