@@ -1,9 +1,12 @@
 //! Scrolling capture: choose an area (live overlay), then the user scrolls
-//! while Lumora screenshots that area every [`TICK`] seconds and stitches
-//! the frames that moved (`lumora_core::scroll_capture`). No synthetic
-//! scroll events, so no Accessibility permission. Done / ↩ (or the shortcut
-//! again) hands the tall image to the normal capture pipeline; Cancel / Esc
-//! drops it.
+//! while Lumora screenshots that area and stitches the frames that moved
+//! (`lumora_core::scroll_capture`). Frames follow the user's scroll-wheel /
+//! trackpad events inside the area (a global `NSEvent` monitor, see
+//! `lumora_ui::scroll_monitor`; `lumora_core::scroll_trigger` decides when),
+//! with a timer as fallback for scrolling that sends no wheel events; the
+//! wheel deltas go to the stitcher as hints. No synthetic scroll events and
+//! no extra permission. Done / ↩ (or the shortcut again) hands the tall
+//! image to the normal capture pipeline; Cancel / Esc drops it.
 //!
 //! The session never ends on its own before the content has scrolled:
 //! identical frames, in-place changes (a click that focuses the window, a
@@ -13,7 +16,7 @@
 //! [`MAX_FRAME_ERRORS`] failed screenshots in a row. Every end is logged at
 //! info with its reason.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -24,18 +27,22 @@ use lumora_capture::screenshot::{self, ShotTarget};
 use lumora_capture::CaptureError;
 use lumora_core::geometry::Rect;
 use lumora_core::i18n::{tr, Msg};
-use lumora_core::scroll_capture::{Frame, MatchInfo, Push, ScrollStitcher, Summary, LOST_LIMIT, MAX_HEIGHT};
+use lumora_core::scroll_capture::{
+    Frame, MatchInfo, Push, ScrollHint, ScrollStitcher, Summary, LOST_LIMIT, MAX_HEIGHT,
+};
+use lumora_core::scroll_trigger::{self, ScrollScheduler, Trigger, WheelDelta, POLL_INTERVAL};
 use lumora_core::selection::Target;
 use lumora_ui::recording_hud::RecordingBorder;
 use lumora_ui::scroll_hud::ScrollControl;
+use lumora_ui::scroll_monitor::{ScrollMonitor, WheelInfo};
 use lumora_ui::util;
 use objc2::rc::Retained;
 use objc2_foundation::NSTimer;
 
 use crate::app::{on_main, App, Mode, Notice};
 
-/// Seconds between frames.
-const TICK: f64 = 0.15;
+/// Wheel events logged one by one (debug) before only the frames are.
+const DEBUG_EVENTS: usize = 40;
 
 /// Seconds after the first content fetch before the one frames use, so the
 /// control and border are on screen in it.
@@ -60,6 +67,8 @@ struct FrameOutcome {
     summary: Summary,
     /// Pixels per point of the frame.
     scale: f64,
+    /// Why the frame was taken.
+    trigger: Trigger,
 }
 
 /// Restarted / lost frames logged at info (with how they were matched)
@@ -85,8 +94,14 @@ pub struct ScrollSession {
     _border: RecordingBorder,
     timer: Retained<NSTimer>,
     shared: Arc<Shared>,
+    /// When frames are taken (main thread only).
+    scheduler: RefCell<ScrollScheduler>,
+    /// Wheel events from other apps; removed with the session.
+    _monitor: ScrollMonitor,
     /// The captured area, global top-left points, whole pixels.
     area: Rect,
+    /// The same area in AppKit global points (wheel events' space).
+    appkit_area: Rect,
     started: std::time::Instant,
     /// Failed screenshots in a row.
     errors: Cell<u32>,
@@ -134,17 +149,29 @@ impl App {
             content: Mutex::new(None),
         });
         let weak = Rc::downgrade(self);
-        let timer = util::schedule_timer(TICK, true, move || {
+        let timer = util::schedule_timer(POLL_INTERVAL, true, move || {
             let Some(app) = weak.upgrade() else { return false };
             app.scroll_tick()
         });
-        log::info!("scrolling capture started on a {kind}: {area:?}");
+        let weak = Rc::downgrade(self);
+        let monitor = ScrollMonitor::start(self.mtm, move |w| {
+            if let Some(app) = weak.upgrade() {
+                app.on_wheel(w);
+            }
+        });
+        log::info!(
+            "scrolling capture started on a {kind}: {area:?}; scroll-wheel monitor {}",
+            if monitor.is_active() { "on" } else { "unavailable, timer only" }
+        );
         self.set_mode(Mode::Scrolling(Box::new(ScrollSession {
             control,
             _border: border,
             timer,
             shared,
+            scheduler: RefCell::new(ScrollScheduler::default()),
+            _monitor: monitor,
             area,
+            appkit_area: appkit,
             started: std::time::Instant::now(),
             errors: Cell::new(0),
         })));
@@ -200,8 +227,34 @@ impl App {
         });
     }
 
-    /// Take the next frame unless one is still in flight. `false` stops the
-    /// timer (the session ended).
+    /// A wheel event anywhere: count it if it is over the area.
+    fn on_wheel(self: &Rc<Self>, w: WheelInfo) {
+        let mode = self.mode.borrow();
+        let Mode::Scrolling(s) = &*mode else { return };
+        let Ok(mut sched) = s.scheduler.try_borrow_mut() else { return };
+        if !scroll_trigger::in_area(&s.appkit_area, w.point) {
+            sched.ignored();
+            return;
+        }
+        sched.wheel(s.started.elapsed().as_secs_f64(), w.event);
+        if sched.counts().events <= DEBUG_EVENTS {
+            log::debug!(
+                "scrolling capture: wheel Δy {:.1} {}{}",
+                w.event.delta_y,
+                if w.event.precise { "pt" } else { "lines" },
+                if w.event.momentum_end {
+                    " (momentum end)"
+                } else if w.event.momentum {
+                    " (momentum)"
+                } else {
+                    ""
+                }
+            );
+        }
+    }
+
+    /// Take the next frame if the scheduler wants one and none is in
+    /// flight. `false` stops the timer (the session ended).
     fn scroll_tick(self: &Rc<Self>) -> bool {
         let mode = self.mode.borrow();
         let Mode::Scrolling(s) = &*mode else { return false };
@@ -210,9 +263,38 @@ impl App {
             Err(_) => return false,
         };
         let Some(content) = content else { return true };
+        if s.shared.busy.load(Ordering::Acquire) {
+            return true;
+        }
+        let now = s.started.elapsed().as_secs_f64();
+        let Ok(mut sched) = s.scheduler.try_borrow_mut() else { return true };
+        let Some(trigger) = sched.poll(now) else { return true };
         if s.shared.busy.swap(true, Ordering::AcqRel) {
             return true;
         }
+        let delta = sched.captured(now, trigger);
+        drop(sched);
+        if trigger.is_scroll() {
+            log::debug!(
+                "scrolling capture: frame by {} at {now:.2} s; wheel Δy {:.1} {} over {} event(s)",
+                trigger.label(),
+                delta.delta_y,
+                if delta.precise { "pt" } else { "lines" },
+                delta.events
+            );
+        }
+        self.take_scroll_frame(s, content, trigger, delta);
+        true
+    }
+
+    /// Screenshot the area and stitch it (off the main thread).
+    fn take_scroll_frame(
+        self: &Rc<Self>,
+        s: &ScrollSession,
+        content: Arc<ShareableContent>,
+        trigger: Trigger,
+        delta: WheelDelta,
+    ) {
         let shared = s.shared.clone();
         let opts = self.shot_options();
         screenshot::capture(&content, ShotTarget::Area(s.area), opts, move |res| {
@@ -223,7 +305,8 @@ impl App {
                         Some(frame) => match shared.stitch.lock() {
                             Ok(mut st) => {
                                 st.1 = shot.scale;
-                                let push = st.0.push(frame);
+                                let hint = ScrollHint::from_wheel(&delta, shot.scale);
+                                let push = st.0.push_hinted(frame, hint);
                                 Some(Ok(FrameOutcome {
                                     push,
                                     frames: st.0.frames(),
@@ -231,6 +314,7 @@ impl App {
                                     matched: st.0.last_match().copied(),
                                     summary: st.0.summary(),
                                     scale: shot.scale,
+                                    trigger,
                                 }))
                             }
                             Err(_) => None,
@@ -246,7 +330,6 @@ impl App {
                 on_main(move |app| app.on_scroll_frame(outcome));
             }
         });
-        true
     }
 
     fn on_scroll_frame(self: &Rc<Self>, outcome: Result<FrameOutcome, CaptureError>) {
@@ -257,6 +340,14 @@ impl App {
                 Ok(o) => {
                     s.errors.set(0);
                     s.control.set_frames(o.frames);
+                    // The content moved on a timer frame: scrolling without
+                    // wheel events (keys, scroll bar); keep the timer fast.
+                    let moved = matches!(o.push, Push::Appended(_) | Push::Prepended(_) | Push::Moved);
+                    if moved && o.trigger == Trigger::Fallback {
+                        if let Ok(mut sched) = s.scheduler.try_borrow_mut() {
+                            sched.moved_without_wheel(s.started.elapsed().as_secs_f64());
+                        }
+                    }
                     Ok(o)
                 }
                 Err(e) => {
@@ -285,11 +376,12 @@ impl App {
                     self.fail(e);
                 }
             }
-            Ok(FrameOutcome { push, frames, scrolled, matched, summary, scale }) => {
+            Ok(FrameOutcome { push, frames, scrolled, matched, summary, scale, trigger }) => {
                 let matched = matched.map_or_else(|| "first frame".to_string(), |m| m.to_string());
                 log::debug!(
-                    "scrolling capture: frame {}: {push:?}; {matched}; {}x{} px @{scale}x, {frames} kept",
+                    "scrolling capture: frame {} ({}): {push:?}; {matched}; {}x{} px @{scale}x, {frames} kept",
                     summary.pushed,
+                    trigger.label(),
                     summary.width,
                     summary.height
                 );
@@ -360,7 +452,8 @@ impl App {
     /// is logged.
     pub fn finish_scrolling_capture(self: &Rc<Self>, reason: &str) {
         let Some(session) = self.end_scrolling() else { return };
-        let ScrollSession { shared, area, started, .. } = *session;
+        let ScrollSession { shared, area, started, scheduler, .. } = *session;
+        let triggers = scheduler.into_inner().counts();
         let (frames, height, summary, last) = shared
             .stitch
             .lock()
@@ -374,6 +467,7 @@ impl App {
             "scrolling capture summary: {summary}; last match: {}",
             last.map_or_else(|| "none".to_string(), |m| m.to_string())
         );
+        log::info!("scrolling capture frames: {triggers}");
         DispatchQueue::global_queue(GlobalQueueIdentifier::QualityOfService(DispatchQoS::UserInitiated)).exec_async(
             move || {
                 // Waits for a frame still being stitched.

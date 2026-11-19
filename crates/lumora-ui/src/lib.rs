@@ -48,6 +48,8 @@ pub mod recording_hud;
 #[cfg(target_os = "macos")]
 pub mod scroll_hud;
 #[cfg(target_os = "macos")]
+pub mod scroll_monitor;
+#[cfg(target_os = "macos")]
 pub mod settings_window;
 #[cfg(target_os = "macos")]
 pub mod shutter;
