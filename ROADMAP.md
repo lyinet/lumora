@@ -127,8 +127,9 @@
 - Developer ID signing + notarization in CI (stable code identity, so
   Screen Recording, Input Monitoring and Keychain trust survive updates).
 - Keyboard-layout-aware keystroke labels (today: US layout only).
-- Scroll-wheel driven scrolling capture (capture on scroll events instead
-  of a fixed 150 ms timer).
+- ✅ Scroll-wheel driven scrolling capture (capture on scroll events instead
+  of a fixed 150 ms timer; wheel deltas as stitch hints) — built, awaiting
+  hardware QA.
 - Live preview of burned-in subtitles in the subtitles window.
 
 ## Later

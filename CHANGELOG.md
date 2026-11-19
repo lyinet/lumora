@@ -6,6 +6,26 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **Scrolling capture follows your scrolling.** Frames are taken on
+  scroll-wheel and trackpad events over the captured area (at most every
+  ~120 ms while scrolling, one ~70 ms after the last event, one when a
+  trackpad fling ends) instead of every 150 ms; scrolling elsewhere on
+  screen is ignored. A timer stays as a fallback for scrolling without wheel
+  events (keys, the scroll bar): 150 ms until the first wheel event, 400 ms
+  after, fast again whenever the content moves without one. Events are
+  observed with a global AppKit monitor, which needs no permission for
+  scroll events (no Accessibility, no Input Monitoring).
+- **Scroll direction and distance guide the stitcher.** The wheel deltas
+  since the last frame give an expected shift (calibrated against the
+  shifts actually found), whose range is searched first, so repeating
+  content (identical list rows) lines up where you scrolled. Weak matches
+  against a well-established scroll direction are skipped (never two in a
+  row). Frames without wheel events are matched exactly as before.
+- The session summary in the log now counts frames taken on scroll events
+  vs. by the timer, wheel events inside / outside the area, and hinted
+  frames; debug logging adds a line per scroll-triggered frame.
+
 ## [0.6.3] - 2026-11-18 (prerelease; scrolling-capture fixes)
 
 Scrolling capture (⌥⇧S) still failed on a real Mac (Mac mini M4, macOS
