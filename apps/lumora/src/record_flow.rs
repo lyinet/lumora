@@ -10,7 +10,9 @@
 //! With the keystroke HUD on (Settings → Recording, off by default), a
 //! listen-only event tap feeds shortcuts and special keys to a pill that is
 //! also allowed into the video. Plain typing is never shown and nothing is
-//! stored; the tap exists only while recording.
+//! stored; the tap exists only while recording. Key characters follow the
+//! keyboard layout (read at the start of each recording and again whenever
+//! the input source changes), with the US table as fallback.
 
 use std::cell::{Cell, RefCell};
 use std::path::Path;
@@ -30,6 +32,7 @@ use lumora_core::recording::{Event, Phase};
 use lumora_core::selection::Target;
 use lumora_ui::click_overlay::{ClickInfo, ClickMonitor, ClickOverlay};
 use lumora_ui::countdown::Countdown;
+use lumora_ui::key_layout::LayoutTranslator;
 use lumora_ui::keystroke_hud::KeystrokeHud;
 use lumora_ui::recording_hud::{RecordingBorder, StopControl};
 use lumora_ui::util;
@@ -60,12 +63,18 @@ impl KeystrokeSession {
     fn start(mtm: objc2::MainThreadMarker, area: Rect, position: HudPosition) -> Option<KeystrokeSession> {
         let hud = KeystrokeHud::show(mtm, area, position);
         let feed = RefCell::new(KeystrokeFeed::new());
+        // Layouts are read now (each session) and after input-source changes.
+        let layout = LayoutTranslator::new();
+        let (current, ascii) = layout.source_ids();
+        log::info!("keystroke HUD layouts: {current:?} (⌘/⌃: {ascii:?})");
+        let layout = RefCell::new(layout);
         let h = hud.clone();
         let tap = KeyTap::start(move |e: KeyEvent| {
             let Ok(mut feed) = feed.try_borrow_mut() else { return };
             let label = match e {
                 KeyEvent::KeyDown { keycode, flags, .. } => {
-                    feed.key_down(keycode, KeyMods::from_cg_flags(flags), util::now())
+                    let Ok(mut layout) = layout.try_borrow_mut() else { return };
+                    feed.key_down_with(keycode, KeyMods::from_cg_flags(flags), util::now(), &mut *layout)
                 }
                 KeyEvent::FlagsChanged { flags } => feed.flags_changed(KeyMods::from_cg_flags(flags), util::now()),
             };

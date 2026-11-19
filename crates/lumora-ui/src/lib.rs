@@ -34,6 +34,8 @@ pub mod history_window;
 #[cfg(target_os = "macos")]
 pub mod icon;
 #[cfg(target_os = "macos")]
+pub mod key_layout;
+#[cfg(target_os = "macos")]
 pub mod keystroke_hud;
 #[cfg(target_os = "macos")]
 pub mod onboarding;
