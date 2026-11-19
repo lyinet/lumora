@@ -80,7 +80,37 @@ pub fn clamp_opacity(percent: u8) -> u8 {
     percent.clamp(OPACITY_MIN, OPACITY_MAX)
 }
 
-/// Colour, width and opacity, shared by every annotation kind.
+/// The inside of a rectangle or ellipse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Fill {
+    /// Outline only (the classic look).
+    #[default]
+    None,
+    /// Filled with the ink colour.
+    Solid,
+    /// Filled with the ink colour at [`FILL_TRANSLUCENT_ALPHA`].
+    Translucent,
+}
+
+/// Alpha of a translucent fill (before the annotation's opacity).
+pub const FILL_TRANSLUCENT_ALPHA: f64 = 0.3;
+
+impl Fill {
+    pub const ALL: [Fill; 3] = [Fill::None, Fill::Solid, Fill::Translucent];
+
+    /// Alpha of the fill paint, or `None` for no fill.
+    pub fn alpha(self) -> Option<f64> {
+        match self {
+            Fill::None => None,
+            Fill::Solid => Some(1.0),
+            Fill::Translucent => Some(FILL_TRANSLUCENT_ALPHA),
+        }
+    }
+}
+
+/// Colour, width, opacity and the per-kind looks, shared by every
+/// annotation kind. Fields a kind doesn't use are ignored by it (a pen
+/// stroke has no fill).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Style {
     pub color: Rgb8,
@@ -88,18 +118,21 @@ pub struct Style {
     /// Opacity of the whole annotation in percent, 10–100. Redactions
     /// ignore it (a see-through redaction would leak what it hides).
     pub opacity: u8,
+    /// Rectangles and ellipses only.
+    pub fill: Fill,
 }
 
 impl Default for Style {
     fn default() -> Self {
-        Style { color: PALETTE[0], width: StrokeWidth::Medium, opacity: OPACITY_MAX }
+        Style::new(PALETTE[0], StrokeWidth::Medium)
     }
 }
 
 impl Style {
-    /// A style with `color` and `width` at full opacity.
+    /// A style with `color` and `width` and every other field at its
+    /// default (opaque, unfilled …).
     pub const fn new(color: Rgb8, width: StrokeWidth) -> Style {
-        Style { color, width, opacity: OPACITY_MAX }
+        Style { color, width, opacity: OPACITY_MAX, fill: Fill::None }
     }
 
     /// Opacity as a 0.1–1.0 multiplier (clamped, so a bad value from a
@@ -147,5 +180,13 @@ mod tests {
         assert!((s.alpha() - 0.55).abs() < 1e-12);
         assert_eq!(clamp_opacity(5), OPACITY_MIN);
         assert_eq!(clamp_opacity(70), 70);
+    }
+
+    #[test]
+    fn fills() {
+        assert_eq!(Style::default().fill, Fill::None);
+        assert_eq!(Fill::None.alpha(), None);
+        assert_eq!(Fill::Solid.alpha(), Some(1.0));
+        assert!(Fill::Translucent.alpha().unwrap() < 0.5);
     }
 }

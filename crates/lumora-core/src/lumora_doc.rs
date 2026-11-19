@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::annotate::{Annotation, AnnotationId, Document, RedactMode, Shape, StrokeWidth, Style};
+use crate::annotate::{Annotation, AnnotationId, Document, Fill, RedactMode, Shape, StrokeWidth, Style};
 use crate::beautify::BeautifyStyle;
 use crate::color::Rgb8;
 use crate::geometry::{Point, Rect, Size};
@@ -161,6 +161,35 @@ impl From<RedactModeDto> for RedactMode {
     }
 }
 
+/// Fill of a rectangle / ellipse (schema 2+).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FillDto {
+    #[default]
+    None,
+    Solid,
+    Translucent,
+}
+
+impl From<Fill> for FillDto {
+    fn from(f: Fill) -> Self {
+        match f {
+            Fill::None => FillDto::None,
+            Fill::Solid => FillDto::Solid,
+            Fill::Translucent => FillDto::Translucent,
+        }
+    }
+}
+impl From<FillDto> for Fill {
+    fn from(f: FillDto) -> Self {
+        match f {
+            FillDto::None => Fill::None,
+            FillDto::Solid => Fill::Solid,
+            FillDto::Translucent => Fill::Translucent,
+        }
+    }
+}
+
 /// The geometry of one annotation, tagged by `"kind"`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -274,6 +303,9 @@ pub struct AnnotationDto {
     /// Percent, 10–100 (schema 2+; the v1 → v2 migration writes 100).
     #[serde(default = "full_opacity")]
     pub opacity: u8,
+    /// Rectangles and ellipses (schema 2+; migration writes `"none"`).
+    #[serde(default)]
+    pub fill: FillDto,
     #[serde(flatten)]
     pub shape: ShapeDto,
 }
@@ -289,6 +321,7 @@ impl From<&Annotation> for AnnotationDto {
             color: a.style.color.hex(),
             width: a.style.width.into(),
             opacity: a.style.opacity,
+            fill: a.style.fill.into(),
             shape: (&a.shape).into(),
         }
     }
@@ -302,7 +335,7 @@ impl TryFrom<AnnotationDto> for Annotation {
         if !(crate::annotate::OPACITY_MIN..=crate::annotate::OPACITY_MAX).contains(&d.opacity) {
             return Err(DocError::Invalid(format!("annotation {}: opacity {} out of 10–100", d.id, d.opacity)));
         }
-        let style = Style { color, width: d.width.into(), opacity: d.opacity };
+        let style = Style { color, width: d.width.into(), opacity: d.opacity, fill: d.fill.into() };
         Ok(Annotation { id: d.id, shape: d.shape.into(), style })
     }
 }
@@ -517,12 +550,13 @@ fn migrate_v0_to_v1(mut json: Value) -> Result<Value, DocError> {
 
 /// v2 (Lumora 0.8) added per-annotation style fields. v1 files had none of
 /// them, so every annotation gets the value that reproduces its v1 look:
-/// `opacity` 100.
+/// `opacity` 100, `fill` none.
 fn migrate_v1_to_v2(mut json: Value) -> Result<Value, DocError> {
     let obj = json.as_object_mut().ok_or_else(|| DocError::Invalid("header is not an object".into()))?;
     if let Some(list) = obj.get_mut("annotations").and_then(Value::as_array_mut) {
         for item in list.iter_mut().filter_map(Value::as_object_mut) {
             item.entry("opacity").or_insert_with(|| Value::from(100));
+            item.entry("fill").or_insert_with(|| Value::from("none"));
         }
     }
     Ok(json)
@@ -653,6 +687,7 @@ mod tests {
         for (i, shape) in every_kind().into_iter().enumerate() {
             let style = Style {
                 opacity: [100, 40, 75][i % 3],
+                fill: Fill::ALL[i % 3],
                 ..Style::new(PALETTE[i % PALETTE.len()], StrokeWidth::ALL[i % 3])
             };
             d.add(shape, style);
@@ -697,7 +732,7 @@ mod tests {
             let a = Annotation {
                 id: i as u64 + 1,
                 shape,
-                style: Style { opacity: 60, ..Style::new(PALETTE[3], StrokeWidth::Thick) },
+                style: Style { opacity: 60, fill: Fill::Translucent, ..Style::new(PALETTE[3], StrokeWidth::Thick) },
             };
             let json = serde_json::to_string(&AnnotationDto::from(&a)).unwrap();
             let back: AnnotationDto = serde_json::from_str(&json).unwrap();
@@ -877,6 +912,7 @@ mod tests {
         assert_eq!(v2["schema_version"], 2);
         for a in v2["annotations"].as_array().unwrap() {
             assert_eq!(a["opacity"], 100, "{a}");
+            assert_eq!(a["fill"], "none", "{a}");
         }
         let doc = LumoraDoc::decode(&with_header(&v1_header().to_string())).unwrap();
         assert_eq!(doc.header.schema_version, SCHEMA_VERSION);
@@ -884,6 +920,7 @@ mod tests {
         assert_eq!(items.len(), 3);
         for a in &items {
             assert_eq!(a.style.opacity, 100);
+            assert_eq!(a.style.fill, Fill::None);
         }
         assert_eq!(items[0].style, Style::new(PALETTE[0], StrokeWidth::Medium));
         // Re-saving writes the current schema and reads back identically.

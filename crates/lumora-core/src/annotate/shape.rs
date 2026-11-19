@@ -7,7 +7,7 @@ use crate::selection::constrain_aspect;
 use super::path::{
     arrow_centerline, arrow_outline, distance_to_polyline, point_in_polygon, quad_point, Path, CURVE_BULGE,
 };
-use super::style::Style;
+use super::style::{Fill, Style};
 
 /// How a redaction hides what's under it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
@@ -175,11 +175,9 @@ impl Shape {
             Shape::Line { start, end } => distance_to_polyline(p, &[*start, *end]) <= reach,
             Shape::Rect { rect, rounded } => {
                 let path = if *rounded { Path::rounded_rect(*rect, rect_radius(style)) } else { Path::rect(*rect) };
-                path.flatten(4).iter().any(|poly| distance_to_polyline(p, poly) <= reach)
+                outline_hit(&path, 4, p, reach, style.fill != Fill::None)
             }
-            Shape::Ellipse { rect } => {
-                Path::ellipse(*rect).flatten(16).iter().any(|poly| distance_to_polyline(p, poly) <= reach)
-            }
+            Shape::Ellipse { rect } => outline_hit(&Path::ellipse(*rect), 16, p, reach, style.fill != Fill::None),
             Shape::Pen { points } | Shape::Highlighter { points } => distance_to_polyline(p, points) <= reach,
             Shape::Step { center } => p.distance(*center) <= style.width.badge_diameter() / 2.0 + slop,
             Shape::Text { .. } | Shape::Redact { .. } | Shape::Spotlight { .. } => {
@@ -340,6 +338,13 @@ impl Shape {
     }
 }
 
+/// Hit on a closed outline's stroke, or anywhere inside when it is filled.
+fn outline_hit(path: &Path, steps: usize, p: Point, reach: f64, filled: bool) -> bool {
+    let polys = path.flatten(steps);
+    polys.iter().any(|poly| distance_to_polyline(p, poly) <= reach)
+        || (filled && polys.iter().any(|poly| point_in_polygon(p, poly)))
+}
+
 /// Corner radius used for rounded rectangles.
 pub fn rect_radius(style: &Style) -> f64 {
     (style.width.points() * 2.0).max(8.0)
@@ -422,6 +427,18 @@ mod tests {
         // The very corner is cut off by the rounding.
         assert!(!r.hit(p(0.0, 0.0), &style(), 0.5));
         assert!(r.hit(p(50.0, 0.0), &style(), 0.5));
+    }
+
+    #[test]
+    fn filled_rects_and_ellipses_hit_inside() {
+        let filled = Style { fill: Fill::Translucent, ..style() };
+        let r = Shape::Rect { rect: Rect::new(0.0, 0.0, 100.0, 50.0), rounded: true };
+        assert!(!r.hit(p(50.0, 25.0), &style(), 1.0));
+        assert!(r.hit(p(50.0, 25.0), &filled, 1.0));
+        assert!(!r.hit(p(150.0, 25.0), &filled, 1.0));
+        let e = Shape::Ellipse { rect: Rect::new(0.0, 0.0, 100.0, 50.0) };
+        assert!(e.hit(p(50.0, 25.0), &Style { fill: Fill::Solid, ..style() }, 1.0));
+        assert!(!e.hit(p(2.0, 2.0), &Style { fill: Fill::Solid, ..style() }, 1.0), "outside the curve");
     }
 
     #[test]

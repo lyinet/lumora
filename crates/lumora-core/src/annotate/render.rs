@@ -9,7 +9,7 @@ use crate::geometry::{Point, Rect};
 use super::document::Annotation;
 use super::path::{arrow_outline, smooth, Path};
 use super::shape::{rect_radius, RedactMode, Shape, TEXT_PILL_PAD};
-use super::style::Style;
+use super::style::{Fill, Style};
 
 /// Opacity of highlighter ink.
 pub const HIGHLIGHTER_ALPHA: f64 = 0.38;
@@ -105,6 +105,19 @@ fn fill(path: Path, color: Rgb8, alpha: f64, shadow: bool) -> RenderOp {
     RenderOp::Shape(ShapeOp { path, paint: Paint::Fill { even_odd: false }, color, alpha, shadow })
 }
 
+/// A closed outline, with the style's fill (if any) painted underneath
+/// it. A solid fill carries the shadow so the stroke doesn't cast one onto
+/// its own fill; a translucent fill casts none (it would muddy the inside).
+fn filled_outline(path: Path, style: &Style, width: f64) -> Vec<RenderOp> {
+    match style.fill.alpha() {
+        None => vec![stroke(path, style, width, true)],
+        Some(alpha) => {
+            let solid = style.fill == Fill::Solid;
+            vec![fill(path.clone(), style.color, alpha, solid), stroke(path, style, width, !solid)]
+        }
+    }
+}
+
 /// Ops for one annotation. `canvas` is the full image rect (the spotlight
 /// dims all of it); `step` is the badge number for step annotations.
 ///
@@ -146,9 +159,9 @@ fn render_opaque(a: &Annotation, canvas: Rect, step: Option<u32>) -> Vec<RenderO
         Shape::Line { start, end } => vec![stroke(Path::polyline(&[*start, *end]), style, w, true)],
         Shape::Rect { rect, rounded } => {
             let path = if *rounded { Path::rounded_rect(*rect, rect_radius(style)) } else { Path::rect(*rect) };
-            vec![stroke(path, style, w, true)]
+            filled_outline(path, style, w)
         }
-        Shape::Ellipse { rect } => vec![stroke(Path::ellipse(*rect), style, w, true)],
+        Shape::Ellipse { rect } => filled_outline(Path::ellipse(*rect), style, w),
         Shape::Pen { points } => vec![stroke(smooth(points), style, w, true)],
         Shape::Highlighter { points } => vec![RenderOp::Shape(ShapeOp {
             path: smooth(points),
@@ -259,7 +272,7 @@ pub fn anchor_point(ops: &[RenderOp]) -> Option<Point> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::annotate::style::{StrokeWidth, PALETTE};
+    use crate::annotate::style::{StrokeWidth, FILL_TRANSLUCENT_ALPHA, PALETTE};
     use crate::geometry::Size;
 
     fn ann(shape: Shape) -> Annotation {
@@ -367,6 +380,43 @@ mod tests {
                 amount: REDACT_BLUR
             }]
         );
+    }
+
+    #[test]
+    fn rect_and_ellipse_fills_sit_under_the_outline() {
+        let rect = Shape::Rect { rect: Rect::new(10.0, 10.0, 50.0, 30.0), rounded: true };
+        let mut a = ann(rect);
+        assert_eq!(render(&a, CANVAS, None).len(), 1, "no fill by default");
+        for (fill_mode, alpha, shadow) in [(Fill::Solid, 1.0, true), (Fill::Translucent, FILL_TRANSLUCENT_ALPHA, false)]
+        {
+            a.style.fill = fill_mode;
+            let ops = render(&a, CANVAS, None);
+            match &ops[..] {
+                [RenderOp::Shape(f), RenderOp::Shape(s)] => {
+                    assert_eq!(f.paint, Paint::Fill { even_odd: false });
+                    assert_eq!(f.alpha, alpha);
+                    assert_eq!(f.shadow, shadow);
+                    assert_eq!(f.path, s.path, "fill and outline share the path");
+                    assert!(matches!(s.paint, Paint::Stroke { .. }));
+                    assert_eq!(s.shadow, !shadow);
+                    assert_eq!(f.color, s.color);
+                }
+                other => panic!("{other:?}"),
+            }
+            // Opacity compounds with the fill's own alpha.
+            a.style.opacity = 50;
+            assert!(
+                matches!(&render(&a, CANVAS, None)[0], RenderOp::Shape(f) if (f.alpha - alpha * 0.5).abs() < 1e-12)
+            );
+            a.style.opacity = 100;
+        }
+        let mut e = ann(Shape::Ellipse { rect: Rect::new(0.0, 0.0, 40.0, 20.0) });
+        e.style.fill = Fill::Translucent;
+        assert_eq!(render(&e, CANVAS, None).len(), 2);
+        // Kinds without a fill ignore it.
+        let mut l = ann(Shape::Line { start: Point::ZERO, end: Point::new(9.0, 9.0) });
+        l.style.fill = Fill::Solid;
+        assert_eq!(render(&l, CANVAS, None).len(), 1);
     }
 
     #[test]

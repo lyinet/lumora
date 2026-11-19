@@ -326,6 +326,11 @@ messages! {
     StrokeThick => "Thick (3)", "粗（3）";
     ToolbarOpacity => "Opacity", "不透明度";
     OpacityTip => "Opacity: {0}%", "不透明度：{0}%";
+    ShapeStyle => "Shape Style", "形状样式";
+    SectionFill => "Fill", "填充";
+    FillNone => "No Fill", "无填充";
+    FillSolid => "Solid", "实心";
+    FillTranslucent => "Translucent", "半透明";
     Undo => "Undo (⌘Z)", "撤销（⌘Z）";
     Redo => "Redo (⇧⌘Z)", "重做（⇧⌘Z）";
     CopyImage => "Copy (⌘C)", "拷贝（⌘C）";

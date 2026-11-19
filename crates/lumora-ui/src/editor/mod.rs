@@ -772,6 +772,12 @@ impl State {
                 ToolbarAction::Color(c) => ed.set_color(c),
                 ToolbarAction::Width(w) => ed.set_width(w),
                 ToolbarAction::Opacity(o) => ed.set_opacity(o),
+                ToolbarAction::Fill(f) => ed.set_fill(f),
+                ToolbarAction::ShapeStyleMenu => {
+                    drop(ed);
+                    this.toolbar.show_style_menu();
+                    Effect::None
+                }
                 ToolbarAction::Toggle(on) => {
                     let mut o = ed.options();
                     match ed.tool() {
@@ -1161,6 +1167,7 @@ impl State {
                 hist.can_undo(),
                 hist.can_redo(),
                 ed.selected().is_some(),
+                ed.style_target(),
             );
         }
         self.draw_chrome();

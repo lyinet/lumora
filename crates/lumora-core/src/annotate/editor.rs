@@ -18,7 +18,7 @@ use crate::geometry::{Handle, Point, Rect, Size};
 use super::document::{Annotation, AnnotationId, Command, Document};
 use super::path::{push_sample, simplify, snap_angle};
 use super::shape::{resize_rect, EditHandle, RedactMode, Shape};
-use super::style::{StrokeWidth, Style};
+use super::style::{Fill, StrokeWidth, Style};
 use crate::color::Rgb8;
 use crate::selection::constrain_aspect;
 
@@ -95,6 +95,27 @@ impl Tool {
     pub fn from_key(c: char) -> Option<Tool> {
         let c = c.to_ascii_lowercase();
         Tool::ALL.iter().copied().find(|t| t.key() == c)
+    }
+
+    /// The tool that draws `shape`.
+    pub fn for_shape(shape: &Shape) -> Tool {
+        match shape {
+            Shape::Arrow { .. } => Tool::Arrow,
+            Shape::Line { .. } => Tool::Line,
+            Shape::Rect { .. } => Tool::Rect,
+            Shape::Ellipse { .. } => Tool::Ellipse,
+            Shape::Pen { .. } => Tool::Pen,
+            Shape::Highlighter { .. } => Tool::Highlighter,
+            Shape::Text { .. } => Tool::Text,
+            Shape::Step { .. } => Tool::Step,
+            Shape::Redact { .. } => Tool::Redact,
+            Shape::Spotlight { .. } => Tool::Spotlight,
+        }
+    }
+
+    /// Whether the style bar offers a fill (rectangles and ellipses).
+    pub fn uses_fill(self) -> bool {
+        matches!(self, Tool::Rect | Tool::Ellipse)
     }
 
     /// Whether colour applies (redaction, spotlight and crop ignore it).
@@ -288,6 +309,24 @@ impl Editor {
         let o = super::style::clamp_opacity(percent);
         self.style.opacity = o;
         self.restyle(|a| a.style.opacity = o)
+    }
+
+    /// Change the fill of rectangles and ellipses; also applies to the
+    /// selection (one undo step; kinds without a fill keep the value but
+    /// don't draw it).
+    pub fn set_fill(&mut self, fill: Fill) -> Effect {
+        self.style.fill = fill;
+        self.restyle(|a| a.style.fill = fill)
+    }
+
+    /// The kind of annotation the style bar is styling: the selection's
+    /// kind (as the tool that draws it) when something is selected, else
+    /// the current tool. Decides which style options are offered.
+    pub fn style_target(&self) -> Tool {
+        match self.selected.and_then(|id| self.doc.get(id)) {
+            Some(a) => Tool::for_shape(&a.shape),
+            None => self.tool,
+        }
     }
 
     /// Change tool options; applies to a selected annotation of that kind.
@@ -1021,6 +1060,33 @@ mod tests {
         assert_eq!(e.document().history().undo_len(), 3, "nothing selected: no undo step");
         drag(&mut e, p(0.0, 200.0), p(100.0, 200.0));
         assert_eq!(e.document().items()[1].style.color, PALETTE[2]);
+    }
+
+    #[test]
+    fn fill_restyles_the_selection_and_style_target_follows_it() {
+        let mut e = editor();
+        e.set_tool(Tool::Rect);
+        assert_eq!(e.style_target(), Tool::Rect);
+        assert!(e.style_target().uses_fill() && Tool::Ellipse.uses_fill() && !Tool::Arrow.uses_fill());
+        drag(&mut e, p(10.0, 10.0), p(100.0, 80.0));
+        let id = e.selected().unwrap();
+        let undo0 = e.document().history().undo_len();
+        e.set_fill(Fill::Solid);
+        assert_eq!(e.document().get(id).unwrap().style.fill, Fill::Solid);
+        assert_eq!(e.document().history().undo_len(), undo0 + 1);
+        e.undo();
+        assert_eq!(e.document().get(id).unwrap().style.fill, Fill::None);
+        e.redo();
+        // A filled rect is grabbed from its inside with the select tool.
+        e.set_tool(Tool::Select);
+        e.select(None);
+        e.handle(Input::Down { at: p(50.0, 50.0), clicks: 1, shift: false });
+        e.handle(Input::Up { at: p(50.0, 50.0), shift: false });
+        assert_eq!(e.selected(), Some(id));
+        assert_eq!(e.style_target(), Tool::Rect, "selection's kind, not the select tool");
+        e.select(None);
+        assert_eq!(e.style_target(), Tool::Select);
+        assert_eq!(Tool::for_shape(&Shape::Spotlight { rect: Rect::ZERO, ellipse: true }), Tool::Spotlight);
     }
 
     #[test]

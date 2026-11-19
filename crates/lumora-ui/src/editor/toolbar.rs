@@ -15,7 +15,7 @@ use std::rc::Rc;
 
 use lumora_core::annotate::editor::{Tool, ToolOptions};
 use lumora_core::annotate::shape::RedactMode;
-use lumora_core::annotate::style::{StrokeWidth, Style, OPACITY_MAX, OPACITY_MIN, PALETTE};
+use lumora_core::annotate::style::{Fill, StrokeWidth, Style, OPACITY_MAX, OPACITY_MIN, PALETTE};
 use lumora_core::color::Rgb8;
 use lumora_core::geometry::Rect;
 use lumora_core::i18n::{tr, Msg};
@@ -45,6 +45,9 @@ pub enum ToolbarAction {
     Width(StrokeWidth),
     /// Opacity in percent (10–100), from the slider on mouse-up.
     Opacity(u8),
+    /// Pop up the shape-style menu (fill, …).
+    ShapeStyleMenu,
+    Fill(Fill),
     /// The contextual checkbox (curved / rounded / background).
     Toggle(bool),
     Redact(RedactMode),
@@ -72,6 +75,8 @@ enum SlotKind {
     Custom,
     Widths,
     Opacity,
+    /// The shape-style menu button (fill, …).
+    ShapeStyle,
     /// The active tool's options (checkbox, redaction mode, crop buttons).
     Options,
 }
@@ -128,6 +133,7 @@ pub struct Toolbar {
     custom: Retained<NSButton>,
     widths: Retained<NSSegmentedControl>,
     opacity: Retained<NSSlider>,
+    shape_style: Retained<NSButton>,
     toggle: Retained<NSButton>,
     redact: Retained<NSSegmentedControl>,
     apply_crop: Retained<NSButton>,
@@ -151,6 +157,8 @@ pub struct Toolbar {
     /// Last synced state, for the overflow menu's check marks.
     last: Cell<Option<(Tool, Style, ToolOptions)>>,
     last_has_selection: Cell<bool>,
+    /// What the style bar styles: the selection's kind, else the tool.
+    last_target: Cell<Tool>,
     menu_targets: RefCell<Vec<Retained<ActionTarget>>>,
 }
 
@@ -362,7 +370,18 @@ impl Toolbar {
         view.addSubview(&opacity);
         slot(SlotKind::Opacity, vec![as_view(&opacity)], x);
         targets.push(target);
-        x += ow + 12.0;
+        x += ow + 8.0;
+
+        // Shape style (fill, …): a menu, so new looks don't widen the bar.
+        let h = on.clone();
+        let target = ActionTarget::new(mtm, move |_| h(ToolbarAction::ShapeStyleMenu));
+        let shape_style =
+            glyph_button(mtm, symbol("slider.horizontal.3", tr(Msg::ShapeStyle)), tr(Msg::ShapeStyle), &target);
+        shape_style.setFrame(cg_rect(Rect::new(x, y, bh, bh)));
+        view.addSubview(&shape_style);
+        slot(SlotKind::ShapeStyle, vec![as_view(&shape_style)], x);
+        targets.push(target);
+        x += bh + 12.0;
 
         // Contextual options: one checkbox, the redaction mode, or crop buttons.
         let h = on.clone();
@@ -530,6 +549,7 @@ impl Toolbar {
             custom,
             widths,
             opacity,
+            shape_style,
             toggle,
             redact,
             apply_crop,
@@ -550,6 +570,7 @@ impl Toolbar {
             trailing_width,
             last: Cell::new(None),
             last_has_selection: Cell::new(false),
+            last_target: Cell::new(Tool::default()),
             menu_targets: RefCell::new(Vec::new()),
         };
         toolbar.fit(width);
@@ -696,6 +717,12 @@ impl Toolbar {
                     w.setEnabled(!crop && tool != Tool::Redact && tool != Tool::Spotlight);
                     menu.addItem(&w);
                 }
+                SlotKind::ShapeStyle => {
+                    for (title, entries) in style_sections(self.last_target.get(), style) {
+                        let items = entries.into_iter().map(|(m, checked, a)| item(tr(m), None, checked, a)).collect();
+                        menu.addItem(&submenu(tr(title), items));
+                    }
+                }
                 SlotKind::Opacity => {
                     let items = OPACITY_PRESETS
                         .iter()
@@ -756,6 +783,62 @@ impl Toolbar {
         menu.popUpMenuPositioningItem_atLocation_inView(None, at, Some(&self.more));
     }
 
+    /// Pop up the shape-style menu under its button: a disabled header per
+    /// section, then its choices with a check mark on the current one.
+    pub fn show_style_menu(&self) {
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        let Some((_, style, _)) = self.last.get() else { return };
+        let sections = style_sections(self.last_target.get(), style);
+        if sections.is_empty() {
+            return;
+        }
+        let menu = NSMenu::initWithTitle(NSMenu::alloc(mtm), &NSString::from_str(tr(Msg::ShapeStyle)));
+        menu.setAutoenablesItems(false);
+        let mut targets = Vec::new();
+        for (i, (title, entries)) in sections.into_iter().enumerate() {
+            if i > 0 {
+                menu.addItem(&NSMenuItem::separatorItem(mtm));
+            }
+            // SAFETY: plain menu item without an action.
+            let header = unsafe {
+                NSMenuItem::initWithTitle_action_keyEquivalent(
+                    NSMenuItem::alloc(mtm),
+                    &NSString::from_str(tr(title)),
+                    None,
+                    &NSString::new(),
+                )
+            };
+            header.setEnabled(false);
+            menu.addItem(&header);
+            for (m, checked, action) in entries {
+                let h = self.on.clone();
+                let target = ActionTarget::new(mtm, move |_| h(action));
+                // SAFETY: the target is kept alive in `menu_targets`.
+                let it = unsafe {
+                    NSMenuItem::initWithTitle_action_keyEquivalent(
+                        NSMenuItem::alloc(mtm),
+                        &NSString::from_str(tr(m)),
+                        Some(ActionTarget::action()),
+                        &NSString::new(),
+                    )
+                };
+                unsafe { it.setTarget(Some(&target)) };
+                it.setIndentationLevel(1);
+                it.setState(if checked { NSControlStateValueOn } else { NSControlStateValueOff });
+                targets.push(target);
+                menu.addItem(&it);
+            }
+        }
+        *self.menu_targets.borrow_mut() = targets;
+        let b = self.shape_style.bounds();
+        let at = if self.shape_style.isFlipped() {
+            objc2_core_foundation::CGPoint::new(0.0, b.size.height + 4.0)
+        } else {
+            objc2_core_foundation::CGPoint::new(0.0, -4.0)
+        };
+        menu.popUpMenuPositioningItem_atLocation_inView(None, at, Some(&self.shape_style));
+    }
+
     /// Beautify button: accent glyph while beautify is on, a soft pill while
     /// its panel is open.
     pub fn set_beautify_state(&self, open: bool, enabled: bool) {
@@ -792,6 +875,7 @@ impl Toolbar {
 
     /// Reflect the editor's state. Animates the tool pill when the tool
     /// changed.
+    #[allow(clippy::too_many_arguments)] // one flat snapshot of editor state
     pub fn sync(
         &self,
         tool: Tool,
@@ -800,9 +884,11 @@ impl Toolbar {
         can_undo: bool,
         can_redo: bool,
         has_selection: bool,
+        target: Tool,
     ) {
         self.last.set(Some((tool, style, options)));
         self.last_has_selection.set(has_selection);
+        self.last_target.set(target);
         if self.active.replace(Some(tool)) != Some(tool) {
             if let Some((_, b)) = self.tools.iter().find(|(t, _)| *t == tool) {
                 let f = b.frame();
@@ -842,9 +928,27 @@ impl Toolbar {
         self.custom.setEnabled(colorful && !crop);
         self.widths.setEnabled(!crop && tool != Tool::Redact && tool != Tool::Spotlight);
         self.opacity.setEnabled(colorful && !crop);
+        self.shape_style.setEnabled(!style_sections(target, style).is_empty());
         self.undo.setEnabled(can_undo);
         self.redo.setEnabled(can_redo);
     }
+}
+
+/// One section of the shape-style menu: its title and (title, checked,
+/// action) entries.
+type StyleSection = (Msg, Vec<(Msg, bool, ToolbarAction)>);
+
+/// The shape-style options for annotations of kind `target` (the selection's
+/// kind, else the tool). Empty when the kind has none (the button is
+/// disabled). Shared by the pop-up menu and the "…" overflow menu.
+fn style_sections(target: Tool, style: Style) -> Vec<StyleSection> {
+    let mut out = Vec::new();
+    if target.uses_fill() {
+        let msgs = [Msg::FillNone, Msg::FillSolid, Msg::FillTranslucent];
+        let entries = Fill::ALL.iter().zip(msgs).map(|(f, m)| (m, style.fill == *f, ToolbarAction::Fill(*f))).collect();
+        out.push((Msg::SectionFill, entries));
+    }
+    out
 }
 
 /// Opacity steps offered when the slider is in the "…" menu.

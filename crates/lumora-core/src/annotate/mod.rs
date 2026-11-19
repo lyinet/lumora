@@ -25,4 +25,4 @@ pub use document::{Annotation, AnnotationId, Command, Document};
 pub use editor::{Editor, Effect, Input, Key, Tool, ToolOptions};
 pub use render::RenderOp;
 pub use shape::{EditHandle, RedactMode, Shape};
-pub use style::{StrokeWidth, Style, OPACITY_MAX, OPACITY_MIN, PALETTE};
+pub use style::{Fill, StrokeWidth, Style, OPACITY_MAX, OPACITY_MIN, PALETTE};
