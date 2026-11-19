@@ -6,6 +6,18 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Live preview for burned-in subtitles.** The subtitles window shows a
+  frame of the video with the subtitles drawn on top exactly as **Burn In
+  Subtitles…** will draw them: the preview uses the export's own layout
+  (font size from the video size, wrapping, box, margins, top / bottom) at
+  the export's render size and the export's own layer code, then scales the
+  whole picture to fit the pane. It updates ~100 ms after you change the
+  size / position / box, edit a line or move the new scrubber, and jumps to
+  a line's midpoint when you click into it. Frames are generated in the
+  background and cached. Audio-only recordings show a note instead of the
+  preview.
+
 ### Changed
 - **Keystroke HUD labels follow your keyboard layout.** Shortcut keys are
   named from the selected layout instead of a US table: ⌘ + the key

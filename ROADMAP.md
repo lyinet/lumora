@@ -132,7 +132,9 @@
 - ✅ Scroll-wheel driven scrolling capture (capture on scroll events instead
   of a fixed 150 ms timer; wheel deltas as stitch hints) — built, awaiting
   hardware QA.
-- Live preview of burned-in subtitles in the subtitles window.
+- ✅ Live preview of burned-in subtitles in the subtitles window (the
+  export's layout and layer code on a frame scaled to fit, scrubber,
+  follows style / edits / the focused line) — built, awaiting hardware QA.
 
 ## Later
 
