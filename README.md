@@ -153,6 +153,10 @@ NOTARY_PROFILE=lumora-notary scripts/bundle.sh
 > [!TIP]
 > Screen Recording permission is tied to the app's code signature. Ad-hoc builds get a new identity each time, so macOS asks again after every rebuild — use a stable signing identity for day-to-day development.
 
+### Signed builds
+
+CI can sign Lumora with a Developer ID certificate and notarize it, so macOS keeps Screen Recording, Microphone and other permissions across updates and opens the app without a Gatekeeper warning. It switches on by itself once the repository has the signing secrets (`MACOS_CERT_P12`, `MACOS_CERT_PASSWORD`, `APPLE_TEAM_ID`, plus an App Store Connect API key or an Apple ID app-specific password for notarization); without them CI builds the ad-hoc DMG as before. It needs a paid Apple Developer account. Setup: [docs/signing.md](docs/signing.md).
+
 ### Permissions
 
 Lumora asks for each permission only when a feature first needs it:
@@ -263,7 +267,7 @@ Everything below is written, type-checked and unit-tested, but **not yet run on 
 **v0.7 — next**
 
 - [ ] Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
-- [ ] Developer ID signing + notarization in CI
+- [ ] Developer ID signing + notarization in CI — pipeline ready ([docs/signing.md](docs/signing.md)), needs an Apple Developer account
 - [ ] Keyboard-layout-aware keystroke labels, scroll-wheel driven scrolling capture, live preview for burned-in subtitles
 
 **Later**

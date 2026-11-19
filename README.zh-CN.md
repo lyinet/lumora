@@ -153,6 +153,10 @@ NOTARY_PROFILE=lumora-notary scripts/bundle.sh
 > [!TIP]
 > “屏幕录制”权限与应用的代码签名绑定。ad-hoc 构建每次都会得到新的签名身份，所以每次重新构建后 macOS 都会再次请求授权——日常开发请使用固定的签名身份。
 
+### 签名版本
+
+CI 可以用 Developer ID 证书为 Lumora 签名并提交 Apple 公证：这样更新后 macOS 会保留“屏幕录制”“麦克风”等权限，打开应用时也不会出现 Gatekeeper 警告。只要仓库里配置了签名密钥（`MACOS_CERT_P12`、`MACOS_CERT_PASSWORD`、`APPLE_TEAM_ID`，以及用于公证的 App Store Connect API 密钥或 Apple ID 专用密码），它就会自动启用；没有这些密钥时，CI 仍和以前一样构建 ad-hoc 签名的 DMG。需要付费的 Apple 开发者账号。配置方法见 [docs/signing.md](docs/signing.md)（英文）。
+
 ### 权限
 
 Lumora 只在某项功能第一次需要时才请求对应权限：
@@ -263,7 +267,7 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
 **v0.7 —— 下一步**
 
 - [ ] 在 Apple Silicon 与 Intel（macOS 14 和 15）上真机调试并修复问题
-- [ ] 在 CI 中进行 Developer ID 签名与公证
+- [ ] 在 CI 中进行 Developer ID 签名与公证——流程已就绪（[docs/signing.md](docs/signing.md)），等待 Apple 开发者账号
 - [ ] 按键提示适配键盘布局、由滚轮驱动的滚动截图、字幕烧录实时预览
 
 **以后**

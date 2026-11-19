@@ -7,6 +7,17 @@ All notable changes to Lumora are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- **Optional Developer ID signing + notarization in CI.** When the
+  repository has the signing secrets (`MACOS_CERT_P12`,
+  `MACOS_CERT_PASSWORD`, `APPLE_TEAM_ID`, and either an App Store Connect
+  API key — `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`, `NOTARY_KEY_P8` — or
+  `APPLE_ID` + `APPLE_APP_PASSWORD`), CI signs the app with the hardened
+  runtime and a secure timestamp, notarizes and staples both the app and the
+  DMG, and checks them with `codesign` / `spctl` / `stapler`. The
+  certificate lives in a temporary keychain that is deleted afterwards.
+  Without the secrets CI builds the same ad-hoc DMG as before and says so.
+  Tag builds refuse to ship un-notarized. New `scripts/sign-and-notarize.sh`
+  and [docs/signing.md](docs/signing.md).
 - **Live preview for burned-in subtitles.** The subtitles window shows a
   frame of the video with the subtitles drawn on top exactly as **Burn In
   Subtitles…** will draw them: the preview uses the export's own layout
@@ -19,6 +30,14 @@ All notable changes to Lumora are documented here. The format follows
   preview.
 
 ### Changed
+- **`scripts/bundle.sh` pins the code identity.** The app is signed with
+  the identifier `com.lumora.app`; with a real identity the build fails
+  unless the designated requirement names that identifier and the team
+  (never a code hash), so permissions survive signed updates. It also fails
+  if `Info.plist` loses its bundle identifier or its Screen Recording,
+  Microphone or Speech Recognition usage strings, reads notarytool's result
+  as JSON (an `Invalid` submission now fails the build and prints Apple's
+  log), and accepts `NOTARY_KEYCHAIN` for a profile in another keychain.
 - **Keystroke HUD labels follow your keyboard layout.** Shortcut keys are
   named from the selected layout instead of a US table: ⌘ + the key
   marked W on AZERTY shows `⌘W`, QWERTZ shows `⌘Z` for its Z key, and the

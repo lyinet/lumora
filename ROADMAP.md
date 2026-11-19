@@ -125,7 +125,10 @@
   transcription, history window, trim / GIF and burn-in exports, scrolling
   capture stitching).
 - Developer ID signing + notarization in CI (stable code identity, so
-  Screen Recording, Input Monitoring and Keychain trust survive updates).
+  Screen Recording, Input Monitoring and Keychain trust survive updates) —
+  pipeline ready (`scripts/sign-and-notarize.sh`, optional CI step,
+  [docs/signing.md](docs/signing.md)); needs an Apple Developer account and
+  the repository secrets, then a first signed build verified on a Mac.
 - ✅ Keyboard-layout-aware keystroke labels (Text Input Sources +
   `UCKeyTranslate`, ASCII-capable layout for ⌘/⌃, US table as fallback) —
   built, awaiting hardware QA.
