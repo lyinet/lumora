@@ -114,7 +114,7 @@
   bands and fixed columns, 1–2 px steps, torn frames skipped, stitching up
   and down; per-frame debug log and an end-of-session summary.
 
-## v0.7 — make it real on hardware, signing
+## v0.7 — make it real on hardware, signing (v0.7.0 released 2026-11-20)
 
 - Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
   for everything v0.1–v0.6 that has only been type-checked (editor,
@@ -127,8 +127,9 @@
 - Developer ID signing + notarization in CI (stable code identity, so
   Screen Recording, Input Monitoring and Keychain trust survive updates) —
   pipeline ready (`scripts/sign-and-notarize.sh`, optional CI step,
-  [docs/signing.md](docs/signing.md)); needs an Apple Developer account and
-  the repository secrets, then a first signed build verified on a Mac.
+  [docs/signing.md](docs/signing.md), shipped in v0.7.0); needs an Apple
+  Developer account and the repository secrets, then a first signed build
+  verified on a Mac. v0.7.0 DMGs are still ad-hoc signed.
 - ✅ Keyboard-layout-aware keystroke labels (Text Input Sources +
   `UCKeyTranslate`, ASCII-capable layout for ⌘/⌃, US table as fallback) —
   built, awaiting hardware QA.

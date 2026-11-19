@@ -35,7 +35,7 @@
 <br>
 
 > [!NOTE]
-> **Lumora is in early alpha (v0.6.3).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested. Testing on real Macs has just started (v0.6.1–v0.6.3 fix the first-run permission, launch, click-ripple and scrolling-capture issues it found), so expect rough edges. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
+> **Lumora is in early alpha (v0.7.0).** The whole app type-checks and passes clippy for Apple Silicon and Intel, and the platform-independent core is unit-tested. Testing on real Macs has just started (v0.6.1–v0.6.3 fix the first-run permission, launch, click-ripple and scrolling-capture issues it found; v0.7.0 adds scroll-wheel scrolling capture, layout-aware keystroke labels and a subtitle preview, not yet tried on a Mac), so expect rough edges. ⭐ **Star the repo to follow along**, and see [STATUS.md](STATUS.md) for exactly what is and isn't verified.
 
 ## Features
 
@@ -264,11 +264,12 @@ Everything below is written, type-checked and unit-tested, but **not yet run on 
 
 - [x] **v0.6 — history & recording extras:** capture history window (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>), keystroke HUD, trim + GIF export, burn-in subtitles, scrolling capture (<kbd>⌥</kbd><kbd>⇧</kbd><kbd>S</kbd>)
 
+- [x] **v0.7.0 — scrolling, keystrokes, subtitles:** scroll-wheel driven scrolling capture, keyboard-layout-aware keystroke labels, live preview for burned-in subtitles (awaiting hardware QA)
+
 **v0.7 — next**
 
 - [ ] Real-Mac bring-up on Apple Silicon + Intel (macOS 14 & 15) and bug fixes
 - [ ] Developer ID signing + notarization in CI — pipeline ready ([docs/signing.md](docs/signing.md)), needs an Apple Developer account
-- [ ] Keyboard-layout-aware keystroke labels, scroll-wheel driven scrolling capture, live preview for burned-in subtitles
 
 **Later**
 

@@ -35,7 +35,7 @@
 <br>
 
 > [!NOTE]
-> **Lumora 目前处于早期 alpha 阶段（v0.6.3）。** 整个应用已能针对 Apple Silicon 和 Intel 通过类型检查与 clippy，与平台无关的核心逻辑也有单元测试覆盖。真机测试刚刚开始（v0.6.1–v0.6.3 修复了它发现的首次启动权限、启动、点击波纹与滚动截图问题），难免会有粗糙之处。⭐ **点个 Star 关注进展**；哪些已验证、哪些尚未验证，请看 [STATUS.md](STATUS.md)。
+> **Lumora 目前处于早期 alpha 阶段（v0.7.0）。** 整个应用已能针对 Apple Silicon 和 Intel 通过类型检查与 clippy，与平台无关的核心逻辑也有单元测试覆盖。真机测试刚刚开始（v0.6.1–v0.6.3 修复了它发现的首次启动权限、启动、点击波纹与滚动截图问题；v0.7.0 新增滚轮驱动的滚动截图、适配键盘布局的按键提示与字幕预览，尚未在真机上验证），难免会有粗糙之处。⭐ **点个 Star 关注进展**；哪些已验证、哪些尚未验证，请看 [STATUS.md](STATUS.md)。
 
 ## 功能
 
@@ -264,11 +264,12 @@ cargo clippy --workspace --all-targets --target x86_64-apple-darwin -- -D warnin
 
 - [x] **v0.6 —— 历史与录屏增强：** 截图历史窗口（<kbd>⌥</kbd><kbd>⇧</kbd><kbd>H</kbd>）、按键提示、剪辑与导出 GIF、字幕烧录、滚动截图（<kbd>⌥</kbd><kbd>⇧</kbd><kbd>S</kbd>）
 
+- [x] **v0.7.0 —— 滚动、按键与字幕：** 由滚轮驱动的滚动截图、按键提示适配键盘布局、字幕烧录实时预览（等待真机验证）
+
 **v0.7 —— 下一步**
 
 - [ ] 在 Apple Silicon 与 Intel（macOS 14 和 15）上真机调试并修复问题
 - [ ] 在 CI 中进行 Developer ID 签名与公证——流程已就绪（[docs/signing.md](docs/signing.md)），等待 Apple 开发者账号
-- [ ] 按键提示适配键盘布局、由滚轮驱动的滚动截图、字幕烧录实时预览
 
 **以后**
 

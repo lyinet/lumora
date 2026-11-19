@@ -6,6 +6,14 @@ All notable changes to Lumora are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-20 (prerelease; awaiting hardware QA)
+
+Scrolling capture driven by your scrolling, keystroke labels that follow
+your keyboard layout, a live preview for burned-in subtitles, and an
+optional Developer ID signing + notarization pipeline. Built and unit-tested;
+none of it has run on a real Mac yet — see STATUS.md for the hardware-QA
+list. Release DMGs stay ad-hoc signed until the signing secrets exist.
+
 ### Added
 - **Optional Developer ID signing + notarization in CI.** When the
   repository has the signing secrets (`MACOS_CERT_P12`,
@@ -584,7 +592,8 @@ First fixes from testing on a real Mac (Mac mini M4, macOS 26 Tahoe).
 - Screen Recording onboarding with live permission polling and relaunch.
 - Universal bundle script (lipo, codesign, notarytool, create-dmg) and CI.
 
-[Unreleased]: https://github.com/lyinet/lumora/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/lyinet/lumora/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/lyinet/lumora/compare/v0.6.3...v0.7.0
 [0.6.3]: https://github.com/lyinet/lumora/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/lyinet/lumora/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/lyinet/lumora/compare/v0.6.0...v0.6.1
