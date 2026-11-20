@@ -23,6 +23,11 @@ All notable changes to Lumora are documented here. The format follows
   with the stroke width; heads are never dashed).
 
 ### Changed
+- **The highlighter multiplies.** Highlighter ink is now composited with a
+  multiply blend (live and in the export), so dark text under it stays dark
+  instead of being washed towards the ink colour; the ink is a little
+  stronger (55 % instead of 38 %) to make up for it. Existing highlights
+  take on the new look when reopened.
 - **`.lumora` schema 2.** Documents now store per-annotation style fields
   (`opacity`, `fill`, `heads`, `dash`, …). Schema-1 files from 0.3–0.7 open unchanged (migrated with
   the values that reproduce their look); files saved by 0.8 need 0.8 or

@@ -14,8 +14,10 @@ use super::path::{
 use super::shape::{rect_radius, RedactMode, Shape, TEXT_PILL_PAD};
 use super::style::{ArrowHeads, Dash, Fill, Style};
 
-/// Opacity of highlighter ink.
-pub const HIGHLIGHTER_ALPHA: f64 = 0.38;
+/// Opacity of highlighter ink. Higher than a normal-blend marker could
+/// afford (0.38 before 0.8) because it multiplies: dark text under it stays
+/// dark, only the paper takes the colour.
+pub const HIGHLIGHTER_ALPHA: f64 = 0.55;
 /// Dim applied outside a spotlight.
 pub const SPOTLIGHT_DIM: f64 = 0.55;
 /// Pixelation block / blur radius in document points.
@@ -41,6 +43,17 @@ pub enum Paint {
     Fill { even_odd: bool },
 }
 
+/// How a shape composites onto what is under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Blend {
+    #[default]
+    Normal,
+    /// `result = under × ink`: colours light areas, leaves dark text dark
+    /// (the highlighter). Live: `compositingFilter = multiplyBlendMode`;
+    /// export: `kCGBlendModeMultiply`.
+    Multiply,
+}
+
 /// A path drawn in one colour.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ShapeOp {
@@ -50,6 +63,7 @@ pub struct ShapeOp {
     pub alpha: f64,
     /// Soft drop shadow (lifts ink off busy screenshots).
     pub shadow: bool,
+    pub blend: Blend,
 }
 
 /// Text laid out in `rect` (top-left aligned, or centred for badges).
@@ -105,11 +119,19 @@ fn stroke_dashed(path: Path, style: &Style, width: f64, dash: Option<(f64, f64)>
         color: style.color,
         alpha: 1.0,
         shadow,
+        blend: Blend::Normal,
     })
 }
 
 fn fill(path: Path, color: Rgb8, alpha: f64, shadow: bool) -> RenderOp {
-    RenderOp::Shape(ShapeOp { path, paint: Paint::Fill { even_odd: false }, color, alpha, shadow })
+    RenderOp::Shape(ShapeOp {
+        path,
+        paint: Paint::Fill { even_odd: false },
+        color,
+        alpha,
+        shadow,
+        blend: Blend::Normal,
+    })
 }
 
 /// An arrow. The classic look (filled head, solid) is one tapered filled
@@ -229,6 +251,7 @@ fn render_opaque(a: &Annotation, canvas: Rect, step: Option<u32>) -> Vec<RenderO
             color: style.color,
             alpha: HIGHLIGHTER_ALPHA,
             shadow: false,
+            blend: Blend::Multiply,
         })],
         Shape::Text { text, background, .. } => {
             let Some(rect) = a.shape.text_rect(style) else { return Vec::new() };
@@ -265,6 +288,7 @@ fn render_opaque(a: &Annotation, canvas: Rect, step: Option<u32>) -> Vec<RenderO
                     color: WHITE,
                     alpha: 0.9,
                     shadow: false,
+                    blend: Blend::Normal,
                 }),
                 RenderOp::Text(TextOp {
                     text: n.to_string(),
@@ -295,6 +319,7 @@ fn render_opaque(a: &Annotation, canvas: Rect, step: Option<u32>) -> Vec<RenderO
                 color: BLACK,
                 alpha: SPOTLIGHT_DIM,
                 shadow: false,
+                blend: Blend::Normal,
             })]
         }
     }
@@ -366,10 +391,55 @@ mod tests {
         match &ops[0] {
             RenderOp::Shape(s) => {
                 assert_eq!(s.alpha, HIGHLIGHTER_ALPHA);
+                assert_eq!(s.blend, Blend::Multiply);
+                assert!(!s.shadow, "a shadow would darken the text it marks");
                 assert_eq!(s.paint, Paint::Stroke { width: 20.0, cap: LineCap::Butt, dash: None });
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn only_the_highlighter_multiplies() {
+        let all = [
+            Shape::Arrow { start: Point::ZERO, end: Point::new(50.0, 0.0), control: None },
+            Shape::Line { start: Point::ZERO, end: Point::new(50.0, 0.0) },
+            Shape::Rect { rect: Rect::new(0.0, 0.0, 9.0, 9.0), rounded: false },
+            Shape::Pen { points: vec![Point::ZERO, Point::new(9.0, 9.0)] },
+            Shape::Step { center: Point::new(20.0, 20.0) },
+            Shape::Spotlight { rect: Rect::new(0.0, 0.0, 9.0, 9.0), ellipse: true },
+        ];
+        for shape in all {
+            for op in render(&ann(shape), CANVAS, Some(1)) {
+                if let RenderOp::Shape(s) = op {
+                    assert_eq!(s.blend, Blend::Normal);
+                }
+            }
+        }
+    }
+
+    /// Multiply on 8-bit channels, as the compositors do it.
+    fn multiply(under: Rgb8, ink: Rgb8, alpha: f64) -> Rgb8 {
+        let ch = |u: u8, i: u8| {
+            let (u, i) = (f64::from(u) / 255.0, f64::from(i) / 255.0);
+            ((u * (1.0 - alpha) + u * i * alpha) * 255.0).round() as u8
+        };
+        Rgb8::new(ch(under.r, ink.r), ch(under.g, ink.g), ch(under.b, ink.b))
+    }
+
+    #[test]
+    fn multiplied_highlight_keeps_text_dark_and_paper_coloured() {
+        let yellow = PALETTE[1];
+        let text = Rgb8::new(0x1C, 0x1C, 0x1E);
+        let paper = Rgb8::new(255, 255, 255);
+        let over_text = multiply(text, yellow, HIGHLIGHTER_ALPHA);
+        let over_paper = multiply(paper, yellow, HIGHLIGHTER_ALPHA);
+        // Text is never lightened (normal blending at this alpha would lift
+        // it towards yellow) and keeps strong contrast with the highlight.
+        assert!(over_text.luminance() <= text.luminance() + 1e-9);
+        let contrast = (over_paper.luminance() + 0.05) / (over_text.luminance() + 0.05);
+        assert!(contrast > 7.0, "WCAG AAA: {contrast} ({over_paper:?} vs {over_text:?})");
+        assert!(over_paper.b < 200, "paper takes the colour: {over_paper:?}");
     }
 
     #[test]

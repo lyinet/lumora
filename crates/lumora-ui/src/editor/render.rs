@@ -8,13 +8,16 @@
 //! * **Export** — replayed into a `CGBitmapContext` at the capture's
 //!   native scale, cropped, for ⌘C / ⌘S / drag-out.
 //!
+//! Blend modes match too: a multiply op gets `compositingFilter =
+//! multiplyBlendMode` live and `kCGBlendModeMultiply` on export.
+//!
 //! Both work in document points with y down; the export context is flipped
 //! and scaled once so the ops need no conversion.
 
 use std::cell::OnceCell;
 
 use lumora_core::annotate::document::Document;
-use lumora_core::annotate::render::{LineCap, Paint, RenderOp, ShapeOp, TextOp};
+use lumora_core::annotate::render::{Blend, LineCap, Paint, RenderOp, ShapeOp, TextOp};
 use lumora_core::annotate::shape::RedactMode;
 use lumora_core::geometry::Rect;
 use objc2::rc::Retained;
@@ -22,7 +25,7 @@ use objc2::runtime::AnyObject;
 use objc2_app_kit::{NSFont, NSGraphicsContext, NSStringDrawing};
 use objc2_core_foundation::{CFRetained, CGSize};
 use objc2_core_graphics::{
-    CGBitmapContextCreate, CGBitmapContextCreateImage, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
+    CGBitmapContextCreate, CGBitmapContextCreateImage, CGBlendMode, CGColorSpace, CGContext, CGImage, CGImageAlphaInfo,
     CGImageByteOrderInfo, CGInterpolationQuality, CGLineCap, CGLineJoin,
 };
 use objc2_core_image::{
@@ -187,6 +190,13 @@ fn shape_layer(op: &ShapeOp, canvas: Rect) -> Retained<CAShapeLayer> {
     if op.shadow {
         apply_shadow(&l);
     }
+    if op.blend == Blend::Multiply {
+        // Core Animation's built-in multiply compositing (a CIFilter name);
+        // composites against the base image layer behind the annotation.
+        let name = NSString::from_str("multiplyBlendMode");
+        // SAFETY: an NSString filter name is a documented compositingFilter value.
+        unsafe { l.setCompositingFilter(Some(&name)) };
+    }
     l
 }
 
@@ -253,6 +263,9 @@ pub fn build_layer(ops: &[RenderOp], ctx: &mut LayerContext<'_>) -> Retained<CAL
 fn draw_shape(ctx: &CGContext, op: &ShapeOp, scale: f64) {
     CGContext::save_g_state(Some(ctx));
     CGContext::set_alpha(Some(ctx), op.alpha);
+    if op.blend == Blend::Multiply {
+        CGContext::set_blend_mode(Some(ctx), CGBlendMode::Multiply);
+    }
     if op.shadow {
         // Shadow geometry is in device space (pixels, y up), unaffected by
         // the flipped, scaled CTM.
